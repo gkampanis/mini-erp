@@ -4,6 +4,7 @@ import os
 import tempfile
 from app.infrastructure.repository import Repository
 from app.infrastructure.importers.excel import preview
+from app.domain.preparation import preparation_values
 
 
 class ERP:
@@ -23,6 +24,16 @@ class ERP:
 
     def detail(self, company, document):
         return self.repository.detail(company, document)
+
+    def prepare_document(self, company, document, group, account_code, note='', actor='local_operator', confirmed=False):
+        values = preparation_values(group, account_code, note, actor, confirmed)
+        return self.repository.prepare_document(company, document, values)
+
+    def preparation(self, company, document):
+        return self.repository.preparation(company, document)
+
+    def import_reviews(self, company):
+        return self.repository.import_reviews(company)
 
     def _archive(self, item):
         directory = self.directory / 'sources'

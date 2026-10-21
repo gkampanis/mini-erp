@@ -1,6 +1,6 @@
 # Schema: υλοποίηση και roadmap
 
-Η `migrations/001_initial.sql` είναι η εκτελέσιμη πηγή αλήθειας για την πρώτη τομή. Οι μελλοντικοί πίνακες παρακάτω είναι σχεδιασμός και δεν δημιουργούνται ακόμη.
+Οι `migrations/001_initial.sql` και `002_preparation.sql` είναι η εκτελέσιμη πηγή αλήθειας. Η δεύτερη προσθέτει document_preparations(document_id,company_id,nature_group,account_code,note,approved_by,approved_at) με tenant-integrity triggers και ξεχωριστό audit από τα imported δεδομένα. Οι μελλοντικοί πίνακες παρακάτω είναι σχεδιασμός και δεν δημιουργούνται ακόμη.
 
 ```mermaid
 erDiagram

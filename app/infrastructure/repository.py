@@ -26,10 +26,15 @@ class Repository:
                         (company,actor,action,entity,encode(payload)))
 
     def persist_import(self, company, item, checked, fail_after=None):
-        report = dict(inserted=0, duplicates=0, rejected=list(checked.rejected))
+        report = dict(inserted=0, duplicates=0, rejected=list(checked.rejected), warnings=[])
         with self.db:
             job = self.db.execute('INSERT INTO import_jobs(company_id,filename,sha256,status,report) VALUES (?,?,?,?,?)',
                                   (company,item.filename,item.sha256,'completed','{}')).lastrowid
+            # Build a casefolded reference index once, avoiding a database scan per imported row.
+            reference_history = {}
+            for prior in self.db.execute('SELECT id,counterparty_id,direction,kind,series,number,issue_date FROM documents WHERE company_id=?', (company,)):
+                key = (prior['counterparty_id'], prior['direction'], prior['kind'], prior['issue_date'][:4], prior['series'].casefold(), prior['number'].casefold())
+                reference_history.setdefault(key, []).append((prior['id'], prior['issue_date']))
             for count, row in enumerate(checked.records):
                 d = row['document']
                 source = self.db.execute('INSERT INTO source_records(job_id,row_number,raw_json) VALUES (?,?,?)',
@@ -50,9 +55,17 @@ class Repository:
                         report['rejected'].append(dict(row=row['row'],reason='Σύγκρουση ταυτότητας/MARK ή ποσών: απαιτείται έλεγχος', raw=row['raw']))
                     self.audit(company,'import_duplicate' if same else 'import_conflict', existing[0]['id'],dict(job=job,row=row['row']))
                 else:
+                    # Same-year reference reuse is a review signal, not proof of a duplicate.
+                    reference_key = (cp, d['direction'], d['kind'], d['issue_date'][:4], d['series'].casefold(), d['number'].casefold())
+                    related = [reference for reference, issued in reference_history.get(reference_key, []) if issued != d['issue_date']]
                     columns = ','.join(values)
                     document = self.db.execute(f'INSERT INTO documents({columns}) VALUES ({",".join("?" for _ in values)})', tuple(values.values())).lastrowid
+                    reference_history.setdefault(reference_key, []).append((document, d['issue_date']))
                     self.audit(company,'document_imported',document,dict(job=job,row=row['row']))
+                    if related:
+                        warning = dict(row=row['row'], reason='Πιθανό διπλότυπο: ίδιος αριθμός με διαφορετική ημερομηνία — έλεγχος', related_document_ids=related)
+                        report['warnings'].append(warning)
+                        self.audit(company,'import_warning',document,dict(job=job,**warning))
                     report['inserted'] += 1
                 if fail_after is not None and count >= fail_after:
                     raise RuntimeError('Injected transaction interruption')
@@ -66,7 +79,7 @@ class Repository:
 
     def search(self, company, query=''):
         # Python casefold handles accented Greek consistently, unlike SQLite lower().
-        rows = self.db.execute('SELECT d.*,c.vat,c.name FROM documents d JOIN counterparties c ON c.id=d.counterparty_id WHERE d.company_id=? ORDER BY d.issue_date DESC,d.id DESC',(company,)).fetchall()
+        rows = self.db.execute('SELECT d.*,c.vat,c.name,p.nature_group,p.account_code,p.approved_at AS prepared_at FROM documents d JOIN counterparties c ON c.id=d.counterparty_id LEFT JOIN document_preparations p ON p.document_id=d.id AND p.company_id=d.company_id WHERE d.company_id=? ORDER BY d.issue_date DESC,d.id DESC',(company,)).fetchall()
         return [dict(r) for r in rows if not query or any(query.casefold() in str(r[k] or '').casefold() for k in ('vat','name','number','series','mark','issue_date'))]
 
     def detail(self, company, document):
@@ -75,3 +88,32 @@ class Repository:
             raise ValueError('Δεν βρέθηκε παραστατικό')
         events = self.db.execute('SELECT action,actor,payload,created_at FROM audit_events WHERE company_id=? AND entity_id=? ORDER BY id',(company,document)).fetchall()
         return dict(row),[dict(x) for x in events]
+
+    def preparation(self, company, document):
+        if self.db.execute('SELECT 1 FROM documents WHERE company_id=? AND id=?', (company, document)).fetchone() is None:
+            raise ValueError('Δεν βρέθηκε παραστατικό')
+        row = self.db.execute('SELECT * FROM document_preparations WHERE company_id=? AND document_id=?', (company, document)).fetchone()
+        return dict(row) if row is not None else None
+
+    def prepare_document(self, company, document, values):
+        with self.db:
+            before = self.preparation(company, document)
+            self.db.execute(
+                "INSERT INTO document_preparations(document_id,company_id,nature_group,account_code,note,approved_by,approved_at) VALUES (?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now')) "
+                "ON CONFLICT(document_id) DO UPDATE SET nature_group=excluded.nature_group,account_code=excluded.account_code,note=excluded.note,approved_by=excluded.approved_by,approved_at=excluded.approved_at",
+                (document, company, values['nature_group'], values['account_code'], values['note'], values['approved_by']))
+            after = self.preparation(company, document)
+            self.audit(company, 'document_prepared', document, dict(before=before, after=after), actor=values['approved_by'])
+        return after
+
+    def import_reviews(self, company):
+        rows = self.db.execute('SELECT * FROM import_jobs WHERE company_id=? ORDER BY created_at DESC,id DESC', (company,)).fetchall()
+        reviews = []
+        for row in rows:
+            review = dict(row)
+            report = json.loads(review['report'])
+            report.setdefault('warnings', [])
+            review.update(report=report, inserted_count=report['inserted'], duplicate_count=report['duplicates'],
+                          rejected_count=len(report['rejected']), warning_count=len(report['warnings']))
+            reviews.append(review)
+        return reviews

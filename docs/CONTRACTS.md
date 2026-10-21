@@ -13,3 +13,10 @@
 - myDATA: αρχικά read-only, με τρέχουσα επίσημη AADE REST/XSD προδιαγραφή κατά την υλοποίηση. Pagination, cursors, retry/backoff, raw XML retention, credentials σε OS keyring. Κανένα endpoint/credential δεν επινοείται εδώ.
 - EBS: Windows-only isolated adapter, disabled by default, χωρίς direct DB writes. States queued → started → save_invoked → confirmed_in_erp ή uncertain/failed/skipped. Confirmation απαιτεί authoritative readback ή ρητό ελεγμένο operator evidence, όχι νέο TED. Μετά crash πριν επιβεβαίωση → uncertain, ποτέ blind replay. Ξεχωριστές acceptance tests και έγκριση πριν activation.
 - Diagnostics: καταγραφή exception type/context και προαιρετικά process metrics χωρίς invoice payloads/secrets σε γενικά logs. Audit δεδομένων μόνο εντός προστατευμένης τοπικής βάσης.
+
+
+## Τοπική προετοιμασία (υλοποιημένη)
+
+`ERP.prepare_document(company,id,group,account_code,note='',actor='local_operator',confirmed=False)` απαιτεί `confirmed is True`, ομάδα `'2'/'6'`, συμβατό συντακτικά account prefix και actor. Επιστρέφει την εγκεκριμένη απόφαση με UTC timestamp. Η `ERP.preparation(company,id)` επιστρέφει dict ή None. Ο λογαριασμός δεν επικυρώνεται στο πραγματικό EBS και καμία λειτουργία δεν κάνει posting. Η απόφαση και το before/after audit είναι atomic, tenant scoped και ξεχωριστά από imported fields.
+
+`ERP.import_reviews(company)` επιστρέφει newest-first jobs με parsed reports και counts. Το search διατηρεί τα αρχικά πεδία και προσθέτει `nature_group`, `account_code`, `prepared_at`. Οι μη δεσμευτικές duplicate warnings αποθηκεύονται σε report/audit και δεν αλλάζουν exact duplicate/conflict handling. Το `document_preparations` δεν είναι supplier mapping ή journal.
