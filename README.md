@@ -1,15 +1,11 @@
-# Νεότερη έκδοση: εκκίνηση με διαγνωστικά
+# Mini ERP — PDF και ελεγχόμενη προετοιμασία RPA
 
-[Λήψη νέου ZIP](https://github.com/gkampanis/mini-erp/raw/refs/heads/downloads/MiniERP-Startup-Fix-20261022-080100.zip)
+[Λήψη νέου ZIP](https://github.com/gkampanis/mini-erp/raw/refs/heads/downloads/MiniERP-PDF-RPA-20261022-090002.zip)
 
-Αποσυμπίεση όλων των αρχείων και διπλό κλικ στο **ANOIGMA_MINI_ERP.bat**. Χρησιμοποιεί την υπάρχουσα Python, κρατά ανοιχτή την κονσόλα και καταγράφει το σφάλμα στο `%LOCALAPPDATA%\MiniERP\Logs`. Δεν εγκαθιστά λογισμικό, δεν αλλάζει EBS ή πραγματικά δεδομένα. Η αιτία αποτυχίας στο συγκεκριμένο Windows PC δεν έχει ακόμη επιβεβαιωθεί. Η νέα Python εκκίνηση ελέγχθηκε σε cloud στον source και στο ZIP· πραγματικό Windows BAT/CMD acceptance παραμένει NOT_RUN.
+Αποσυμπίεσε ολόκληρο το ZIP και άνοιξε το **ANOIGMA_MINI_ERP.bat** με την υπάρχουσα Python 3.12+ με Tcl/Tk. Ο launcher διατηρεί διαγνωστικό log.
 
----
+Περιλαμβάνει στρογγυλοποίηση δύο δεκαδικών με αρχικές τιμές/audit, επωνυμία και ΑΦΜ, PDF δίπλα στα στοιχεία, σύνδεση τοπικού PDF ή λήψη από HTTPS, ξεχωριστό είδος τιμολογίου/δελτίου αποστολής, καρτέλα RPA με προεπιλογή προσομοίωσης και ρυθμίσεις myDATA API κωδικών. Η προαιρετική προβολή PDF και ο Windows adapter έχουν ξεχωριστά κουμπιά εγκατάστασης πρόσθετων, κατόπιν επιβεβαίωσης.
 
-# Mini ERP — δοκιμαστικό πακέτο
+Η πραγματική συμπλήρωση αφορά πέντε πεδία ΤΕΔ ομάδας 6 με mapper και πιλοτικό έλεγχο, χωρίς Save και με παύση ανά παραστατικό. Δεν υπάρχει ακόμη ζωντανός συγχρονισμός/άντληση PDF ΑΑΔΕ ή αυτόνομη λογιστική καταχώριση.
 
-[Λήψη MiniERP-Demo.zip](https://github.com/gkampanis/mini-erp/raw/refs/heads/downloads/MiniERP-Demo.zip)
-
-Αποσυμπιέστε το ZIP και τρέξτε START_DEMO.cmd. Απαιτείται Python 3.12+ με Tcl/Tk. Περιέχει μόνο συνθετικά demo δεδομένα, όχι πραγματικά παραστατικά. Δεν συνδέεται στο EBS και δεν κάνει λογιστικές καταχωρίσεις.
-
-Οι έλεγχοι cloud έχουν περάσει. Windows/live EBS: NOT_RUN. Δείτε τη συνοδευτική verification αναφορά και το SHA-256.
+Πέρασαν 41 backend/tool tests, 12 GUI regressions, GUI smoke και έλεγχοι αποσυμπιεσμένου ZIP. Windows launcher/native API/live EBS: **NOT_RUN**. Περιέχει μόνο συνθετικά Excel, χωρίς πραγματικά PDF ή κωδικούς. Η συνοδευτική αναφορά και το SHA-256 αντιστοιχούν στο νέο αρχείο.
