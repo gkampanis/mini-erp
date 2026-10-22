@@ -8,8 +8,9 @@ from app.domain.preparation import preparation_values
 
 
 class ERP:
-    def __init__(self, directory):
+    def __init__(self, directory, credential_store=None):
         self.directory = Path(directory)
+        self.credential_store = credential_store
         self.repository = Repository(directory)
         self.db = self.repository.db
 
@@ -71,3 +72,69 @@ class ERP:
             raise ValueError('Δεν υπάρχουν έγκυρες εγγραφές')
         self._archive(item)  # Content-addressed orphan on rollback is safe; never a partial DB import.
         return self.repository.persist_import(company, item, checked, fail_after)
+
+    def rename_counterparty(self, company, counterparty, name, confirmed=False):
+        if confirmed is not True:raise ValueError('Απαιτείται επιβεβαίωση επωνυμίας')
+        return self.repository.rename_counterparty(company,counterparty,name)
+
+    def mydata_credentials(self, company, environment=None):
+        from app.infrastructure.aade.credentials import WindowsCredentialStore,target_for
+        row=self.db.execute('SELECT vat FROM companies WHERE id=?',(company,)).fetchone()
+        if row is None:raise ValueError('Δεν βρέθηκε εταιρεία')
+        stored=self.db.execute('SELECT environment FROM aade_settings WHERE company_id=?',(company,)).fetchone()
+        environment=environment or (stored[0] if stored else 'test')
+        if environment not in ('test','production'):raise ValueError('Μη έγκυρο περιβάλλον')
+        vault=self.credential_store or WindowsCredentialStore()
+        value=vault.read(target_for(self.directory,row['vat'],environment))
+        return dict(environment=environment,username=value['username'] if value else '',key=value['key'] if value else '')
+
+    def save_mydata_credentials(self, company, environment, username, key, confirmed=False):
+        from app.infrastructure.aade.credentials import WindowsCredentialStore,target_for,validate
+        if confirmed is not True:raise ValueError('Απαιτείται επιβεβαίωση αποθήκευσης κωδικών')
+        value=validate(environment,username,key)
+        row=self.db.execute('SELECT vat FROM companies WHERE id=?',(company,)).fetchone()
+        if row is None:raise ValueError('Δεν βρέθηκε εταιρεία')
+        vault=self.credential_store or WindowsCredentialStore()
+        target=target_for(self.directory,row['vat'],environment)
+        before=vault.read(target)
+        vault.write(target,value)
+        try:
+            with self.db:
+                self.db.execute("INSERT INTO aade_settings(company_id,environment) VALUES (?,?) ON CONFLICT(company_id) DO UPDATE SET environment=excluded.environment,updated_at=CURRENT_TIMESTAMP",(company,environment))
+                self.repository.audit(company,'mydata_credentials_saved',None,dict(environment=environment,storage='Windows Credential Manager'))
+        except Exception:
+            if before is None:vault.delete(target)
+            else:vault.write(target,before)
+            raise
+
+    def attachments(self, company, document):
+        self.detail(company,document)
+        return [dict(r) for r in self.db.execute('SELECT * FROM attachments WHERE company_id=? AND document_id=? ORDER BY id',(company,document))]
+
+    def attach_pdf(self, company, document, filename, kind='invoice', data=None, source='local', confirmed=False):
+        from app.infrastructure.pdf_archive import KINDS,store,MAX_PDF
+        if confirmed is not True:raise ValueError('Απαιτείται επιβεβαίωση σύνδεσης PDF')
+        self.detail(company,document)
+        if kind not in KINDS:raise ValueError('Άγνωστο είδος αρχείου')
+        if data is None:
+            with Path(filename).open('rb') as stream:data=stream.read(MAX_PDF+1)
+        digest,relative=store(self.directory,data)
+        with self.db:
+            self.db.execute('INSERT INTO attachments(company_id,document_id,kind,sha256,storage_path,original_filename,source) VALUES (?,?,?,?,?,?,?) ON CONFLICT(company_id,document_id,kind,sha256) DO NOTHING',(company,document,kind,digest,relative,Path(filename).name,source))
+            row=self.db.execute('SELECT * FROM attachments WHERE company_id=? AND document_id=? AND kind=? AND sha256=?',(company,document,kind,digest)).fetchone()
+            self.repository.audit(company,'pdf_linked',document,dict(attachment_id=row['id'],kind=kind,sha256=digest))
+        return dict(row)
+
+    def download_pdf(self, company, document, url, kind='invoice', confirmed=False, cancel=None):
+        from app.infrastructure.pdf_archive import download
+        if confirmed is not True:raise ValueError('Απαιτείται επιβεβαίωση λήψης PDF')
+        self.detail(company,document)
+        data,source=download(url,cancel)
+        return self.attach_pdf(company,document,'download.pdf',kind,data,source,confirmed=True)
+
+    def attachment_path(self, company, document, attachment):
+        from app.infrastructure.pdf_archive import checked_path
+        self.detail(company,document)
+        row=self.db.execute('SELECT * FROM attachments WHERE id=? AND company_id=? AND document_id=?',(attachment,company,document)).fetchone()
+        if row is None:raise ValueError('Δεν βρέθηκε συνδεδεμένο αρχείο')
+        return checked_path(self.directory,row['storage_path'],row['sha256'])

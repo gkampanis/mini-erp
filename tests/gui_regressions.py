@@ -144,7 +144,7 @@ class DesktopRegressions(unittest.TestCase):
         self.assertTrue(checked.winfo_exists())
         self.commit(checked)
         self.assertEqual((self.count('documents'), self.count('import_jobs')), (2, 1))
-        self.assertEqual(self.app.erp.search(self.app.company, '000000001')[0]['name'], '000000001')
+        self.assertEqual(self.app.erp.search(self.app.company, '000000001')[0]['name'], 'Χωρίς επωνυμία')
 
     def test_busy_prevents_discarding_preview_and_keeps_progress(self):
         preview = self.open_preview()
@@ -223,7 +223,8 @@ class DesktopRegressions(unittest.TestCase):
         self.app.tree.selection_set(str(document_id))
         with patch.object(self.app.erp, 'detail', wraps=self.app.erp.detail) as detail:
             self.app.open_detail()
-            detail.assert_called_once_with(self.app.company, document_id)
+            self.assertTrue(detail.call_args_list)
+            self.assertTrue(all(call.args == (self.app.company, document_id) for call in detail.call_args_list))
         win = self.app._details[document_id]
         self.assertIn('Γ/3', win.title())
         self.app.open_detail()
@@ -331,6 +332,47 @@ class DesktopRegressions(unittest.TestCase):
         self.assertTrue(win.winfo_exists())
         self.assertIsNone(self.app.erp.preparation(self.app.company,int(document_id)))
         self.assertEqual(self.errors,[])
+
+    def test_double_click_details_show_inline_pdf_and_keep_preparation(self):
+        from tests.test_workspace import synthetic_pdf
+        self.import_fixture('combined.xlsx')
+        document=int(self.app.tree.get_children()[0])
+        self.app.erp.attach_pdf(self.app.company,document,'synthetic.pdf',data=synthetic_pdf(),confirmed=True)
+        self.app.tree.selection_set(str(document));self.app.open_detail()
+        win=self.app._details[document];pane=win.pdf_pane
+        wait(self.root,lambda:pane.image is not None and not self.app.busy)
+        self.assertTrue(pane.canvas.find_all())
+        self.assertIn('1 από 1',pane.state.get())
+        self.assertEqual(len(pane.files.get_children()),1)
+        self.assertIsNone(self.app.erp.preparation(self.app.company,document))
+        self.assertTrue(self.button(win,'Έγκριση τοπικής προετοιμασίας').winfo_exists())
+
+    def test_aade_settings_mask_and_secure_save_with_synthetic_vault(self):
+        from tests.test_workspace import MemoryVault
+        self.app.erp.credential_store=MemoryVault()
+        win=self.app.open_aade()
+        entries=[w for w in widgets(win) if isinstance(w,ttk.Entry) and not isinstance(w,ttk.Combobox)]
+        username,key=entries
+        self.assertTrue(key.cget('show'))
+        username.insert(0,'synthetic-ui-user');key.insert(0,'synthetic-ui-key')
+        self.button(win,'Αποθήκευση κωδικών').invoke()
+        self.assertEqual(key.get(),'')
+        self.assertEqual(self.app.erp.mydata_credentials(self.app.company)['key'],'synthetic-ui-key')
+        self.assertNotIn('synthetic-ui-key','\n'.join(self.app.erp.db.iterdump()))
+
+    def test_rpa_tab_queues_selected_approved_document_and_simulates(self):
+        self.import_fixture('combined.xlsx')
+        document=int(self.app.tree.get_children()[0])
+        self.app.erp.prepare_document(self.app.company,document,'6','64.03',confirmed=True)
+        self.app.refresh();self.app.tree.selection_set(str(document))
+        panel=self.app.rpa_panel
+        with patch('app.ui.rpa_panel.messagebox.askyesno',return_value=True):panel.queue_selected()
+        self.assertIsNotNone(panel.job)
+        panel.start()
+        wait(self.root,lambda:not self.app.busy)
+        meta,items=panel.rpa.items(self.app.company,panel.job)
+        self.assertEqual(meta['status'],'completed');self.assertEqual(items[0]['status'],'simulated')
+        self.assertIn('Προσομοίωση',panel.state.get())
 
 
 if __name__ == '__main__':

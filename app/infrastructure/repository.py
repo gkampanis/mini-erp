@@ -41,7 +41,11 @@ class Repository:
                                          (job,row['row'],encode(row['raw']))).lastrowid
                 self.db.execute('INSERT INTO counterparties(company_id,vat,name) VALUES (?,?,?) ON CONFLICT(company_id,vat) DO NOTHING',
                                 (company,d['vat'],d['name']))
-                cp = self.db.execute('SELECT id FROM counterparties WHERE company_id=? AND vat=?', (company,d['vat'])).fetchone()[0]
+                counterparty = self.db.execute('SELECT * FROM counterparties WHERE company_id=? AND vat=?', (company,d['vat'])).fetchone()
+                cp = counterparty['id']
+                if counterparty['name'] in (d['vat'],'Χωρίς επωνυμία') and d['name'] not in (d['vat'],'Χωρίς επωνυμία'):
+                    self.db.execute('UPDATE counterparties SET name=? WHERE id=?',(d['name'],cp))
+                    self.audit(company,'counterparty_named',None,dict(counterparty_id=cp,before=counterparty['name'],after=d['name']))
                 identity = (company,cp,d['direction'],d['kind'],d['series'],d['number'],d['issue_date'])
                 existing = self.db.execute('SELECT * FROM documents WHERE (company_id=? AND counterparty_id=? AND direction=? AND kind=? AND series=? AND number=? AND issue_date=?) OR (company_id=? AND mark=? AND mark IS NOT NULL)',
                                            (*identity,company,d['mark'])).fetchall()
@@ -67,6 +71,11 @@ class Repository:
                         report['warnings'].append(warning)
                         self.audit(company,'import_warning',document,dict(job=job,**warning))
                     report['inserted'] += 1
+                changes = row.get('rounding_changes',[])
+                if changes or d.get('rounding_minor'):
+                    warning = dict(row=row['row'],reason='Στρογγυλοποίηση σε 2 δεκαδικά (ROUND_HALF_UP)',changes=changes,rounding_minor=d.get('rounding_minor',0))
+                    report['warnings'].append(warning)
+                    self.audit(company,'amounts_rounded',existing[0]['id'] if len(existing)==1 else (document if not existing else None),dict(job=job,**warning))
                 if fail_after is not None and count >= fail_after:
                     raise RuntimeError('Injected transaction interruption')
             # Rejected original rows are retained too, not just normalized records.
@@ -117,3 +126,12 @@ class Repository:
                           rejected_count=len(report['rejected']), warning_count=len(report['warnings']))
             reviews.append(review)
         return reviews
+
+    def rename_counterparty(self, company, counterparty, name):
+        if not isinstance(name,str) or not name.strip() or len(name.strip())>250:
+            raise ValueError('Δώσε επωνυμία έως 250 χαρακτήρες')
+        with self.db:
+            row=self.db.execute('SELECT * FROM counterparties WHERE id=? AND company_id=?',(counterparty,company)).fetchone()
+            if row is None:raise ValueError('Δεν βρέθηκε αντισυμβαλλόμενος')
+            self.db.execute('UPDATE counterparties SET name=? WHERE id=?',(name.strip(),counterparty))
+            self.audit(company,'counterparty_renamed',None,dict(counterparty_id=counterparty,vat=row['vat'],before=row['name'],after=name.strip()))

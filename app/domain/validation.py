@@ -1,5 +1,5 @@
 """Local document validation; no tax/accounting classification or posting."""
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import date, datetime, timedelta
 import re
 # Decimal normalization derived from EBS v2.9 money(), kept inside the domain.
@@ -20,10 +20,7 @@ def cents(value):
         amount = money(value)
         if not amount.is_finite() or abs(amount) > Decimal('1000000000000'):
             raise ValueError('Ποσό εκτός ορίων')
-        scaled = amount * 100
-        if scaled != scaled.to_integral_value():
-            raise ValueError('Επιτρέπονται έως δύο δεκαδικά ψηφία')
-        return int(scaled)
+        return int(amount.quantize(Decimal('0.01'),rounding=ROUND_HALF_UP)*100)
     except InvalidOperation as exc:
         raise ValueError('Μη έγκυρο ποσό') from exc
 
@@ -72,12 +69,29 @@ def record(fields, epoch1904=False):
     net = cents(fields.get('net', ''))
     tax = cents(fields.get('tax', ''))
     gross = cents(fields.get('gross', '')) if fields.get('gross', '').strip() else net+tax
-    if net <= 0 or tax < 0 or gross != net+tax:
-        raise ValueError('Απαιτούνται θετική καθαρή, μη αρνητικό ΦΠΑ και σύνολο = καθαρή + ΦΠΑ')
+    rounding = gross-net-tax
+    originals = [money(fields[k]) for k in ('net','tax','gross') if fields.get(k,'').strip()]
+    has_fraction = any(value != value.quantize(Decimal('0.01'),rounding=ROUND_HALF_UP) for value in originals)
+    raw_difference = abs(money(fields['gross'])-money(fields['net'])-money(fields['tax'])) if fields.get('gross','').strip() else Decimal(0)
+    if money(fields['net'])<=0 or money(fields['tax'])<0 or net < 0 or tax < 0 or gross < 0 or (fields.get('gross','').strip() and money(fields['gross'])<0):
+        raise ValueError('Απαιτούνται θετική καθαρή/σύνολο και μη αρνητικό ΦΠΑ')
+    if rounding and not (has_fraction and abs(rounding)<=1 and raw_difference<=Decimal('0.01')):
+        raise ValueError('Το σύνολο δεν συμφωνεί με καθαρή + ΦΠΑ: απαιτείται έλεγχος')
     currency = fields.get('currency', 'EUR').strip() or 'EUR'
     if currency != 'EUR':
         raise ValueError('Πρώτη τομή: μόνο EUR')
-    return dict(vat=vat, name=fields.get('name', '').strip() or vat,
+    return dict(vat=vat, name=fields.get('name', '').strip() or 'Χωρίς επωνυμία',
                 series=series, number=number, issue_date=iso_date(fields.get('date', ''), epoch1904),
                 mark=mark or None, net_minor=net, tax_minor=tax, gross_minor=gross,
-                currency=currency, direction='incoming', kind='invoice')
+                currency=currency, direction='incoming', kind='invoice',rounding_minor=rounding)
+
+
+def rounding_changes(fields, item):
+    changes = []
+    for key,target in (('net','net_minor'),('tax','tax_minor'),('gross','gross_minor')):
+        if fields.get(key,'').strip():
+            original = money(fields[key])
+            rounded = Decimal(item[target])/100
+            if original!=rounded:
+                changes.append(dict(field=key,original=str(original),rounded=f'{rounded:.2f}'))
+    return changes

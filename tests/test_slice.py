@@ -85,7 +85,7 @@ class SliceTests(unittest.TestCase):
     def test_money_and_dates(self):
         self.assertEqual(cents('1.234,56'),123456)
         self.assertEqual(cents('1,234.56'),123456)
-        for invalid in ['NaN','Infinity','','0.001','1e99']:
+        for invalid in ['NaN','Infinity','','1e99']:
             with self.assertRaises(ValueError):cents(invalid)
         self.assertEqual(iso_date('1'), '1900-01-01')
         self.assertEqual(iso_date('0',True),'1904-01-01')
@@ -94,7 +94,7 @@ class SliceTests(unittest.TestCase):
     def test_formula_and_invalid_amounts(self):
         workbook(self.root/'formula.xlsx',[HEADERS,ROW],formula=True)
         self.assertIn('Τύπος',preview(self.root/'formula.xlsx').rejected[0]['reason'])
-        for value in ['NaN','-10','0.001']:
+        for value in ['NaN','-10']:
             row = list(ROW); row[5] = value
             workbook(self.root/'bad.xlsx',[HEADERS,row])
             self.assertEqual(len(preview(self.root/'bad.xlsx').records),0)
@@ -131,7 +131,7 @@ class SliceTests(unittest.TestCase):
             self.assertEqual(restored.execute('SELECT count(*) FROM documents').fetchone()[0],2)
         self.erp.close()
         self.erp = ERP(self.root/'data')
-        self.assertEqual([r[0] for r in self.erp.db.execute('SELECT version FROM schema_migrations ORDER BY version')], ['001_initial.sql', '002_preparation.sql'])
+        self.assertEqual([r[0] for r in self.erp.db.execute('SELECT version FROM schema_migrations ORDER BY version')], ['001_initial.sql', '002_preparation.sql', '003_rounding.sql', '004_workspace.sql'])
 
 
 class ProcessCrashTests(unittest.TestCase):

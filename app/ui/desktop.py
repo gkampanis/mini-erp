@@ -19,7 +19,7 @@ GROUPS = {'Όλες οι ομάδες':None,'Ομάδα 2 · Αγορές':'2','
 STATES = ('Όλα τα παραστατικά','Χωρίς προετοιμασία','Με τοπική έγκριση')
 ACTIONS = {'document_imported':'Εισαγωγή παραστατικού','import_duplicate':'Παράλειψη διπλοτύπου',
            'import_conflict':'Σύγκρουση εισαγωγής','document_prepared':'Τοπική έγκριση προετοιμασίας',
-           'import_warning':'Προειδοποίηση εισαγωγής'}
+           'import_warning':'Προειδοποίηση εισαγωγής','amounts_rounded':'Στρογγυλοποίηση ποσών', 'pdf_linked':'Σύνδεση PDF','counterparty_named':'Συμπλήρωση επωνυμίας'}
 
 
 def amount(value):
@@ -107,7 +107,8 @@ class Desktop:
         header = ttk.Frame(root,padding=(24,20,24,12))
         header.pack(fill='x')
         self.import_button = ttk.Button(header,text='+  Εισαγωγή Excel',style='Primary.TButton',command=self.choose_excel)
-        self.import_button.pack(side='right',padx=(16,0))
+        self.import_button.pack(side='right',padx=(8,0))
+        ttk.Button(header,text='ΑΑΔΕ / myDATA',command=self.open_aade).pack(side='right')
         ttk.Label(header,text='Mini ERP',style='Title.TLabel').pack(anchor='w')
         ttk.Label(header,text=f"{company['name']}  ·  Προετοιμασία παραστατικών για EBS",style='Subtitle.TLabel').pack(anchor='w',pady=(3,0))
         metrics = ttk.Frame(root,padding=(24,0,24,16))
@@ -149,8 +150,9 @@ class Desktop:
         self.result_count = tk.StringVar()
         ttk.Label(self.documents_tab,textvariable=self.result_count,style='Subtitle.TLabel').pack(anchor='w',pady=(0,8))
         columns = ('issue_date','reference','name','vat','gross_minor','nature_group','account_code','preparation_state')
-        titles = ('Ημερομηνία','Παραστατικό','Αντισυμβαλλόμενος','ΑΦΜ','Σύνολο €','Ομάδα','Λογαριασμός','Προετοιμασία')
+        titles = ('Ημερομηνία','Παραστατικό','Επωνυμία αντισυμβαλλομένου','ΑΦΜ','Σύνολο €','Ομάδα','Λογαριασμός','Προετοιμασία')
         self.tree = table(self.documents_tab,columns,titles,{'name':220,'reference':135,'gross_minor':110,'nature_group':80,'preparation_state':160})
+        self.tree.configure(selectmode='extended')
         for col in columns:
             self.tree.heading(col,command=lambda key=col:self.sort_documents(key))
         self.tree.bind('<Double-1>',lambda _:self.open_detail())
@@ -169,6 +171,10 @@ class Desktop:
         ttk.Button(self.reviews_tab,text='Προβολή αναφοράς',command=self.open_review).pack(side='bottom',anchor='e',pady=(12,0))
         self.review_tree.master.pack_forget()
         self.review_tree.master.pack(fill='both',expand=True)
+        self.rpa_tab=ttk.Frame(self.notebook,padding=14)
+        self.notebook.add(self.rpa_tab,text='RPA → EBS')
+        from app.ui.rpa_panel import RPAPanel
+        self.rpa_panel=RPAPanel(self,self.rpa_tab,table)
         footer = ttk.Frame(root,padding=(24,12,24,12))
         footer.pack(side='bottom',fill='x')
         self.notebook.pack_forget()
@@ -230,7 +236,8 @@ class Desktop:
             self.progress.pack_forget()
             if error:
                 self.status.set('Η εργασία απέτυχε. Μπορείς να διορθώσεις το αρχείο και να ξαναδοκιμάσεις.')
-                messagebox.showerror('Η εισαγωγή δεν ολοκληρώθηκε',error,parent=self.root)
+                self.root.deiconify()
+                messagebox.showerror('Η εργασία δεν ολοκληρώθηκε',error,parent=self.root)
             else:
                 callback(result)
             self._sync_import_button()
@@ -317,7 +324,7 @@ class Desktop:
         header.pack(fill='x')
         ttk.Label(header,text='Έλεγχος εισαγωγής',style='Section.TLabel').pack(anchor='w')
         ttk.Label(header,text=f'{item.filename}  ·  Φύλλο: {item.sheet}',style='Subtitle.TLabel').pack(anchor='w',pady=4)
-        ttk.Label(header,text=f'{len(item.records)} έγκυρες εγγραφές    |    {len(item.rejected)} εξαιρέσεις',style='Section.TLabel').pack(anchor='w')
+        ttk.Label(header,text=f'{len(item.records)} έγκυρες εγγραφές    |    {len(item.rejected)} εξαιρέσεις    |    {sum(bool(r.get("rounding_changes")) for r in item.records)} με στρογγυλοποίηση',style='Section.TLabel').pack(anchor='w')
         pages = ttk.Notebook(win)
         pages.pack(fill='both',expand=True,padx=18)
         valid_tab, mapping_tab, errors_tab = [ttk.Frame(pages,padding=12) for _ in range(3)]
@@ -325,10 +332,10 @@ class Desktop:
         pages.add(mapping_tab,text='Αντιστοίχιση στηλών')
         pages.add(errors_tab,text=f'Εξαιρέσεις ({len(item.rejected)})')
         ttk.Label(valid_tab,text='Έλεγξε ΑΦΜ, σειρά / αριθμό, ημερομηνία και ποσά πριν επιβεβαιώσεις.',style='Subtitle.TLabel').pack(anchor='w',pady=(0,10))
-        valid_tree = table(valid_tab,('row','vat','reference','date','net','tax','gross'),('Γραμμή','ΑΦΜ','Παραστατικό','Ημερομηνία','Καθαρή €','ΦΠΑ €','Σύνολο €'),{'row':70,'reference':160})
+        valid_tree = table(valid_tab,('row','name','vat','reference','date','net','tax','rounding','gross'),('Γραμμή','Επωνυμία','ΑΦΜ','Παραστατικό','Ημερομηνία','Καθαρή €','ΦΠΑ €','Στρογγ. €','Σύνολο €'),{'row':70,'name':220,'reference':160})
         for row in item.records:
             d = row['document']
-            valid_tree.insert('','end',values=(row['row'],d['vat'],reference(d),when(d['issue_date']),amount(d['net_minor']),amount(d['tax_minor']),amount(d['gross_minor'])))
+            valid_tree.insert('','end',values=(row['row'],d['name'],d['vat'],reference(d),when(d['issue_date']),amount(d['net_minor']),amount(d['tax_minor']),amount(d['rounding_minor']),amount(d['gross_minor'])))
         ttk.Label(mapping_tab,text='Άλλαξε μόνο ό,τι χρειάζεται και πάτησε «Επανέλεγχος». Τα πεδία με * είναι απαραίτητα.',style='Subtitle.TLabel',wraplength=850).pack(anchor='w',pady=(0,14))
         mapping_frame = ttk.Frame(mapping_tab)
         mapping_frame.pack(fill='x')
@@ -433,24 +440,37 @@ class Desktop:
                 self._details.pop(document_id,None)
         win.bind('<Destroy>',clear_detail)
         win.title('Παραστατικό · '+reference(row))
-        win.geometry('1080x760')
-        win.minsize(880,620)
+        win.geometry(f'{min(1480,self.root.winfo_screenwidth()-40)}x{min(880,self.root.winfo_screenheight()-40)}')
+        win.minsize(960,650)
         header = ttk.Frame(win,padding=18)
         header.pack(fill='x')
         ttk.Label(header,text=reference(row),style='Title.TLabel').pack(anchor='w')
         ttk.Label(header,text=f"{row['name']}  ·  ΑΦΜ {row['vat']}  ·  {when(row['issue_date'])}",style='Subtitle.TLabel').pack(anchor='w',pady=4)
-        ttk.Label(header,text=f"Καθαρή {amount(row['net_minor'])} €    +    ΦΠΑ {amount(row['tax_minor'])} €    =    Σύνολο {amount(row['gross_minor'])} €",style='Section.TLabel').pack(anchor='w',pady=(8,0))
-        pages = ttk.Notebook(win)
-        pages.pack(fill='both',expand=True,padx=18,pady=(0,18))
+        ttk.Label(header,text=f"Καθαρή {amount(row['net_minor'])} €    +    ΦΠΑ {amount(row['tax_minor'])} €    +    Στρογγ. {amount(row['rounding_minor'])} €    =    Σύνολο {amount(row['gross_minor'])} €",style='Section.TLabel').pack(anchor='w',pady=(8,0))
+        split=ttk.Panedwindow(win,orient='horizontal')
+        split.pack(fill='both',expand=True,padx=18,pady=(0,18))
+        left=ttk.Frame(split,width=640);right=ttk.Frame(split,width=480)
+        split.add(left,weight=1);split.add(right,weight=1)
+        win.after_idle(lambda:split.sashpos(0,int(split.winfo_width()*.52)) if split.winfo_exists() else None)
+        pages = ttk.Notebook(left)
+        pages.pack(fill='both',expand=True)
         summary,prepare_tab,source,history = [ttk.Frame(pages,padding=12) for _ in range(4)]
         for page,title in ((summary,'Στοιχεία'),(prepare_tab,'Προετοιμασία EBS'),(source,'Προέλευση'),(history,'Ιστορικό')):
             pages.add(page,text=title)
-        details = [('Αριθμός',row['number']),('Σειρά',row['series'] or '—'),('MARK',row['mark'] or '—'),('Νόμισμα',row['currency']),('Κατάσταση','Τοπικά εγκεκριμένη προετοιμασία' if preparation else 'Χρειάζεται έλεγχο'),('EBS','Δεν έχει γίνει αποστολή / καταχώριση')]
+        details = [('Επωνυμία',row['name']),('ΑΦΜ',row['vat']),('Αριθμός',row['number']),('Σειρά',row['series'] or '—'),('MARK',row['mark'] or '—'),('Νόμισμα',row['currency']),('Κατάσταση','Τοπικά εγκεκριμένη προετοιμασία' if preparation else 'Χρειάζεται έλεγχο'),('EBS','Δεν έχει γίνει αποστολή / καταχώριση')]
         for i,(label,value) in enumerate(details):
             ttk.Label(summary,text=label,style='Subtitle.TLabel').grid(row=i,column=0,sticky='w',padx=12,pady=12)
-            ttk.Label(summary,text=value).grid(row=i,column=1,sticky='w',padx=18,pady=12)
+            ttk.Label(summary,text=value,wraplength=300).grid(row=i,column=1,sticky='w',padx=18,pady=12)
+        def rename():
+            value=simpledialog.askstring('Επωνυμία αντισυμβαλλομένου','Επωνυμία (το ΑΦΜ παραμένει αμετάβλητο):',initialvalue=row['name'],parent=win)
+            if not value:return
+            if not messagebox.askyesno('Επιβεβαίωση','Η επωνυμία θα ενημερωθεί για αυτόν τον αντισυμβαλλόμενο, με ιστορικό. Συνέχεια;',parent=win):return
+            try:self.erp.rename_counterparty(self.company,row['counterparty_id'],value,confirmed=True)
+            except ValueError as exc:messagebox.showerror('Επωνυμία',str(exc),parent=win);return
+            win.destroy();self.refresh()
+        ttk.Button(summary,text='Διόρθωση επωνυμίας',command=rename).grid(row=len(details),column=0,columnspan=2,sticky='w',padx=12,pady=8)
         ttk.Label(prepare_tab,text='Ομάδα και λογαριασμός ανά παραστατικό',style='Section.TLabel').pack(anchor='w')
-        ttk.Label(prepare_tab,text='Ο ίδιος αντισυμβαλλόμενος μπορεί να έχει αγορές και έξοδα. Επιβεβαίωσε τη φύση της συγκεκριμένης συναλλαγής και τον λογαριασμό του δικού σου σχεδίου.',style='Subtitle.TLabel',wraplength=900).pack(anchor='w',pady=(6,14))
+        ttk.Label(prepare_tab,text='Ο ίδιος αντισυμβαλλόμενος μπορεί να έχει αγορές και έξοδα. Επιβεβαίωσε τη φύση της συγκεκριμένης συναλλαγής και τον λογαριασμό του δικού σου σχεδίου.',style='Subtitle.TLabel',wraplength=520).pack(anchor='w',pady=(6,14))
         choices = {'2 · Αγορές':'2','6 · Έξοδα':'6'}
         group = tk.StringVar(value=next((label for label,value in choices.items() if preparation and value==preparation['nature_group']),''))
         account = tk.StringVar(value=preparation['account_code'] if preparation else '')
@@ -459,14 +479,14 @@ class Desktop:
         fields.pack(fill='x')
         ttk.Label(fields,text='Ομάδα συναλλαγής').grid(row=0,column=0,sticky='w',pady=8)
         ttk.Combobox(fields,textvariable=group,values=tuple(choices),state='readonly',width=28).grid(row=0,column=1,sticky='ew',padx=16)
-        ttk.Label(fields,text='Λογαριασμός λογιστικού σχεδίου').grid(row=1,column=0,sticky='w',pady=8)
+        ttk.Label(fields,text='Λογαριασμός').grid(row=1,column=0,sticky='w',pady=8)
         ttk.Entry(fields,textvariable=account,width=30).grid(row=1,column=1,sticky='ew',padx=16)
         ttk.Label(fields,text='Σημείωση ελέγχου').grid(row=2,column=0,sticky='w',pady=8)
-        ttk.Entry(fields,textvariable=note,width=50).grid(row=2,column=1,sticky='ew',padx=16)
+        ttk.Entry(fields,textvariable=note,width=28).grid(row=2,column=1,sticky='ew',padx=16)
         fields.columnconfigure(1,weight=1)
         approved = tk.BooleanVar(value=False)
         ttk.Checkbutton(prepare_tab,text='Έλεγξα το παραστατικό, την ομάδα και τον λογαριασμό.',variable=approved).pack(anchor='w',pady=18)
-        ttk.Label(prepare_tab,text='Η έγκριση αφορά μόνο την τοπική προετοιμασία. Δεν επαληθεύει τον λογαριασμό στο EBS και δεν δημιουργεί λογιστική εγγραφή.',style='Subtitle.TLabel',wraplength=900).pack(anchor='w')
+        ttk.Label(prepare_tab,text='Η έγκριση αφορά μόνο την τοπική προετοιμασία. Δεν επαληθεύει τον λογαριασμό στο EBS και δεν δημιουργεί λογιστική εγγραφή.',style='Subtitle.TLabel',wraplength=520).pack(anchor='w')
         def save():
             if self.busy:
                 messagebox.showinfo('Εργασία σε εξέλιξη','Περίμενε να ολοκληρωθεί η εισαγωγή.',parent=win)
@@ -490,3 +510,9 @@ class Desktop:
         read_text(source,f"Αρχείο: {row['filename']}\nSHA-256: {row['sha256']}\n\nΑρχική γραμμή Excel (αμετάβλητη):\n"+json.dumps(json.loads(row['raw_json']),ensure_ascii=False,indent=2))
         timeline = '\n\n'.join(f"{event['created_at']}  ·  {ACTIONS.get(event['action'],event['action'])}\nΧειριστής: {event['actor']}\n{json.dumps(json.loads(event['payload']),ensure_ascii=False,indent=2)}" for event in events)
         read_text(history,timeline or 'Δεν υπάρχουν ενέργειες.')
+        from app.ui.pdf_pane import PDFPane
+        win.pdf_pane=PDFPane(self,right,document_id,win)
+
+    def open_aade(self):
+        from app.ui.aade_dialog import open_settings
+        return open_settings(self)

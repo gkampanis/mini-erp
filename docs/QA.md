@@ -65,3 +65,20 @@ DISPLAY=:99 XDG_CACHE_HOME=/workspace/cloud-tools/cache /usr/bin/python3 -m test
 Μετά αναφορά χρήστη ότι η εκκίνηση δεν εμφανίζει τίποτα, ο CMD launcher απλοποιήθηκε και ο έλεγχος Python μεταφέρθηκε σε bootstrap Python. Προστέθηκε `ANOIGMA_MINI_ERP.bat` με διατήρηση κονσόλας μέσω cmd /k, αναλυτικό per-run startup log, preflight έκδοσης/ελλιπούς αποσυμπίεσης/Tk/SQLite και διατήρηση πραγματικού child exit code. Δεν τεκμηριώνεται ακόμη η συγκεκριμένη αιτία στο PC του χρήστη· το νέο bootstrap εξασφαλίζει δυνατότητα διάγνωσης χωρίς νέα εγκατάσταση Python ή αλλαγή EBS.
 
 Προστέθηκαν 4 tests εκκίνησης, άρα 30 backend/tool tests και 9 GUI regressions. Το gate εκτελεί επιπλέον πραγματικό `START_DEMO.py --check` στον source και στο αποσυμπιεσμένο ZIP. Οι BAT/CMD δεν έχουν εκτελεστεί σε Windows σε αυτή την cloud μηχανή.
+
+
+## PDF / RPA / στρογγυλοποίηση / UI — 22/10/2026
+
+Το υποχρεωτικό suite επεκτάθηκε σε 41 backend/tool tests και 12 GUI regressions.
+Τα νέα synthetic tests ελέγχουν ROUND_HALF_UP και raw/audit, πραγματική migration
+002→003/004 με προϋπάρχουσες εγκρίσεις, επωνυμία/ΑΦΜ, απομόνωση εταιρειών,
+vault με injected memory adapter χωρίς μυστικά στο SQLite, PDF checksum και
+πραγματικό raster rendering, HTTPS validation και mock λήψη, αποθήκευση ουράς,
+παύση 40, αλλαγή approval, αβέβαιη προσπάθεια και απαγόρευση replay.
+Στο GUI ελέγχονται επιπλέον ασφαλής φόρμα κωδικών, inline PDF και ουρά simulation.
+
+Οι Windows Credential Manager/SendInput και πραγματικό EBS δεν εκτελέστηκαν.
+Η HTTPS λήψη ελέγχεται με συνθετική απόκριση, όχι με πραγματικό τιμολόγιο.
+Η μελέτη επίσημων τρεχουσών AADE προδιαγραφών παραμένει περιορισμένη από proxy
+403· δεν δηλώνεται ελεγμένη ζωντανή σύνδεση. Τα πεδία κωδικών δεν είναι connector.
+Για πλήρη tests χρειάζονται οι pinned PDF εξαρτήσεις του requirements-pdf.txt.

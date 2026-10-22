@@ -32,3 +32,25 @@ erDiagram
 | payments/settlements | Ξεχωριστό milestone: payment events, currency, counterparties, allocation σε invoices, reconciliation και audit. Όχι εγγραφές γενικού καθολικού. |
 
 Ποσά integer minor units για EUR στο MVP. Μελλοντικά multicurrency χρειάζεται explicit currency scale και migration· δεν θεωρούμε κάθε νόμισμα δύο δεκαδικά. ΑΦΜ/MARK/σειρές/αριθμοί TEXT, dates ISO. Source bytes και raw rows ποτέ overwrite. Για updates σε έγγραφα απαιτούνται versioning, review και before/after audit. Ο λογαριασμός και η φορολογική κατηγοριοποίηση είναι διαφορετικές έννοιες.
+
+
+## Αναβάθμιση 003 / 004
+
+Η 003 ανακατασκευάζει ατομικά το documents, διατηρώντας IDs, προετοιμασίες,
+πηγές και audit. Προστίθεται `rounding_minor` (ακέραιος, -1 έως 1):
+`gross_minor = net_minor + tax_minor + rounding_minor`. Η στήλη αφορά μόνο
+διαφορά τεκμηριωμένης στρογγυλοποίησης αρχικών δεκαδικών, όχι αυθαίρετο κλείσιμο
+ασυμφωνιών ή αυτόματη εγγραφή λογιστικού λογαριασμού στρογγυλοποίησης.
+
+Η 004 προσθέτει:
+
+- `attachments`: company/document, είδος invoice/delivery_note/other, SHA-256,
+  σχετική διαδρομή immutable blob, αρχικό όνομα, προέλευση, timestamp.
+- `aade_settings`: μόνο εταιρεία, περιβάλλον και timestamp. **Κανένα μυστικό**.
+- `rpa_jobs`: εταιρεία, simulation/fill_only, κατάσταση, timestamp.
+- `rpa_items`: job/document, snapshot εγκεκριμένων πεδίων, κατάσταση,
+  αιτία και timestamp. Η κατάσταση started αποθηκεύεται πριν το input και
+  διακοπή μετατρέπεται σε uncertain για χειροκίνητο έλεγχο.
+
+Οι εφαρμογικές υπηρεσίες ελέγχουν εταιρεία πριν επιστρέψουν PDF ή ουρά.
+Η SQLite δεν αποτελεί σύστημα εξουσιοδότησης πολλαπλών χρηστών ή κρυπτογράφηση.

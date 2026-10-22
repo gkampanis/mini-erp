@@ -28,6 +28,8 @@ def main():
     if not args.prepare_only:
         import tkinter as tk
         from app.ui.desktop import Desktop
+        from app.ui.dpi import enable
+        enable()
         root = tk.Tk()
         Desktop(root,args.data_dir)
         root.mainloop()

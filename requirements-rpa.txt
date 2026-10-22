@@ -1,0 +1,2 @@
+# Optional Windows mouse/keyboard adapter. Never imported by the normal UI.
+PyAutoGUI==0.9.54

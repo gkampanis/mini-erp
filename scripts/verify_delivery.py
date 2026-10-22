@@ -22,7 +22,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIRS = {'app':{'.py'},'tests':{'.py'},'scripts':{'.py'},'migrations':{'.sql'},'docs':{'.md','.png'}}
-SOURCE_FILES = ('START_DEMO.cmd','ANOIGMA_MINI_ERP.bat','START_DEMO.py','TRY_DEMO.md','README.md','NOTICE.md','AGENTS.md')
+SOURCE_FILES = ('START_DEMO.cmd','ANOIGMA_MINI_ERP.bat','START_DEMO.py','TRY_DEMO.md','README.md','NOTICE.md','AGENTS.md','requirements-pdf.txt','requirements-rpa.txt')
 
 
 class CheckFailed(RuntimeError):
@@ -42,7 +42,7 @@ def selected_files(root):
 
 def code_manifest(root):
     return {p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes().replace(b'\r\n',b'\n') if p.suffix in ('.cmd','.bat') else p.read_bytes()).hexdigest()
-            for p in selected_files(root) if p.suffix in ('.py','.sql','.cmd','.bat')}
+            for p in selected_files(root) if p.suffix in ('.py','.sql','.cmd','.bat','.txt')}
 
 
 def static_checks(root):
@@ -87,7 +87,7 @@ def inspect_archive(path):
         names = archive.namelist()
         if len(names)!=len(set(names)):raise CheckFailed('Archive has duplicate entries')
         required = {'MiniERP-Demo/app/__main__.py','MiniERP-Demo/migrations/001_initial.sql',
-                    'MiniERP-Demo/migrations/002_preparation.sql','MiniERP-Demo/tests/fixtures.py',
+                    'MiniERP-Demo/migrations/002_preparation.sql','MiniERP-Demo/migrations/003_rounding.sql','MiniERP-Demo/migrations/004_workspace.sql','MiniERP-Demo/requirements-pdf.txt','MiniERP-Demo/requirements-rpa.txt','MiniERP-Demo/tests/fixtures.py',
                     'MiniERP-Demo/START_DEMO.cmd','MiniERP-Demo/ANOIGMA_MINI_ERP.bat','MiniERP-Demo/START_DEMO.py','MiniERP-Demo/TRY_DEMO.md',
                     'MiniERP-Demo/scripts/verify_delivery.py','MiniERP-Demo/scripts/run_checks.py'}
         if not required.issubset(names):raise CheckFailed('Archive missing required runtime/verification files')
@@ -189,7 +189,7 @@ def main(argv=None):
     gate = DeliveryCheck(ROOT,run_dir)
     report = dict(run_id=run_id,status='FAILED',platform=platform.platform(),python=sys.version.split()[0],
                   artifact=None,checks=gate.checks,windows_desktop='NOT_RUN' if os.name!='nt' else 'REQUIRED',
-                  windows_launcher='NOT_RUN',ebs_live='NOT_RUN',pdf_download='NOT_IMPLEMENTED',
+                  windows_launcher='NOT_RUN',ebs_live='NOT_RUN',pdf_download='SYNTHETIC_TESTS_ONLY',
                   scope='Synthetic source demo only; not a certified Windows EXE or EBS integration')
     report_path = run_dir/'report.json'
     try:

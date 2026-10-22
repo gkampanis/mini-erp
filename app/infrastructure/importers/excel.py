@@ -7,13 +7,13 @@ import json
 import zipfile
 import xml.etree.ElementTree as ET
 from app.infrastructure.importers.legacy_primitives import NS, NAMES, norm, sheets, read_sheet
-from app.domain.validation import record
+from app.domain.validation import record, rounding_changes
 
 MAX_FILE = 20 * 1024 * 1024
 MAX_EXPANDED = 64 * 1024 * 1024
 MAX_ROWS = 20000
 MAX_COLUMNS = 200
-NAMES = {**NAMES, 'name': {norm(x) for x in ['επωνυμία', 'προμηθευτής', 'supplier name', 'name']},
+NAMES = {**NAMES, 'name': {norm(x) for x in ['επωνυμία', 'επωνυμία εκδότη','επωνυμία προμηθευτή','επωνυμία αντισυμβαλλομένου','ονομασία προμηθευτή','αντισυμβαλλόμενος','προμηθευτής', 'supplier name', 'issuer name','seller name','counterparty name','name']},
          'currency': {norm(x) for x in ['νόμισμα', 'currency']}}
 REQUIRED = ('vat', 'date', 'net', 'tax')
 
@@ -93,7 +93,7 @@ def preview(path, manual_mapping=None):
                         raise ValueError('Τύπος Excel: απαιτούνται σταθερές τιμές')
                     fields = {k:raw.get(v, '') for k,v in mapping.items()}
                     item = record(fields, epoch1904)
-                    records.append(dict(row=row_no, raw=raw, document=item))
+                    records.append(dict(row=row_no, raw=raw, document=item,rounding_changes=rounding_changes(fields,item)))
                 except (ValueError, OverflowError) as exc:
                     rejected.append(dict(row=row_no, reason=str(exc), raw=raw))
         else:
