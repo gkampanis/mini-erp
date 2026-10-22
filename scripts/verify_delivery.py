@@ -22,7 +22,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIRS = {'app':{'.py'},'tests':{'.py'},'scripts':{'.py'},'migrations':{'.sql'},'docs':{'.md','.png'}}
-SOURCE_FILES = ('START_DEMO.cmd','TRY_DEMO.md','README.md','NOTICE.md','AGENTS.md')
+SOURCE_FILES = ('START_DEMO.cmd','ANOIGMA_MINI_ERP.bat','START_DEMO.py','TRY_DEMO.md','README.md','NOTICE.md','AGENTS.md')
 
 
 class CheckFailed(RuntimeError):
@@ -41,8 +41,8 @@ def selected_files(root):
 
 
 def code_manifest(root):
-    return {p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes().replace(b'\r\n',b'\n') if p.suffix=='.cmd' else p.read_bytes()).hexdigest()
-            for p in selected_files(root) if p.suffix in ('.py','.sql','.cmd')}
+    return {p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes().replace(b'\r\n',b'\n') if p.suffix in ('.cmd','.bat') else p.read_bytes()).hexdigest()
+            for p in selected_files(root) if p.suffix in ('.py','.sql','.cmd','.bat')}
 
 
 def static_checks(root):
@@ -88,7 +88,7 @@ def inspect_archive(path):
         if len(names)!=len(set(names)):raise CheckFailed('Archive has duplicate entries')
         required = {'MiniERP-Demo/app/__main__.py','MiniERP-Demo/migrations/001_initial.sql',
                     'MiniERP-Demo/migrations/002_preparation.sql','MiniERP-Demo/tests/fixtures.py',
-                    'MiniERP-Demo/START_DEMO.cmd','MiniERP-Demo/TRY_DEMO.md',
+                    'MiniERP-Demo/START_DEMO.cmd','MiniERP-Demo/ANOIGMA_MINI_ERP.bat','MiniERP-Demo/START_DEMO.py','MiniERP-Demo/TRY_DEMO.md',
                     'MiniERP-Demo/scripts/verify_delivery.py','MiniERP-Demo/scripts/run_checks.py'}
         if not required.issubset(names):raise CheckFailed('Archive missing required runtime/verification files')
         for item in archive.infolist():
@@ -208,6 +208,7 @@ def main(argv=None):
             gate.checks.append(dict(name='static_checks',status='PASSED',details=static_checks(snapshot)))
             ensure_display()
             gate.checks.append(dict(name='desktop_display',status='PASSED'))
+            gate.command('source_launcher_python',[sys.executable,'START_DEMO.py','--check','--log-dir',str(run_dir/'source-launcher')],cwd=snapshot)
             gate.suite('source_tests','backend',snapshot)
             gate.suite('source_gui','gui',snapshot)
             gate.command('source_gui_smoke',[sys.executable,'-m','tests.gui_smoke'],cwd=snapshot)
@@ -218,6 +219,7 @@ def main(argv=None):
             with zipfile.ZipFile(candidate) as archive:archive.extractall(extracted)
             packaged = extracted/'MiniERP-Demo'
             if code_manifest(packaged)!=original:raise CheckFailed('Packaged code differs from checked source')
+            gate.command('package_launcher_python',[sys.executable,'START_DEMO.py','--check','--log-dir',str(run_dir/'package-launcher')],cwd=packaged)
             gate.suite('package_tests','backend',packaged)
             gate.suite('package_gui','gui',packaged)
             gate.command('package_gui_smoke',[sys.executable,'-m','tests.gui_smoke'],cwd=packaged)

@@ -1,54 +1,43 @@
 @echo off
-setlocal
-cd /d "%~dp0"
-set "MINIERP_PY="
-where py >nul 2>nul
-if not errorlevel 1 (
-    py -3.12 -c "import sys, tkinter, sqlite3; assert sys.version_info >= (3,12)" >nul 2>nul
-    if not errorlevel 1 set "MINIERP_PY=py -3.12"
-)
-if not defined MINIERP_PY (
-    where py >nul 2>nul
-    if not errorlevel 1 (
-        py -3 -c "import sys, tkinter, sqlite3; assert sys.version_info >= (3,12)" >nul 2>nul
-        if not errorlevel 1 set "MINIERP_PY=py -3"
-    )
-)
-if not defined MINIERP_PY (
-    python -c "import sys, tkinter, sqlite3; assert sys.version_info >= (3,12)" >nul 2>nul
-    if not errorlevel 1 set "MINIERP_PY=python"
-)
-if not defined MINIERP_PY (
-    echo Python 3.12 or newer with Tcl/Tk is required.
-    echo Install Python from https://www.python.org/downloads/windows/
-    echo Enable the Python launcher and Tcl/Tk options, then try again.
-    if /I "%~1"=="--check" exit /b 1
-    pause
-    exit /b 1
-)
-if /I "%~1"=="--check" goto verify_launcher
-if not defined LOCALAPPDATA (
-    echo Windows LOCALAPPDATA is not available. Demo was not started.
-    pause
-    exit /b 1
-)
-echo Mini ERP - Synthetic demo. No EBS connection or accounting posting.
-echo Data folder: %LOCALAPPDATA%\MiniERP\Demo
-%MINIERP_PY% -m app.demo --data-dir "%LOCALAPPDATA%\MiniERP\Demo"
-if errorlevel 1 (
-    echo.
-    echo The demo could not start. Keep this window open and share the error above.
-    pause
-    exit /b 1
-)
-endlocal
-exit /b 0
+setlocal EnableExtensions DisableDelayedExpansion
+if /I "%~1"=="--check" goto check_mode
+if /I "%~1"=="--run" goto run_mode
+"%ComSpec%" /d /k call "%~f0" --run
+exit /b
 
-:verify_launcher
-if not defined TEMP exit /b 1
-set "MINIERP_CHECK_DIR=%TEMP%\MiniERP-Check-%RANDOM%-%RANDOM%"
-if exist "%MINIERP_CHECK_DIR%" exit /b 1
-%MINIERP_PY% -m app.demo --prepare-only --data-dir "%MINIERP_CHECK_DIR%"
-set "MINIERP_CHECK_EXIT=%ERRORLEVEL%"
-if exist "%MINIERP_CHECK_DIR%\SYNTHETIC_DEMO_ONLY" rmdir /s /q "%MINIERP_CHECK_DIR%"
-exit /b %MINIERP_CHECK_EXIT%
+:check_mode
+set "MINIERP_ARGS=--check"
+goto detect_python
+
+:run_mode
+echo.
+echo Mini ERP - startup diagnostics
+set "MINIERP_ARGS="
+
+:detect_python
+cd /d "%~dp0"
+if not exist "%~dp0START_DEMO.py" goto incomplete_package
+if not exist "%~dp0app\demo.py" goto incomplete_package
+where py >nul 2>nul
+if errorlevel 1 goto try_python
+py -3 -c "import sys" >nul 2>nul
+if errorlevel 1 goto try_python
+py -3 "%~dp0START_DEMO.py" %MINIERP_ARGS%
+exit /b %ERRORLEVEL%
+
+:try_python
+where python >nul 2>nul
+if errorlevel 1 goto missing_python
+python "%~dp0START_DEMO.py" %MINIERP_ARGS%
+exit /b %ERRORLEVEL%
+
+:incomplete_package
+echo ERROR: The package is incomplete. Extract ALL files from the ZIP first.
+echo Expected app\demo.py and START_DEMO.py next to this CMD file.
+exit /b 1
+
+:missing_python
+echo ERROR: Python was not found through py or python on PATH.
+echo You may have Python installed in another location.
+echo This window stays open so the error can be read.
+exit /b 1

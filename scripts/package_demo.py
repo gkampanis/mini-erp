@@ -14,7 +14,7 @@ from tests.fixtures import demos
 def build(output):
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    files = [ROOT / name for name in ('START_DEMO.cmd','TRY_DEMO.md','README.md','NOTICE.md','AGENTS.md')]
+    files = [ROOT / name for name in ('START_DEMO.cmd','ANOIGMA_MINI_ERP.bat','START_DEMO.py','TRY_DEMO.md','README.md','NOTICE.md','AGENTS.md')]
     for directory, extensions in [('app',{'.py'}),('migrations',{'.sql'}),('tests',{'.py'}),('scripts',{'.py'}),('docs',{'.md','.png'})]:
         files.extend(p for p in (ROOT/directory).rglob('*') if p.is_file() and p.suffix in extensions and '__pycache__' not in p.parts)
     with tempfile.TemporaryDirectory() as temp:
@@ -23,7 +23,7 @@ def build(output):
         with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as archive:
             for path in sorted(files):
                 data = path.read_bytes()
-                if path.suffix == '.cmd':
+                if path.suffix in ('.cmd','.bat'):
                     data = data.replace(b'\r\n',b'\n').replace(b'\n',b'\r\n')
                 archive.writestr('MiniERP-Demo/'+path.relative_to(ROOT).as_posix(),data)
             for path in sorted(samples.glob('*.xlsx')):

@@ -58,3 +58,8 @@ py -3.12 scripts\verify_delivery.py --require-windows
 ```
 
 Στο cloud: `DISPLAY=:99 /usr/bin/python3 scripts/verify_delivery.py`. Τα αποτελέσματα Linux δεν χαρακτηρίζονται ως Windows acceptance. Το τελικό ZIP περιέχει verification report και έχει εξωτερικό SHA-256. Αποτυχία υποχρεωτικού ελέγχου μπλοκάρει τη νέα παράδοση. Δεν απαιτούνται πρόσθετα runtime packages για την εφαρμογή.
+
+
+## Εκκίνηση Windows με διαγνωστικά
+
+Στο ZIP κάντε αποσυμπίεση όλων των αρχείων και διπλό κλικ στο `ANOIGMA_MINI_ERP.bat`. Ο launcher χρησιμοποιεί την υπάρχουσα Python (`py -3`, αλλιώς `python`), διατηρεί ανοικτή την κονσόλα και γράφει log στο `%LOCALAPPDATA%\MiniERP\Logs`. Ο Python bootstrap ελέγχεται πλέον από το delivery gate και στον source και στο ZIP. Η εκτέλεση των Windows BAT/CMD παραμένει ξεχωριστή αποδοχή Windows. Για παράκαμψη CMD: `py -3 START_DEMO.py` από τον φάκελο του προγράμματος.

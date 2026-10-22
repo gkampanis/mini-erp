@@ -58,3 +58,10 @@ DISPLAY=:99 XDG_CACHE_HOME=/workspace/cloud-tools/cache /usr/bin/python3 -m test
 Η συσκευασία περνά πλέον από το [Delivery Check](ECC_DELIVERY.md). Προστέθηκαν 6 έλεγχοι του ίδιου του gate: πραγματικό exit/timeout, μηδενικά ή skipped tests, απουσία φρέσκων αποτελεσμάτων, syntax/επικίνδυνα patterns, package manifest/allowlist και μη αντικατάσταση artifact μετά αποτυχία. Το backend suite περιέχει πλέον 26 tests, ενώ οι GUI regressions παραμένουν 9. Τα suites εκτελούνται ξανά και από το αποσυμπιεσμένο υποψήφιο ZIP.
 
 Η cloud εκτέλεση έλεγξε και το demo/readback από το πακέτο. Αίτημα `--require-windows` στο Linux επέστρεψε αποτυχία χωρίς Windows ZIP, όπως απαιτείται. Οι Windows CMD launcher αλλαγές παραμένουν μη δοκιμασμένες σε πραγματικά Windows μέχρι να εκτελεστεί εκεί το gate. Δεν γίνεται ισχυρισμός coverage percentage ή πλήρους security audit από στοχευμένο static check.
+
+
+## Startup diagnostics — 22/10/2026
+
+Μετά αναφορά χρήστη ότι η εκκίνηση δεν εμφανίζει τίποτα, ο CMD launcher απλοποιήθηκε και ο έλεγχος Python μεταφέρθηκε σε bootstrap Python. Προστέθηκε `ANOIGMA_MINI_ERP.bat` με διατήρηση κονσόλας μέσω cmd /k, αναλυτικό per-run startup log, preflight έκδοσης/ελλιπούς αποσυμπίεσης/Tk/SQLite και διατήρηση πραγματικού child exit code. Δεν τεκμηριώνεται ακόμη η συγκεκριμένη αιτία στο PC του χρήστη· το νέο bootstrap εξασφαλίζει δυνατότητα διάγνωσης χωρίς νέα εγκατάσταση Python ή αλλαγή EBS.
+
+Προστέθηκαν 4 tests εκκίνησης, άρα 30 backend/tool tests και 9 GUI regressions. Το gate εκτελεί επιπλέον πραγματικό `START_DEMO.py --check` στον source και στο αποσυμπιεσμένο ZIP. Οι BAT/CMD δεν έχουν εκτελεστεί σε Windows σε αυτή την cloud μηχανή.

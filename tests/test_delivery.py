@@ -39,7 +39,7 @@ class DeliveryTests(unittest.TestCase):
     def test_syntax_and_unsafe_app_calls_are_blocked_without_exposing_values(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            for name in ('START_DEMO.cmd','TRY_DEMO.md','README.md','NOTICE.md','AGENTS.md'):(root/name).touch()
+            for name in ('START_DEMO.cmd','ANOIGMA_MINI_ERP.bat','START_DEMO.py','TRY_DEMO.md','README.md','NOTICE.md','AGENTS.md'):(root/name).touch()
             (root/'app').mkdir()
             source = root/'app/main.py'
             source.write_text('def broken(:\n',encoding='utf8')
@@ -49,7 +49,7 @@ class DeliveryTests(unittest.TestCase):
                 with self.subTest(code=code),self.assertRaises(CheckFailed) as error:static_checks(root)
                 self.assertNotIn('synthetic-sensitive-literal',str(error.exception))
             source.write_text('x = 1\n')
-            self.assertEqual(static_checks(root)['python_files'],1)
+            self.assertEqual(static_checks(root)['python_files'],2)
 
     def test_packaged_source_matches_manifest_and_excludes_local_data(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -71,7 +71,7 @@ class DeliveryTests(unittest.TestCase):
             output = Path(temp)/'delivery.zip'
             # Existing user artifacts must be preserved; no failed run may replace them.
             output.write_bytes(b'previous-verified-artifact')
-            with patch.object(verify_delivery,'ensure_display'),patch.object(verify_delivery.DeliveryCheck,'suite',side_effect=CheckFailed('synthetic required failure')):
+            with patch.object(verify_delivery,'ensure_display'),patch.object(verify_delivery.DeliveryCheck,'command',return_value={}),patch.object(verify_delivery.DeliveryCheck,'suite',side_effect=CheckFailed('synthetic required failure')):
                 self.assertEqual(verify_delivery.main(['--output',str(output)]),1)
             self.assertEqual(output.read_bytes(),b'previous-verified-artifact')
             self.assertFalse(output.with_suffix('.verification.json').exists())
