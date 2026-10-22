@@ -31,3 +31,18 @@ raw provenance, tenant boundaries, migrations, atomic import and audit.
 
 ECC verification-loop is a process reference, not a runtime dependency. Do not
 install global ECC hooks or add unrelated product modules automatically.
+
+## User-approved delivery channel
+
+The user explicitly requests that future demo ZIPs be delivered through
+`gkampanis/mini-erp` on GitHub with a working download link, rather than sandbox
+or local filesystem links. After the delivery gate passes, upload the verified
+ZIP, SHA-256 and report to that repository, using a release if API access is
+available or a dedicated downloads branch otherwise. Preserve repository
+visibility and existing branches/files; never force-push over remote changes.
+Check upload success and, where possible, fetch the download URL and compare
+its bytes to the verified SHA-256 before claiming the link works. If access
+blocks upload or verification, state the precise blocker; never supply an
+unuploaded or hypothetical GitHub download URL as if it works. This authorizes
+routine delivery uploads to this repository, not unrelated publication or
+changes to EBS/production data.
