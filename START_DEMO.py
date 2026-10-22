@@ -21,7 +21,7 @@ def probe(root=ROOT, version=None):
     version = sys.version_info[:2] if version is None else version
     if version < MINIMUM:
         raise RuntimeError('Detected Python %s.%s; this build requires Python 3.12 or newer.' % tuple(version))
-    for name in ('app/demo.py','app/__init__.py','migrations/001_initial.sql','migrations/002_preparation.sql','migrations/003_rounding.sql','migrations/004_workspace.sql','tests/fixtures.py'):
+    for name in ('app/demo.py','app/__init__.py','migrations/001_initial.sql','migrations/002_preparation.sql','migrations/003_rounding.sql','migrations/004_workspace.sql','migrations/005_workflow.sql','migrations/006_mydata_read.sql','migrations/007_counterparty_cards.sql','migrations/008_account_defaults.sql','migrations/009_registry.sql','tests/fixtures.py'):
         if not (root/name).is_file():
             raise RuntimeError('Incomplete extraction: missing '+name+'. Extract the entire ZIP, not just the launcher.')
     import sqlite3
@@ -37,7 +37,7 @@ def probe(root=ROOT, version=None):
 
 
 def child_arguments(data_dir, check):
-    return [sys.executable,'-u','-m','app.demo','--data-dir',str(data_dir)]+(['--prepare-only'] if check else [])
+    return [sys.executable,'-u','-m','app.demo' if check else 'app','--data-dir',str(data_dir)]+(['--prepare-only'] if check else [])
 
 
 def run_child(arguments, log, root=ROOT):
@@ -89,7 +89,9 @@ def main(argv=None):
                 if os.name=='nt' and not os.environ.get('LOCALAPPDATA'):
                     raise RuntimeError('LOCALAPPDATA is unavailable; no demo data directory was selected.')
                 say('Opening Mini ERP. Keep this window available if a problem appears.')
-                code = run_child(child_arguments(base/'Demo',False),log)
+                data_dir=base/'Demo' if (base/'Demo'/'mini_erp.sqlite3').is_file() else base/'Data'
+                say('Data directory: '+str(data_dir))
+                code = run_child(child_arguments(data_dir,False),log)
             if code!=0:
                 raise RuntimeError('Application exited with code '+str(code)+'. See the diagnostic log above.')
             say('Launcher check passed.' if args.check else 'Mini ERP closed normally.')

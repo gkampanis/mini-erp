@@ -22,7 +22,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIRS = {'app':{'.py'},'tests':{'.py'},'scripts':{'.py'},'migrations':{'.sql'},'docs':{'.md','.png'}}
-SOURCE_FILES = ('START_DEMO.cmd','ANOIGMA_MINI_ERP.bat','START_DEMO.py','TRY_DEMO.md','README.md','NOTICE.md','AGENTS.md','requirements-pdf.txt','requirements-rpa.txt')
+SOURCE_FILES = ('START_DEMO.cmd','ANOIGMA_MINI_ERP.bat','START_DEMO.py','TRY_DEMO.md','README.md','NOTICE.md','AGENTS.md','requirements-pdf.txt','requirements-rpa.txt','requirements-browser.txt')
 
 
 class CheckFailed(RuntimeError):
@@ -87,7 +87,7 @@ def inspect_archive(path):
         names = archive.namelist()
         if len(names)!=len(set(names)):raise CheckFailed('Archive has duplicate entries')
         required = {'MiniERP-Demo/app/__main__.py','MiniERP-Demo/migrations/001_initial.sql',
-                    'MiniERP-Demo/migrations/002_preparation.sql','MiniERP-Demo/migrations/003_rounding.sql','MiniERP-Demo/migrations/004_workspace.sql','MiniERP-Demo/requirements-pdf.txt','MiniERP-Demo/requirements-rpa.txt','MiniERP-Demo/tests/fixtures.py',
+                    'MiniERP-Demo/migrations/002_preparation.sql','MiniERP-Demo/migrations/003_rounding.sql','MiniERP-Demo/migrations/004_workspace.sql','MiniERP-Demo/migrations/005_workflow.sql','MiniERP-Demo/migrations/006_mydata_read.sql','MiniERP-Demo/migrations/007_counterparty_cards.sql','MiniERP-Demo/migrations/008_account_defaults.sql','MiniERP-Demo/migrations/009_registry.sql','MiniERP-Demo/requirements-pdf.txt','MiniERP-Demo/requirements-rpa.txt','MiniERP-Demo/tests/fixtures.py',
                     'MiniERP-Demo/START_DEMO.cmd','MiniERP-Demo/ANOIGMA_MINI_ERP.bat','MiniERP-Demo/START_DEMO.py','MiniERP-Demo/TRY_DEMO.md',
                     'MiniERP-Demo/scripts/verify_delivery.py','MiniERP-Demo/scripts/run_checks.py'}
         if not required.issubset(names):raise CheckFailed('Archive missing required runtime/verification files')

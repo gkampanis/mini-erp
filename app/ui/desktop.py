@@ -95,7 +95,7 @@ class Desktop:
         self._documents = {}
         self._jobs = {}
         self._details = {}
-        self._sort = ('issue_date',True)
+        self._sort = ('source_record_id',False)
         self.status = tk.StringVar(value='')
         root.title('Mini ERP · Προετοιμασία παραστατικών για EBS')
         root.geometry(f'{min(1320,root.winfo_screenwidth()-40)}x{min(880,root.winfo_screenheight()-40)}')
@@ -109,24 +109,21 @@ class Desktop:
         self.import_button = ttk.Button(header,text='+  Εισαγωγή Excel',style='Primary.TButton',command=self.choose_excel)
         self.import_button.pack(side='right',padx=(8,0))
         ttk.Button(header,text='ΑΑΔΕ / myDATA',command=self.open_aade).pack(side='right')
+        ttk.Button(header,text='Αντισυμβαλλόμενοι',command=self.open_counterparties).pack(side='right',padx=8)
         ttk.Label(header,text='Mini ERP',style='Title.TLabel').pack(anchor='w')
-        ttk.Label(header,text=f"{company['name']}  ·  Προετοιμασία παραστατικών για EBS",style='Subtitle.TLabel').pack(anchor='w',pady=(3,0))
-        metrics = ttk.Frame(root,padding=(24,0,24,16))
-        metrics.pack(fill='x')
-        self.metrics = {}
-        for i,(key,label) in enumerate((('total','Παραστατικά στη βάση'),('pending','Χωρίς προετοιμασία'),('issues','Εξαιρέσεις / προειδοποιήσεις εισαγωγής'))):
-            metrics.columnconfigure(i,weight=1,uniform='cards')
-            card = ttk.Frame(metrics,style='Card.TFrame',padding=(18,12))
-            card.grid(row=0,column=i,sticky='nsew',padx=(0,10 if i<2 else 0))
-            var = tk.StringVar(value='0')
-            self.metrics[key] = var
-            ttk.Label(card,textvariable=var,style='Metric.TLabel').pack(anchor='w')
-            ttk.Label(card,text=label,style='Caption.TLabel',wraplength=260).pack(anchor='w')
+        self.company_caption=tk.StringVar(value=f"{company['name']}  ·  Προετοιμασία παραστατικών για EBS")
+        ttk.Label(header,textvariable=self.company_caption,style='Subtitle.TLabel').pack(anchor='w',pady=(3,0))
+        metrics=ttk.Frame(root,padding=(24,0,24,10));metrics.pack(fill='x')
+        self.metrics={}
+        for key,label in [('total','Παραστατικά'),('pending','Χρειάζονται λογαριασμό'),('issues','Έλεγχοι εισαγωγής')]:
+            var=tk.StringVar(value='0');self.metrics[key]=var
+            ttk.Label(metrics,text=label+':',style='Subtitle.TLabel').pack(side='left',padx=(0,5))
+            ttk.Label(metrics,textvariable=var).pack(side='left',padx=(0,24))
         self.notebook = ttk.Notebook(root)
         self.notebook.pack(fill='both',expand=True,padx=24)
         self.documents_tab = ttk.Frame(self.notebook,padding=14)
         self.reviews_tab = ttk.Frame(self.notebook,padding=14)
-        self.notebook.add(self.documents_tab,text='Παραστατικά')
+        self.notebook.add(self.documents_tab,text='Παραστατικά → EBS')
         self.notebook.add(self.reviews_tab,text='Έλεγχοι εισαγωγής')
         filters = ttk.Frame(self.documents_tab)
         filters.pack(fill='x',pady=(0,12))
@@ -149,9 +146,9 @@ class Desktop:
             box.bind('<<ComboboxSelected>>',lambda _:self.refresh())
         self.result_count = tk.StringVar()
         ttk.Label(self.documents_tab,textvariable=self.result_count,style='Subtitle.TLabel').pack(anchor='w',pady=(0,8))
-        columns = ('issue_date','reference','name','vat','gross_minor','nature_group','account_code','preparation_state')
-        titles = ('Ημερομηνία','Παραστατικό','Επωνυμία αντισυμβαλλομένου','ΑΦΜ','Σύνολο €','Ομάδα','Λογαριασμός','Προετοιμασία')
-        self.tree = table(self.documents_tab,columns,titles,{'name':220,'reference':135,'gross_minor':110,'nature_group':80,'preparation_state':160})
+        columns = ('reference','name','vat','issue_date','gross_minor','account_code','preparation_state','aade_state','pdf_state','ebs_state')
+        titles = ('Παραστατικό','Επωνυμία','ΑΦΜ','Ημερομηνία','Σύνολο €','Λογαριασμός','Έλεγχος','ΑΑΔΕ','PDF','EBS')
+        self.tree = table(self.documents_tab,columns,titles,{'name':190,'reference':100,'vat':95,'issue_date':90,'gross_minor':85,'account_code':120,'preparation_state':120,'aade_state':90,'pdf_state':70,'ebs_state':170})
         self.tree.configure(selectmode='extended')
         for col in columns:
             self.tree.heading(col,command=lambda key=col:self.sort_documents(key))
@@ -171,8 +168,10 @@ class Desktop:
         ttk.Button(self.reviews_tab,text='Προβολή αναφοράς',command=self.open_review).pack(side='bottom',anchor='e',pady=(12,0))
         self.review_tree.master.pack_forget()
         self.review_tree.master.pack(fill='both',expand=True)
-        self.rpa_tab=ttk.Frame(self.notebook,padding=14)
-        self.notebook.add(self.rpa_tab,text='RPA → EBS')
+        self.rpa_tab=ttk.Frame(self.documents_tab)
+        self.rpa_tab.pack(side='bottom',fill='x',pady=(8,0))
+        self.tree.master.pack_forget()
+        self.tree.master.pack(fill='both',expand=True)
         from app.ui.rpa_panel import RPAPanel
         self.rpa_panel=RPAPanel(self,self.rpa_tab,table)
         footer = ttk.Frame(root,padding=(24,12,24,12))
@@ -181,7 +180,7 @@ class Desktop:
         self.notebook.pack(fill='both',expand=True,padx=24)
         self.progress = ttk.Progressbar(footer,mode='indeterminate',length=110)
         ttk.Label(footer,textvariable=self.status,style='Subtitle.TLabel').pack(anchor='w')
-        ttk.Label(footer,text='Τοπική προετοιμασία · Δεν έχει γίνει αποστολή ή καταχώριση στο EBS',style='Subtitle.TLabel').pack(anchor='w',pady=(3,0))
+        ttk.Label(footer,text='Μία εισαγωγή Excel · Έλεγχος λογαριασμών · Καταχώριση EBS · Ctrl+Shift+F9 παύση / F10 συνέχεια / F12 διακοπή',style='Subtitle.TLabel').pack(anchor='w',pady=(3,0))
         root.protocol('WM_DELETE_WINDOW',self.close)
         root.bind('<Control-f>',lambda _:(entry.focus_set(),entry.select_range(0,'end')))
         self.refresh()
@@ -235,7 +234,7 @@ class Desktop:
             self.progress.stop()
             self.progress.pack_forget()
             if error:
-                self.status.set('Η εργασία απέτυχε. Μπορείς να διορθώσεις το αρχείο και να ξαναδοκιμάσεις.')
+                self.status.set('Η εργασία δεν ολοκληρώθηκε. Δες την αιτία στο μήνυμα· μην επαναλάβεις καταχώριση EBS χωρίς έλεγχο ιστορικού.')
                 self.root.deiconify()
                 messagebox.showerror('Η εργασία δεν ολοκληρώθηκε',error,parent=self.root)
             else:
@@ -254,17 +253,25 @@ class Desktop:
         self.refresh()
 
     def refresh(self):
+        identity=self.erp.db.execute('SELECT vat,name FROM companies WHERE id=?',(self.company,)).fetchone()
+        self.company_caption.set(identity['name']+' · ΑΦΜ '+identity['vat']+' · Προετοιμασία για EBS')
         selected = self.tree.selection()
         all_rows = self.erp.search(self.company)
         jobs = self.erp.import_reviews(self.company)
-        rows = self.erp.search(self.company,self.query.get().strip())
+        from app.application.workspace import Workspace
+        from app.ui.rpa_panel import LABELS as EBS_LABELS
+        rows = Workspace(self.erp).rows(self.company,self.query.get().strip())
         wanted_group = GROUPS.get(self.group_filter.get())
         rows = [r for r in rows if (wanted_group is None or r.get('nature_group')==wanted_group)
                 and (self.state_filter.get()!=STATES[1] or not r.get('prepared_at'))
                 and (self.state_filter.get()!=STATES[2] or r.get('prepared_at'))]
         for row in rows:
             row['reference'] = reference(row)
-            row['preparation_state'] = 'Τοπικά εγκεκριμένο' if row.get('prepared_at') else 'Χρειάζεται έλεγχο'
+            row['ebs_state'] = EBS_LABELS.get(row['ebs_state'],row['ebs_state'])
+            row['aade_state'] = {'not_checked':'Δεν ελέγχθηκε','matched':'Συμφωνεί','different':'Διαφορά','cancelled_at_aade':'Αναφορά ακύρωσης'}.get(row['aade_state'],row['aade_state'])
+            row['preparation_state'] = 'Εγκεκριμένο' if row.get('prepared_at') else 'Πρόταση καρτέλας' if row.get('suggested_account') else 'Χρειάζεται λογαριασμό'
+            if not row.get('prepared_at') and row.get('suggested_account'):
+                row['nature_group']=row['suggested_group'];row['account_code']=row['suggested_account']
         key,reverse = self._sort
         rows.sort(key=lambda r:r.get(key) or (0 if key.endswith('_minor') else ''),reverse=reverse)
         self._documents = {r['id']:r for r in rows}
@@ -424,6 +431,8 @@ class Desktop:
             self.show_report(job['filename'],job['report'])
 
     def open_detail(self):
+        identity=self.erp.db.execute('SELECT vat,name FROM companies WHERE id=?',(self.company,)).fetchone()
+        self.company_caption.set(identity['name']+' · ΑΦΜ '+identity['vat']+' · Προετοιμασία για EBS')
         selected = self.tree.selection()
         if not selected:
             return
@@ -461,6 +470,10 @@ class Desktop:
         for i,(label,value) in enumerate(details):
             ttk.Label(summary,text=label,style='Subtitle.TLabel').grid(row=i,column=0,sticky='w',padx=12,pady=12)
             ttk.Label(summary,text=value,wraplength=300).grid(row=i,column=1,sticky='w',padx=18,pady=12)
+        def card():
+            from app.ui.counterparties import open_detail
+            return open_detail(self,row['counterparty_id'])
+        ttk.Button(summary,text='Καρτέλα αντισυμβαλλομένου',command=card).grid(row=len(details)+1,column=0,columnspan=2,sticky='w',padx=12,pady=8)
         def rename():
             value=simpledialog.askstring('Επωνυμία αντισυμβαλλομένου','Επωνυμία (το ΑΦΜ παραμένει αμετάβλητο):',initialvalue=row['name'],parent=win)
             if not value:return
@@ -471,14 +484,19 @@ class Desktop:
         ttk.Button(summary,text='Διόρθωση επωνυμίας',command=rename).grid(row=len(details),column=0,columnspan=2,sticky='w',padx=12,pady=8)
         ttk.Label(prepare_tab,text='Ομάδα και λογαριασμός ανά παραστατικό',style='Section.TLabel').pack(anchor='w')
         ttk.Label(prepare_tab,text='Ο ίδιος αντισυμβαλλόμενος μπορεί να έχει αγορές και έξοδα. Επιβεβαίωσε τη φύση της συγκεκριμένης συναλλαγής και τον λογαριασμό του δικού σου σχεδίου.',style='Subtitle.TLabel',wraplength=520).pack(anchor='w',pady=(6,14))
+        from app.application.counterparties import Counterparties
+        cp_card,_=Counterparties(self.erp).detail(self.company,row['counterparty_id'])
+        cp_defaults=cp_card['accounts']
         choices = {'2 · Αγορές':'2','6 · Έξοδα':'6'}
-        group = tk.StringVar(value=next((label for label,value in choices.items() if preparation and value==preparation['nature_group']),''))
-        account = tk.StringVar(value=preparation['account_code'] if preparation else '')
+        group = tk.StringVar(value=next((label for label,value in choices.items() if value==(preparation['nature_group'] if preparation else cp_defaults['preferred_group'])),''))
+        account = tk.StringVar(value=preparation['account_code'] if preparation else cp_defaults['purchases_account'] if cp_defaults['preferred_group']=='2' else cp_defaults['expenses_account'] if cp_defaults['preferred_group']=='6' else '')
         note = tk.StringVar(value=preparation['note'] if preparation else '')
         fields = ttk.Frame(prepare_tab)
         fields.pack(fill='x')
         ttk.Label(fields,text='Ομάδα συναλλαγής').grid(row=0,column=0,sticky='w',pady=8)
-        ttk.Combobox(fields,textvariable=group,values=tuple(choices),state='readonly',width=28).grid(row=0,column=1,sticky='ew',padx=16)
+        group_box=ttk.Combobox(fields,textvariable=group,values=tuple(choices),state='readonly',width=28)
+        group_box.grid(row=0,column=1,sticky='ew',padx=16)
+        group_box.bind('<<ComboboxSelected>>',lambda _:account.set(cp_defaults['purchases_account'] if choices.get(group.get())=='2' else cp_defaults['expenses_account']))
         ttk.Label(fields,text='Λογαριασμός').grid(row=1,column=0,sticky='w',pady=8)
         ttk.Entry(fields,textvariable=account,width=30).grid(row=1,column=1,sticky='ew',padx=16)
         ttk.Label(fields,text='Σημείωση ελέγχου').grid(row=2,column=0,sticky='w',pady=8)
@@ -516,3 +534,7 @@ class Desktop:
     def open_aade(self):
         from app.ui.aade_dialog import open_settings
         return open_settings(self)
+
+    def open_counterparties(self):
+        from app.ui.counterparties import open_register
+        return open_register(self)

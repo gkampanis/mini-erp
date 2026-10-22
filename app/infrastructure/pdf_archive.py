@@ -10,7 +10,7 @@ import urllib.parse
 import urllib.request
 from app.infrastructure.optional_packages import activate
 
-MAX_PDF=25*1024*1024
+MAX_PDF=40*1024*1024
 KINDS={'invoice':'Τιμολόγιο','delivery_note':'Δελτίο αποστολής','other':'Άλλο έγγραφο'}
 
 
@@ -25,7 +25,7 @@ def renderer_available():
 
 def validate_pdf(data):
     if not data or len(data)>MAX_PDF or not data.lstrip().startswith(b'%PDF-'):
-        raise ValueError('Απαιτείται PDF έως 25 MB')
+        raise ValueError('Απαιτείται PDF έως 40 MB')
     return hashlib.sha256(data).hexdigest()
 
 
@@ -82,14 +82,14 @@ def download(url,cancel=None):
     try:
         with opener.open(urllib.request.Request(url,headers={'Accept':'application/pdf'}),timeout=20) as response:
             length=response.headers.get('Content-Length')
-            if length and int(length)>MAX_PDF:raise ValueError('Το PDF υπερβαίνει τα 25 MB')
+            if length and int(length)>MAX_PDF:raise ValueError('Το PDF υπερβαίνει τα 40 MB')
             result=bytearray()
             while True:
                 if cancel is not None and cancel.is_set():raise ValueError('Η λήψη ακυρώθηκε')
                 chunk=response.read(65536)
                 if not chunk:break
                 result.extend(chunk)
-                if len(result)>MAX_PDF:raise ValueError('Το PDF υπερβαίνει τα 25 MB')
+                if len(result)>MAX_PDF:raise ValueError('Το PDF υπερβαίνει τα 40 MB')
             data=bytes(result)
             validate_pdf(data)
             # Signed URL query strings may contain credentials: never persist them.

@@ -44,5 +44,10 @@ class StartupTests(unittest.TestCase):
                 self.assertFalse(Path(args[args.index('--data-dir')+1]).exists())
             self.assertIn('Launcher check passed.',next(Path(temp).glob('startup-*.log')).read_text(encoding='utf8'))
 
+    def test_normal_startup_does_not_reseed_synthetic_documents(self):
+        args=START_DEMO.child_arguments(Path('existing-data'),False)
+        self.assertEqual(args[args.index('-m')+1],'app')
+        self.assertNotIn('app.demo',args)
+
 
 if __name__=='__main__':unittest.main()

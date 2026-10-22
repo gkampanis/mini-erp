@@ -131,7 +131,7 @@ class SliceTests(unittest.TestCase):
             self.assertEqual(restored.execute('SELECT count(*) FROM documents').fetchone()[0],2)
         self.erp.close()
         self.erp = ERP(self.root/'data')
-        self.assertEqual([r[0] for r in self.erp.db.execute('SELECT version FROM schema_migrations ORDER BY version')], ['001_initial.sql', '002_preparation.sql', '003_rounding.sql', '004_workspace.sql'])
+        self.assertEqual([r[0] for r in self.erp.db.execute('SELECT version FROM schema_migrations ORDER BY version')], ['001_initial.sql', '002_preparation.sql', '003_rounding.sql', '004_workspace.sql', '005_workflow.sql', '006_mydata_read.sql', '007_counterparty_cards.sql', '008_account_defaults.sql', '009_registry.sql'])
 
 
 class ProcessCrashTests(unittest.TestCase):

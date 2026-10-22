@@ -1,0 +1,5 @@
+CREATE TABLE mydata_syncs(id INTEGER PRIMARY KEY,company_id INTEGER NOT NULL REFERENCES companies(id),environment TEXT NOT NULL,method TEXT NOT NULL,date_from TEXT NOT NULL,date_to TEXT NOT NULL,report TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE mydata_pages(id INTEGER PRIMARY KEY,sync_id INTEGER NOT NULL REFERENCES mydata_syncs(id),sha256 TEXT NOT NULL,storage_path TEXT NOT NULL,UNIQUE(sync_id,sha256));
+CREATE TABLE mydata_records(id INTEGER PRIMARY KEY,company_id INTEGER NOT NULL REFERENCES companies(id),environment TEXT NOT NULL,mark TEXT NOT NULL,document_id INTEGER REFERENCES documents(id),record_json TEXT NOT NULL,match_status TEXT NOT NULL,last_sync INTEGER NOT NULL REFERENCES mydata_syncs(id),UNIQUE(company_id,environment,mark));
+CREATE TABLE provider_attempts(id INTEGER PRIMARY KEY,company_id INTEGER NOT NULL REFERENCES companies(id),environment TEXT NOT NULL,mark TEXT NOT NULL,state TEXT NOT NULL,source_hash TEXT NOT NULL,path TEXT,sha256 TEXT,byte_count INTEGER,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX provider_latest ON provider_attempts(company_id,environment,mark,id);

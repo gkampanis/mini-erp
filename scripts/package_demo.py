@@ -14,7 +14,7 @@ from tests.fixtures import demos
 def build(output):
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    files = [ROOT / name for name in ('START_DEMO.cmd','ANOIGMA_MINI_ERP.bat','START_DEMO.py','TRY_DEMO.md','README.md','NOTICE.md','AGENTS.md','requirements-pdf.txt','requirements-rpa.txt')]
+    files = [ROOT / name for name in ('START_DEMO.cmd','ANOIGMA_MINI_ERP.bat','START_DEMO.py','TRY_DEMO.md','README.md','NOTICE.md','AGENTS.md','requirements-pdf.txt','requirements-rpa.txt','requirements-browser.txt')]
     for directory, extensions in [('app',{'.py'}),('migrations',{'.sql'}),('tests',{'.py'}),('scripts',{'.py'}),('docs',{'.md','.png'})]:
         files.extend(p for p in (ROOT/directory).rglob('*') if p.is_file() and p.suffix in extensions and '__pycache__' not in p.parts)
     with tempfile.TemporaryDirectory() as temp:

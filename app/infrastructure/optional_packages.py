@@ -18,7 +18,7 @@ def activate():
 
 
 def install(feature):
-    if feature not in ('pdf','rpa'):raise ValueError('Άγνωστη προαιρετική δυνατότητα')
+    if feature not in ('pdf','rpa','browser'):raise ValueError('Άγνωστη προαιρετική δυνατότητα')
     path=directory();path.mkdir(parents=True,exist_ok=True)
     requirement=Path(__file__).resolve().parents[2]/('requirements-'+feature+'.txt')
     command=[sys.executable,'-m','pip','install','--disable-pip-version-check','--target',str(path),'--upgrade','--requirement',str(requirement)]
@@ -28,4 +28,8 @@ def install(feature):
         # Do not dump process environment, credentials or arbitrary package-manager logs.
         raise RuntimeError('Δεν ολοκληρώθηκε η εγκατάσταση προβολής/adapter. Έλεγξε ότι υπάρχει pip και πρόσβαση στο PyPI. Η εφαρμογή και τα παραστατικά διατηρήθηκαν.')
     activate()
+    if feature=='browser':
+        environment=os.environ.copy();environment['PYTHONPATH']=str(path)+os.pathsep+environment.get('PYTHONPATH','')
+        browser=subprocess.run([sys.executable,'-m','playwright','install','chromium'],env=environment,capture_output=True,text=True,timeout=300)
+        if browser.returncode:raise RuntimeError('Δεν εγκαταστάθηκε ο Chromium. Η άμεση λήψη PDF παραμένει διαθέσιμη.')
     return True

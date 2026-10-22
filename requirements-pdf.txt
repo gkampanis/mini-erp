@@ -1,3 +1,4 @@
 # Optional inline PDF viewer; verified package versions from PyPI metadata.
 pypdfium2==5.14.0
 Pillow==13.0.0
+pypdf==6.10.0

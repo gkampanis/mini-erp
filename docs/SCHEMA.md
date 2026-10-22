@@ -54,3 +54,12 @@ erDiagram
 
 Οι εφαρμογικές υπηρεσίες ελέγχουν εταιρεία πριν επιστρέψουν PDF ή ουρά.
 Η SQLite δεν αποτελεί σύστημα εξουσιοδότησης πολλαπλών χρηστών ή κρυπτογράφηση.
+
+## Συνδεδεμένη ροή 005–009
+
+005: persisted execution/profile/need-new/expected-TED και ebs_profiles με
+signature/pilot evidence. 006: mydata_syncs/pages/records και provider_attempts,
+χωριστά ανά εταιρεία και περιβάλλον. 007: σταθεροί μοναδικοί κωδικοί καρτελών και
+πολλαπλοί ρόλοι. 008: εγκεκριμένες προεπιλογές αγορών/εξόδων ανά καρτέλα,
+χωρίς μεταβολή προηγούμενων document_preparations. 009: εφαρμοσμένα στοιχεία
+Μητρώου χωρίς αποθήκευση SOAP credential/request payload.

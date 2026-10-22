@@ -33,3 +33,14 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Συγκεκριμένο user-owned myInvoices v0.13.0
+
+Κατόπιν ρητής υπόδειξης του χρήστη επιλέχθηκαν τα modules στο
+`app/infrastructure/providers/` από το δικό του `gkampanis/legend`, commit
+`36a1539c71102f89ecfdd26bf25283d293f86c8d`. Πρόκειται για διαφορετικό κώδικα από
+το παλαιότερο File Organizer HEAD που αναφέρεται παραπάνω. Η αναφορά MIT του
+File Organizer δεν αποδίδεται αυτομάτως σε όλο το myInvoices. Δεν βρέθηκε
+ξεχωριστό LICENSE στο συγκεκριμένο root. Η επαναχρησιμοποίηση γίνεται στο
+έργο του ίδιου χρήστη με την εξουσιοδότησή του. Δεν περιλαμβάνονται δεδομένα,
+credentials, PDFs πελατών ή profiles. Βλέπε docs/CONNECTED_WORKFLOW.md.

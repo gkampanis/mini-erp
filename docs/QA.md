@@ -82,3 +82,33 @@ vault με injected memory adapter χωρίς μυστικά στο SQLite, PDF 
 Η μελέτη επίσημων τρεχουσών AADE προδιαγραφών παραμένει περιορισμένη από proxy
 403· δεν δηλώνεται ελεγμένη ζωντανή σύνδεση. Τα πεδία κωδικών δεν είναι connector.
 Για πλήρη tests χρειάζονται οι pinned PDF εξαρτήσεις του requirements-pdf.txt.
+
+## Ενιαία ροή / καρτέλες / API / Μητρώο — 22/10/2026
+
+Η τελική εκτέλεση του delivery gate πέρασε 68 backend/tool tests και 14 GUI
+regressions τόσο στον source όσο και στο αποσυμπιεσμένο ZIP, μαζί με smoke,
+startup, migration/integrity, archive allowlist/hash και demo readback.
+Περιλαμβάνονται πραγματικές δοκιμές Chromium σε routed συνθετικές σελίδες:
+δυναμικό embedded PDF με byte-for-byte διατήρηση, αναγνωρίσιμο HTML print και
+απόρριψη challenge. Δεν έγιναν αιτήματα σε πραγματικούς παρόχους.
+
+Η ενιαία ροή ελέγχει ότι μία εισαγωγή εμφανίζει αμέσως τα ίδια document IDs,
+καρτέλες και προεπιλογές επαναχρησιμοποιούνται χωρίς αυτόματη έγκριση,
+συμφωνία ΑΑΔΕ δεν διπλασιάζει documents, PDF συνδέεται στο ίδιο document,
+μαζικές εγκρίσεις/audit κάνουν rollback μαζί και τα native-like fake Save/New
+events διατηρούν σειρά και παύση στα 40 χωρίς replay. Οι SOAP registry tests
+ελέγχουν το τεκμηριωμένο συμβόλαιο και την απουσία μυστικών από SQLite/audit.
+
+Ελέγχθηκαν πραγματικά screenshots και τα όρια βασικών ενεργειών στα 1240 και
+960 pixels. Βρέθηκε και διορθώθηκε αποκομμένο κουμπί αποθήκευσης καρτέλας.
+Οι [ενιαία λίστα](screenshots/connected-main.png) και
+[καρτέλα](screenshots/counterparty-card.png) περιέχουν μόνο συνθετικά στοιχεία.
+Η κανονική εκκίνηση δεν ξανασπέρνει demo παραστατικά και διατηρεί την υπάρχουσα
+βάση. Τα αρχικά 13 αρχεία EBS επαληθεύτηκαν ξανά byte-for-byte.
+
+Ακόμη NOT_RUN: native Windows Credential Manager/Win32/hotkeys, πραγματικά
+credentials/εξουσιοδοτήσεις ΑΑΔΕ και Μητρώου, πραγματικές σελίδες παρόχων και
+πραγματική EBS αποθήκευση/λογιστικό αποτέλεσμα. Το pipeline δεν τα πιστοποιεί.
+Η πραγματική φόρμα αγορών ομάδας 2 είναι ανοιχτή διευκρίνιση από τον χρήστη.
+
+Προστέθηκε ξεχωριστή αναβάθμιση από πραγματικό synthetic schema 004: διατηρήθηκαν documents, raw rows, audit, approvals, PDF bytes/metadata και προϋπάρχον RPA history με επιτυχή FK/integrity checks.

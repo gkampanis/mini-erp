@@ -352,7 +352,7 @@ class DesktopRegressions(unittest.TestCase):
         self.app.erp.credential_store=MemoryVault()
         win=self.app.open_aade()
         entries=[w for w in widgets(win) if isinstance(w,ttk.Entry) and not isinstance(w,ttk.Combobox)]
-        username,key=entries
+        username,key=win.api_username_entry,win.api_key_entry
         self.assertTrue(key.cget('show'))
         username.insert(0,'synthetic-ui-user');key.insert(0,'synthetic-ui-key')
         self.button(win,'Αποθήκευση κωδικών').invoke()
@@ -373,6 +373,48 @@ class DesktopRegressions(unittest.TestCase):
         meta,items=panel.rpa.items(self.app.company,panel.job)
         self.assertEqual(meta['status'],'completed');self.assertEqual(items[0]['status'],'simulated')
         self.assertIn('Προσομοίωση',panel.state.get())
+
+    def test_one_excel_register_card_and_bulk_accounts_share_document_ids(self):
+        self.import_fixture('separate.xlsx')
+        ids=set(self.app.tree.get_children())
+        self.assertEqual(len(ids),2)
+        self.assertNotIn('RPA → EBS',[self.app.notebook.tab(t,'text') for t in self.app.notebook.tabs()])
+        register=self.app.open_counterparties();self.assertEqual(len(register.card_tree.get_children()),2)
+        register.destroy()
+        from app.ui.counterparties import open_detail
+        cp=self.app.erp.search(self.app.company,'000000001')[0]['counterparty_id']
+        card=open_detail(self.app,cp)
+        card.account_fields[0].set('20.01');card.account_fields[1].set('64.03');card.account_fields[2].set('6 · Έξοδα')
+        with patch('app.ui.counterparties.messagebox.askyesno',return_value=True):self.button(card,'Αποθήκευση καρτέλας').invoke()
+        self.app.query.set('000000001');self.app.refresh()
+        document=int(self.app.tree.get_children()[0])
+        self.assertEqual(self.app._documents[document]['account_code'],'64.03')
+        self.assertEqual(self.app._documents[document]['preparation_state'],'Πρόταση καρτέλας')
+        self.assertIsNone(self.app.erp.preparation(self.app.company,document))
+        accounts=self.app.rpa_panel.accounts()
+        fields=[w for w in widgets(accounts) if isinstance(w,ttk.Entry) and not isinstance(w,ttk.Combobox)]
+        self.assertIn('64.03',[w.get() for w in fields])
+        with patch('app.ui.rpa_panel.messagebox.askyesno',return_value=True):self.button(accounts,'Έγκριση λογαριασμών').invoke()
+        self.assertEqual(self.app.erp.preparation(self.app.company,document)['account_code'],'64.03')
+        self.assertEqual(self.count('documents'),2)
+        self.app.reset_filters();self.assertEqual(set(self.app.tree.get_children()),ids)
+
+    def test_aade_read_updates_same_excel_row_and_shows_match(self):
+        from tests.test_workspace import MemoryVault
+        from tests.test_workflow import response
+        from app.infrastructure.aade.client import parsed_page
+        self.import_fixture('separate.xlsx');document=self.app.erp.search(self.app.company,'000000001')[0]['id']
+        with self.app.erp.db:self.app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(self.app.company,))
+        self.app.erp.credential_store=MemoryVault()
+        self.app.erp.save_mydata_credentials(self.app.company,'production','synthetic-user','synthetic-key',confirmed=True)
+        win=self.app.open_aade();win.period_vars[0].set('2026-10-01');win.period_vars[1].set('2026-10-31');win.kind_var.set('Ληφθέντα')
+        raw=response(receiver='000000008')
+        with patch('app.infrastructure.aade.client.Client.fetch',return_value=[(raw,parsed_page(raw))]) as fetch:
+            win.fetch_aade();wait(self.root,lambda:not self.app.busy);fetch.assert_called_once()
+        self.assertEqual(len(win.records_tree.get_children()),1)
+        self.assertIn('Συμφωνεί με Excel',win.records_tree.item(win.records_tree.get_children()[0],'values'))
+        self.assertEqual(self.app._documents[document]['aade_state'],'Συμφωνεί')
+        self.assertEqual(self.count('documents'),2)
 
 
 if __name__ == '__main__':

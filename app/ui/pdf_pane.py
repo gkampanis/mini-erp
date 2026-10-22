@@ -117,3 +117,31 @@ class PDFPane:
         def done(_):
             if self.alive():self.setup.pack_forget();self.show()
         self.owner.run_worker(lambda:install('pdf'),done)
+
+
+def open_saved_pdf(owner,path,digest):
+    """View a provider artifact, including AADE documents absent from the Excel."""
+    import hashlib
+    from pathlib import Path
+    win=tk.Toplevel(owner.root);win.title('PDF παρόχου · '+Path(path).name);win.geometry('800x820')
+    frame=ttk.Frame(win,padding=12);frame.pack(fill='both',expand=True)
+    state=tk.StringVar(value='Φόρτωση PDF…');ttk.Label(frame,textvariable=state).pack(anchor='w')
+    controls=ttk.Frame(frame);controls.pack(fill='x',pady=8)
+    canvas=tk.Canvas(frame,background='#e6ecf4');canvas.pack(fill='both',expand=True)
+    current={'page':0,'total':1,'image':None}
+    def show(offset=0):
+        if owner.busy:return
+        page=current['page']+offset
+        if page<0 or page>=current['total']:return
+        def execute():
+            file=Path(path)
+            if not file.is_file() or file.is_symlink() or hashlib.sha256(file.read_bytes()).hexdigest()!=digest:raise ValueError('Το PDF λείπει ή έχει αλλάξει. Δεν προβλήθηκε ως το αρχειοθετημένο αρχείο.')
+            return render(file,page,max(200,canvas.winfo_width()-20),max(200,canvas.winfo_height()-20))
+        def done(result):
+            if not win.winfo_exists():return
+            current['page']=page;current['total']=result['pages'];current['image']=tk.PhotoImage(master=canvas,data=result['ppm'],format='PPM')
+            canvas.delete('all');canvas.create_image(8,8,image=current['image'],anchor='nw');state.set(f"Σελίδα {page+1}/{result['pages']} · Αρχειοθετημένο PDF, χωρίς ανεξάρτητη λογιστική επαλήθευση")
+        owner.run_worker(execute,done)
+    ttk.Button(controls,text='‹ Σελίδα',command=lambda:show(-1)).pack(side='left')
+    ttk.Button(controls,text='Σελίδα ›',command=lambda:show(1)).pack(side='left',padx=6)
+    win.update_idletasks();show();return win
