@@ -48,3 +48,13 @@ py -3.12 -m app --data-dir C:\MiniERP-data
 Το νέο repository είναι ανεξάρτητο από τον EBS Agent. `main` για baseline και `feature/*` για λειτουργίες. Τοπικά tags μόνο για ελεγμένα releases. Κανένα push ή δημόσια διάθεση χωρίς έγκριση και έλεγχο άδειας/δεδομένων.
 
 Στο παρόν cloud χρησιμοποιήστε `/usr/bin/python3 -m app.demo` με διαθέσιμο `DISPLAY` για σωστή απόδοση ελληνικών. Δείτε επίσης το [schema roadmap](docs/SCHEMA.md) και τα [screenshots της εκτελεσμένης εφαρμογής](docs/screenshots/documents.png).
+
+## Έλεγχος πριν από ZIP
+
+Το [Mini ERP Delivery Check](docs/ECC_DELIVERY.md), εμπνευσμένο από το ECC, εκτελεί τους ελέγχους και δοκιμάζει το ίδιο το συσκευασμένο πρόγραμμα πριν παραγάγει ελεγμένο ZIP:
+
+```powershell
+py -3.12 scripts\verify_delivery.py --require-windows
+```
+
+Στο cloud: `DISPLAY=:99 /usr/bin/python3 scripts/verify_delivery.py`. Τα αποτελέσματα Linux δεν χαρακτηρίζονται ως Windows acceptance. Το τελικό ZIP περιέχει verification report και έχει εξωτερικό SHA-256. Αποτυχία υποχρεωτικού ελέγχου μπλοκάρει τη νέα παράδοση. Δεν απαιτούνται πρόσθετα runtime packages για την εφαρμογή.

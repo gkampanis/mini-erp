@@ -52,3 +52,9 @@ DISPLAY=:99 XDG_CACHE_HOME=/workspace/cloud-tools/cache /usr/bin/python3 -m test
 Νέα πραγματικά screenshots από συνθετικά δεδομένα: [νέα λίστα](screenshots/documents.png), [προετοιμασία](screenshots/preparation.png), [έλεγχοι εισαγωγής](screenshots/import-reviews.png). Οι δύο εμφανιζόμενοι λογαριασμοί στα screenshots είναι συνθετικά παραδείγματα, όχι επικυρωμένο σχέδιο EBS.
 
 Μετά τις αλλαγές επαληθεύτηκαν ξανά byte-for-byte και τα 13 αρχεία του αρχικού EBS archive. Δεν έγινε live EBS/Windows acceptance, πραγματική καταχώριση, λήψη PDF ή myDATA σύνδεση. Η τοπική προετοιμασία δεν αλλάζει αυτή τη διάκριση.
+
+## Delivery gate εμπνευσμένο από ECC — 22/10/2026
+
+Η συσκευασία περνά πλέον από το [Delivery Check](ECC_DELIVERY.md). Προστέθηκαν 6 έλεγχοι του ίδιου του gate: πραγματικό exit/timeout, μηδενικά ή skipped tests, απουσία φρέσκων αποτελεσμάτων, syntax/επικίνδυνα patterns, package manifest/allowlist και μη αντικατάσταση artifact μετά αποτυχία. Το backend suite περιέχει πλέον 26 tests, ενώ οι GUI regressions παραμένουν 9. Τα suites εκτελούνται ξανά και από το αποσυμπιεσμένο υποψήφιο ZIP.
+
+Η cloud εκτέλεση έλεγξε και το demo/readback από το πακέτο. Αίτημα `--require-windows` στο Linux επέστρεψε αποτυχία χωρίς Windows ZIP, όπως απαιτείται. Οι Windows CMD launcher αλλαγές παραμένουν μη δοκιμασμένες σε πραγματικά Windows μέχρι να εκτελεστεί εκεί το gate. Δεν γίνεται ισχυρισμός coverage percentage ή πλήρους security audit από στοχευμένο static check.

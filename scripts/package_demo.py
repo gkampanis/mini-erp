@@ -14,8 +14,8 @@ from tests.fixtures import demos
 def build(output):
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    files = [ROOT / name for name in ('START_DEMO.cmd','TRY_DEMO.md','README.md','NOTICE.md')]
-    for directory, extensions in [('app',{'.py'}),('migrations',{'.sql'}),('tests',{'.py'}),('docs',{'.md','.png'})]:
+    files = [ROOT / name for name in ('START_DEMO.cmd','TRY_DEMO.md','README.md','NOTICE.md','AGENTS.md')]
+    for directory, extensions in [('app',{'.py'}),('migrations',{'.sql'}),('tests',{'.py'}),('scripts',{'.py'}),('docs',{'.md','.png'})]:
         files.extend(p for p in (ROOT/directory).rglob('*') if p.is_file() and p.suffix in extensions and '__pycache__' not in p.parts)
     with tempfile.TemporaryDirectory() as temp:
         samples = Path(temp)/'SampleExcel'
@@ -36,6 +36,6 @@ def build(output):
 
 
 if __name__=='__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--output',type=Path,default=ROOT/'.local/releases/MiniERP-Demo.zip')
-    build(parser.parse_args().output)
+    # Public packaging entrypoint always passes through the delivery gate.
+    from scripts.verify_delivery import main
+    sys.exit(main())

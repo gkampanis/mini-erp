@@ -22,9 +22,11 @@ if not defined MINIERP_PY (
     echo Python 3.12 or newer with Tcl/Tk is required.
     echo Install Python from https://www.python.org/downloads/windows/
     echo Enable the Python launcher and Tcl/Tk options, then try again.
+    if /I "%~1"=="--check" exit /b 1
     pause
     exit /b 1
 )
+if /I "%~1"=="--check" goto verify_launcher
 if not defined LOCALAPPDATA (
     echo Windows LOCALAPPDATA is not available. Demo was not started.
     pause
@@ -40,3 +42,13 @@ if errorlevel 1 (
     exit /b 1
 )
 endlocal
+exit /b 0
+
+:verify_launcher
+if not defined TEMP exit /b 1
+set "MINIERP_CHECK_DIR=%TEMP%\MiniERP-Check-%RANDOM%-%RANDOM%"
+if exist "%MINIERP_CHECK_DIR%" exit /b 1
+%MINIERP_PY% -m app.demo --prepare-only --data-dir "%MINIERP_CHECK_DIR%"
+set "MINIERP_CHECK_EXIT=%ERRORLEVEL%"
+if exist "%MINIERP_CHECK_DIR%\SYNTHETIC_DEMO_ONLY" rmdir /s /q "%MINIERP_CHECK_DIR%"
+exit /b %MINIERP_CHECK_EXIT%
