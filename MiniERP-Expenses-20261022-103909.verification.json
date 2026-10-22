@@ -1,0 +1,236 @@
+{
+  "run_id": "20261022T103909Z-3bf674e3",
+  "status": "PASSED",
+  "platform": "Linux-6.18.55-x86_64-with-glibc2.41",
+  "python": "3.13.5",
+  "artifact": {
+    "path": "/workspace/mini-erp/.local/releases/MiniERP-Expenses-Only.zip",
+    "sha256": "f9c64a7579969dbf5dd6fe777b04235f4f582137bb1fc6feded95e069f2639d1",
+    "size": 706385
+  },
+  "checks": [
+    {
+      "name": "static_checks",
+      "status": "PASSED",
+      "details": {
+        "python_files": 67,
+        "scope": "Syntax and targeted dangerous-call/credential-literal checks; not a full security audit"
+      }
+    },
+    {
+      "name": "desktop_display",
+      "status": "PASSED"
+    },
+    {
+      "name": "source_launcher_python",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 0.215,
+      "log": "/workspace/mini-erp/.local/verification/20261022T103909Z-3bf674e3/source_launcher_python.log"
+    },
+    {
+      "name": "source_tests",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 3.931,
+      "log": "/workspace/mini-erp/.local/verification/20261022T103909Z-3bf674e3/source_tests.log",
+      "counts": {
+        "tests": 70,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      }
+    },
+    {
+      "name": "source_gui",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 4.181,
+      "log": "/workspace/mini-erp/.local/verification/20261022T103909Z-3bf674e3/source_gui.log",
+      "counts": {
+        "tests": 15,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      }
+    },
+    {
+      "name": "source_gui_smoke",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 0.916,
+      "log": "/workspace/mini-erp/.local/verification/20261022T103909Z-3bf674e3/source_gui_smoke.log"
+    },
+    {
+      "name": "package_build",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 0.115,
+      "log": "/workspace/mini-erp/.local/verification/20261022T103909Z-3bf674e3/package_build.log"
+    },
+    {
+      "name": "archive_integrity",
+      "status": "PASSED",
+      "details": {
+        "entries": 104,
+        "crc": "passed",
+        "local_data": "excluded"
+      }
+    },
+    {
+      "name": "package_launcher_python",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 0.215,
+      "log": "/workspace/mini-erp/.local/verification/20261022T103909Z-3bf674e3/package_launcher_python.log"
+    },
+    {
+      "name": "package_tests",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 3.732,
+      "log": "/workspace/mini-erp/.local/verification/20261022T103909Z-3bf674e3/package_tests.log",
+      "counts": {
+        "tests": 70,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      }
+    },
+    {
+      "name": "package_gui",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 3.98,
+      "log": "/workspace/mini-erp/.local/verification/20261022T103909Z-3bf674e3/package_gui.log",
+      "counts": {
+        "tests": 15,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      }
+    },
+    {
+      "name": "package_gui_smoke",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 1.022,
+      "log": "/workspace/mini-erp/.local/verification/20261022T103909Z-3bf674e3/package_gui_smoke.log"
+    },
+    {
+      "name": "demo_initialization",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 0.168,
+      "log": "/workspace/mini-erp/.local/verification/20261022T103909Z-3bf674e3/demo_initialization.log"
+    },
+    {
+      "name": "demo_readback",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 0.114,
+      "log": "/workspace/mini-erp/.local/verification/20261022T103909Z-3bf674e3/demo_readback.log"
+    }
+  ],
+  "windows_desktop": "NOT_RUN",
+  "windows_launcher": "NOT_RUN",
+  "ebs_live": "NOT_RUN",
+  "pdf_download": "SYNTHETIC_TESTS_ONLY",
+  "scope": "Synthetic source demo only; not a certified Windows EXE or EBS integration",
+  "source_code_sha256": "1f002792ed8a93dab775723c9c0027962099d075e192dad67d142af007b2bcbc",
+  "source_files": {
+    "ANOIGMA_MINI_ERP.bat": "e48cc8f28bf4d8742785febb88054e7a1da4cb286ecad2bd86d79beb5cfe2b15",
+    "START_DEMO.cmd": "22f5806878c2ac8791327e89bd492a884f36b095df6aee0c4575dc1be9fb5bb7",
+    "START_DEMO.py": "b5c194ddde4aa86098ad4467fe240472033080da0917089ac5bc8efd43d98480",
+    "app/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app/__main__.py": "f17e5f4e67f8a4d1c8c0663e981c34c84fe7b02100d0dc691aa9c93bb2097f55",
+    "app/application/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app/application/account_defaults.py": "4fb333580d68bf422f3153d9f3841f68a1769dacb6dfa3d1f0d0fe3a68eac33b",
+    "app/application/counterparties.py": "77f08b80825b94cc96cee2e620ec23286ebb9891ddead2ee8b266d01eb0f4971",
+    "app/application/mydata.py": "4f93cfcb4e31bb325a58fd3323357d0d765bf40efb412d6f27c262e0973a891d",
+    "app/application/provider_pdf.py": "4e8a4bc4bd9edf749341fb7453dc8267f80d20b6d4fcbea163bdfbb3911cf0b8",
+    "app/application/registry.py": "5af6480d8753fd3f6096d7854db3dbc67465107529084ea0f7970931a583ea24",
+    "app/application/rpa.py": "3c16e077d65eee0f76c9ebc00cece3b2e17a2677eccf8175e2bc3faa70107331",
+    "app/application/service.py": "fc54b746224bb225bd681522dd0ad77316f62caa949df2ff56ec1607385c22e2",
+    "app/application/workspace.py": "aa9b5c190842b12e9f201973c9b9eb30d07c06b28c7614ea6b506029f069eaa8",
+    "app/demo.py": "c7cd4ccc1c2c702878593727bc5d05f9090efaee1f566cd140d70b756f6c6283",
+    "app/domain/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app/domain/preparation.py": "48fdb19b2f9ea0fcc498dc18962927baa61f5a82a657b0f33793151f5abfc36d",
+    "app/domain/validation.py": "02d31d72ef35c9d89fbb1db48643dba4f4d9d5882c4dc51351ada7180f26cbdd",
+    "app/infrastructure/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app/infrastructure/aade/__init__.py": "0ed48673024c2ee909bb7623ca6927510b2e05c7f6e0028affb5d725aee591f8",
+    "app/infrastructure/aade/client.py": "ff911c68b2202414f877e2e8a70bab4f6b648009ef397a28ba3976fb5bf99e0b",
+    "app/infrastructure/aade/credentials.py": "ed76cf2b8fd52906b4eefbb6f6157d519d9d7f6e82cfc7afe17679a43a844cd7",
+    "app/infrastructure/aade/registry.py": "505f443fda5a54cd28b836efb9603b959287058d24d506375773ac8977f648f5",
+    "app/infrastructure/database.py": "ff75742c5b3e3ee637d2895387d05b1fb37cadcad3db87caf180acce15ff9a62",
+    "app/infrastructure/ebs_adapter/__init__.py": "337fd86263607dd29e591965c9f25d1192396973f204b72a0d9beffbc7ca327c",
+    "app/infrastructure/ebs_adapter/adapter.py": "62f706ef6e4a1b1728105218b7c678b53133c4f5f6552deca6550bbf7d35acf4",
+    "app/infrastructure/ebs_adapter/session.py": "dacea22647fd8a7698e9ee407ba529a661e89a4e3a0e4a746069f629f0bf8d0e",
+    "app/infrastructure/importers/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app/infrastructure/importers/excel.py": "5a606c36c78437554f63bfd6784a6226d57d24e911c4e983daa042ef22320056",
+    "app/infrastructure/importers/legacy_primitives.py": "4ed5e0f5b7450446b2dc86db4dd2b8b10ff5693dac8794684b20280d8bf62011",
+    "app/infrastructure/optional_packages.py": "42b7dd6c9a0e75079aa1fad4d7eb7f253a9f7152b4fbc6f9c2cc83cd68fd0c62",
+    "app/infrastructure/pdf_archive.py": "ed3b41b9b06e0d9d13ae57a0ab929302348d5572aaf1d2757a4ef099107017f1",
+    "app/infrastructure/providers/__init__.py": "3cc9cc8baa04204bfb81473127600b73ea31b817017e16ea75b324dc9aa6c4fe",
+    "app/infrastructure/providers/automatic_downloads.py": "5a91d8088a147f9e534897b00f0d18d7eb7fb3ec369c8a474ca91a37d5989a53",
+    "app/infrastructure/providers/batch.py": "c77987d16275d737355e5fd9509ee40686ac9c5739450fb837ac30b5f98f3f4c",
+    "app/infrastructure/providers/browser_downloads.py": "c1732ca328efb054425bfd4db750b4f4e7c456daf6c49dcaebab2c793213cece",
+    "app/infrastructure/providers/browser_recovery.py": "604211dd74f7a6f4ddd8b7ebea25a5472af37d1482d04ab640119057e0b9aea7",
+    "app/infrastructure/providers/local_files.py": "2ed240d7ffa5c4605c3e5ae240fa0e0c90d0cd0cb61a85a012fb457f5b9d62e0",
+    "app/infrastructure/providers/models.py": "72088b45506fec22d3ce55179e9a502ab3fe1b79266f91450460eaaae28867ae",
+    "app/infrastructure/providers/pdf_downloads.py": "80475af62f3efc4dbf4d16b569f3075dc872c8d554bad9195b3a24af84a89be9",
+    "app/infrastructure/providers/print_fallback.py": "e2480859584cac0e388aaa1fd0d6f8264c701448b438c02d422cbb483f91e77e",
+    "app/infrastructure/providers/provider_documents.py": "38cc5beefcd709a564bb8c4272b5d1976fc0f6782db5a0fdc116e72d7b10c110",
+    "app/infrastructure/providers/xml_parser.py": "4921ef98a242de9ab97b95a0b70f532e0eb87d2c5372af32ee0f4191aaad1073",
+    "app/infrastructure/repository.py": "5fd7fa4543dd8ab9de8eed00191bdc70b097858afdfdda6b8b70ff2bc6b3c468",
+    "app/ui/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app/ui/aade_dialog.py": "05da4fbc73eded7738aa0823505e7398b4d22df04e289ff062ea34eb7d09e054",
+    "app/ui/counterparties.py": "4aa5245a369c138ca937607053365f59e3cd7f91cf0b337950b8555aba1d899c",
+    "app/ui/desktop.py": "fd03cd0df8d431101a96904b43560330354594329d6c01eacf4d3f465b7c0ce4",
+    "app/ui/dpi.py": "b197397ba070ea6bb02802b228c6f2376190e39a869e129396a1d6a512cafcab",
+    "app/ui/pdf_pane.py": "211a1245d1ff2f8efddd4e9b04be133e30fd02be52f12d24fad94338d07cb90e",
+    "app/ui/registry.py": "e9b4404182eff32e6e02199ba756a6b5fde6a3fce12b08db9235f652ee2335e5",
+    "app/ui/rpa_panel.py": "a3ac407f0547824fc39786b2a03c6de7a072e5cdb1d52c70cef19d6643b72ff5",
+    "app/ui/theme.py": "a438488fff9770529272486718a7ef85ecf2fb9e24bc3979aef9c8162d6cd100",
+    "migrations/001_initial.sql": "9a97053499ed0fbd57697436d97498914373a907a0655c5702e916431bcc0265",
+    "migrations/002_preparation.sql": "b8308f2e0a0e16fe39bcbe99178d9e1b9033c141050bd39512603873166b6bdd",
+    "migrations/003_rounding.sql": "f250e9db7952c1b31f150f8925735cbc54e11254ff10ce858d18e8f323fa1ed8",
+    "migrations/004_workspace.sql": "983a8a0ece34832ec3ff2bcac24e5d1e1c68dfed4cb918d7131dbc09e73d0c0d",
+    "migrations/005_workflow.sql": "8ea0d8af841af7baee47585ae30e3a97e8e3feda7697342a2ea5c01d35d90144",
+    "migrations/006_mydata_read.sql": "051336080f77a7e433e31ca3857bc5801e4f665656b75cddedb5273440168cca",
+    "migrations/007_counterparty_cards.sql": "f2b3eb8e65fa5afc332e310cec977d20260cebe24416b037d8a7d38a35f2061e",
+    "migrations/008_account_defaults.sql": "531a486db5986f5b6ac23b79a2b8d1f95bb11d6298f5e4cdabce3cf846cfa60a",
+    "migrations/009_registry.sql": "a6ec30b2e4c5ec2866157546616e2ebe4478b990189cac0ca3c020fb4d21bc0e",
+    "requirements-browser.txt": "38dc7daa38fa21f968aca78c4fde5c402b2eac16b3ea4545fcc4ec5e17d9051b",
+    "requirements-pdf.txt": "456cfe67346affa4537b421b6d091c92abfb3e21648dd9857b35d2313a0adc75",
+    "requirements-rpa.txt": "d2255bdd601aae4085562b6840be70ee36323c1d65dca5e6a7845563c86c9e22",
+    "scripts/package_demo.py": "91185aeaee28c5f7c5b441fab5dd57b01f8f538dcab40621e062687857c00535",
+    "scripts/run_checks.py": "c505a75af7c67ac1708a408bc4a8207d6c44f5981020d42f0c572654ffd10acf",
+    "scripts/verify_delivery.py": "3cf874af6e36fbebf3599f7f05d76233880581c2f82c826b8a9300c4598f486c",
+    "tests/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tests/fixtures.py": "97c800e2ed0325e770610f0e87b942ed85d910a85efc9d0c7cc3e0759ebe9cde",
+    "tests/gui_regressions.py": "9db576ec0808c293a57031c0a8f4c6a6167bb503ca75134bc195b47b76c2e798",
+    "tests/gui_smoke.py": "aa9ba8862aee54b1f044860cf40d983daf7e6406d5732c970157a31165b468f0",
+    "tests/test_counterparty_cards.py": "ac13b104298567d050727edafd21e7a57ba9f5e528104eb96b8eae9e74777aab",
+    "tests/test_delivery.py": "c61ae710fe497890c3df73d83d61d66c4160f07be55206bb42a17df514623922",
+    "tests/test_preparation.py": "6729b66562493796fbff8649abb6e7da5861bd87300d524bffe8a67e85c155c1",
+    "tests/test_provider_browser.py": "1aee7f12a7447d053cc2513f32849dc1c7c7771591abe67db52adb1dc78b1d57",
+    "tests/test_registry.py": "5611655d5fdeb71dcda34641d35db278793182f72811c8341d33fbda95a19a36",
+    "tests/test_slice.py": "7849398b61d784ab22f06ce621c4810eca3e8a3971179a7478ffbe1759c06dd8",
+    "tests/test_startup.py": "0e429638ab520ef7344c8b8fb8850e20e057faf62d2026062c66956ced810aac",
+    "tests/test_workflow.py": "4598aa45c7f44dd1313b26053cddbf0447fea19149e8ffe92c0c0916c89c559e",
+    "tests/test_workspace.py": "140b02c389be2c8aaa97f071ae7f1bc9d91a12bfb664e031638d26f680c9577e"
+  }
+}
