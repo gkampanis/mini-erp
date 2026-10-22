@@ -16,10 +16,10 @@ def open_register(owner):
     ttk.Label(body,text='Μία καρτέλα ανά ΑΦΜ στην εταιρεία. Ενημερώνεται από την ίδια εισαγωγή Excel.',style='Subtitle.TLabel').pack(anchor='w',pady=8)
     query=tk.StringVar();row=ttk.Frame(body);row.pack(fill='x',pady=8)
     entry=ttk.Entry(row,textvariable=query);entry.pack(side='left',fill='x',expand=True,padx=(0,8))
-    tree=table(body,('code','name','vat','roles','count'),('Κωδικός','Επωνυμία','ΑΦΜ','Ρόλοι','Παραστατικά'),{'name':300,'roles':220})
+    tree=table(body,('code','name','vat','scope','roles','count'),('Κωδικός','Επωνυμία','ΑΦΜ','Διαχωρισμός','Ρόλοι','Παραστατικά'),{'name':300,'roles':220})
     def refresh():
         tree.delete(*tree.get_children())
-        for card in service.list(owner.company,query.get()):tree.insert('','end',iid=str(card['id']),values=(card['code'],card['name'],card['vat'],', '.join(ROLES[r] for r in card['roles']),card['document_count']))
+        for card in service.list(owner.company,query.get()):tree.insert('','end',iid=str(card['id']),values=(card['code'],card['name'],card['vat'],card['transaction_scope'],', '.join(ROLES[r] for r in card['roles']),card['document_count']))
     ttk.Button(row,text='Αναζήτηση',command=refresh).pack(side='left');entry.bind('<Return>',lambda _:refresh())
     def open_card():
         selected=tree.selection()

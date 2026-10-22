@@ -416,6 +416,21 @@ class DesktopRegressions(unittest.TestCase):
         self.assertEqual(self.app._documents[document]['aade_state'],'Συμφωνεί')
         self.assertEqual(self.count('documents'),2)
 
+    def test_mixed_list_simulation_excludes_purchases_without_second_import(self):
+        self.import_fixture('separate.xlsx')
+        ids=[r['id'] for r in self.app.rpa_panel.workspace.rows(self.app.company)]
+        self.app.rpa_panel.workspace.approve_many(self.app.company,[dict(document=ids[0],group='2',account='20.01'),dict(document=ids[1],group='6',account='64.03')],confirmed=True)
+        self.app.refresh()
+        self.assertEqual(self.app._documents[ids[0]]['ebs_state'],'Αγορές · εκτός EBS')
+        with patch('app.ui.rpa_panel.messagebox.askyesno',return_value=True) as confirm:
+            self.app.rpa_panel.simulate()
+            self.assertIn('1 αγορές ομάδας 2 εξαιρέθηκαν',confirm.call_args.args[1])
+        wait(self.root,lambda:not self.app.busy)
+        items=self.app.rpa_panel.rpa.items(self.app.company,self.app.rpa_panel.job)[1]
+        self.assertEqual([i['document_id'] for i in items],[ids[1]])
+        self.assertEqual(self.count('documents'),2)
+        self.assertEqual(self.app.erp.preparation(self.app.company,ids[0])['nature_group'],'2')
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

@@ -8,7 +8,7 @@ from app.application.workspace import Workspace
 from app.infrastructure.ebs_adapter.adapter import load_mapper
 from app.infrastructure.optional_packages import install
 
-LABELS={'not_sent':'Δεν στάλθηκε','queued':'Σε αναμονή','started':'Συμπλήρωση','save_pending':'Save σε εξέλιξη','simulated':'Προσομοίωση','filled_no_save':'Συμπληρώθηκε χωρίς Save','uncertain':'Έλεγχος στο EBS','failed':'Απέτυχε','save_invoked':'Στάλθηκε Save · έλεγχος','ui_saved_review':'Save → νέο ΤΕΔ · έλεγχος','reviewed_by_operator':'Ελέγχθηκε από χειριστή'}
+LABELS={'purchase_excluded':'Αγορές · εκτός EBS','not_sent':'Δεν στάλθηκε','queued':'Σε αναμονή','started':'Συμπλήρωση','save_pending':'Save σε εξέλιξη','simulated':'Προσομοίωση','filled_no_save':'Συμπληρώθηκε χωρίς Save','uncertain':'Έλεγχος στο EBS','failed':'Απέτυχε','save_invoked':'Στάλθηκε Save · έλεγχος','ui_saved_review':'Save → νέο ΤΕΔ · έλεγχος','reviewed_by_operator':'Ελέγχθηκε από χειριστή'}
 
 
 class RPAPanel:
@@ -21,7 +21,7 @@ class RPAPanel:
         row=ttk.Frame(parent);row.pack(fill='x',pady=(4,6))
         ttk.Button(row,text='Λογαριασμοί & έγκριση',command=self.accounts).pack(side='left')
         ttk.Button(row,text='Δοκιμή 1 εγγραφής',command=self.pilot).pack(side='left',padx=6)
-        ttk.Button(row,text='Καταχώριση στο EBS',style='Primary.TButton',command=self.post).pack(side='left')
+        ttk.Button(row,text='Έξοδα → EBS',style='Primary.TButton',command=self.post).pack(side='left')
         ttk.Button(row,text='Ρυθμίσεις EBS',command=self.settings).pack(side='right')
         row=ttk.Frame(parent);row.pack(fill='x')
         self.scope=tk.StringVar(value='Όλες της λίστας')
@@ -155,11 +155,14 @@ class RPAPanel:
                 if not selected:raise ValueError('Επίλεξε ένα παραστατικό για πιλοτική καταχώριση')
                 ids=[int(selected[0])]
             if not ids:raise ValueError('Δεν υπάρχουν εγγραφές. Φόρτωσε πρώτα Excel.')
-            unapproved=[x for x in ids if not self.owner._documents[x].get('prepared_at')]
-            if unapproved:raise ValueError(f'{len(unapproved)} εγγραφές χρειάζονται λογαριασμό. Πάτησε «Λογαριασμοί & έγκριση» για μαζικό έλεγχο.')
+            scope=self.rpa.expense_scope(self.owner.company,ids)
+            excluded=len(scope['purchases'])
+            if scope['needs_review']:raise ValueError(f"{len(scope['needs_review'])} εγγραφές χρειάζονται διαχωρισμό ή έγκριση λογαριασμού. {excluded} αγορές ομάδας 2 είναι εκτός EBS. Πάτησε «Λογαριασμοί & έγκριση».")
+            ids=scope['expenses']
+            if not ids:raise ValueError('Δεν υπάρχουν εγκεκριμένα έξοδα ομάδας 6 σε αυτή την επιλογή. Οι αγορές ομάδας 2 παραμένουν στη βάση, εκτός EBS.')
             real=mode=='fill_only'
             if real and sys.platform!='win32':raise ValueError('Η πραγματική καταχώριση απαιτεί Windows με Entersoft. Η προσομοίωση λειτουργεί εδώ.')
-            if not messagebox.askyesno('Έναρξη '+('EBS' if real else 'προσομοίωσης'),f'{len(ids)} παραστατικά, με τους εγκεκριμένους λογαριασμούς τους.\n'+('Θα εκτελεστεί η ροή συμπλήρωση → Save → νέο ΤΕΔ. Επιβεβαιώνεις κενό ΤΕΔ και πραγματικές καταχωρίσεις;' if real else 'Δεν θα γίνει καμία ενέργεια στο EBS. Συνέχεια;'),parent=self.owner.root):return
+            if not messagebox.askyesno('Έναρξη '+('EBS' if real else 'προσομοίωσης'),f'{len(ids)} έξοδα ομάδας 6, με τους εγκεκριμένους λογαριασμούς τους.\n{excluded} αγορές ομάδας 2 εξαιρέθηκαν και παραμένουν στη βάση.\n'+('Θα εκτελεστεί η ροή συμπλήρωση → Save → νέο ΤΕΔ. Επιβεβαιώνεις κενό ΤΕΔ και πραγματικές καταχωρίσεις;' if real else 'Δεν θα γίνει καμία ενέργεια στο EBS. Συνέχεια;'),parent=self.owner.root):return
             self.job=self.rpa.create(self.owner.company,ids,mode,confirmed=True,execution='save_new' if real else 'fill_only',pilot=pilot)
         except ValueError as exc:messagebox.showwarning('Πριν την έναρξη',str(exc),parent=self.owner.root);return
         self.start()
@@ -169,7 +172,10 @@ class RPAPanel:
     def simulate(self):self.make('simulation')
     def queue_selected(self):
         self.scope.set('Μόνο επιλεγμένες')
-        try:self.job=self.rpa.create(self.owner.company,self.ids(),confirmed=True)
+        try:
+            scope=self.rpa.expense_scope(self.owner.company,self.ids())
+            if scope['needs_review']:raise ValueError('Υπάρχουν αταξινόμητες ή μη εγκεκριμένες εγγραφές')
+            self.job=self.rpa.create(self.owner.company,scope['expenses'],confirmed=True)
         except ValueError as exc:messagebox.showwarning('Έλεγχος',str(exc),parent=self.owner.root)
         self.refresh()
 

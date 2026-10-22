@@ -7,6 +7,10 @@ class Counterparties:
         result=[]
         for row in rows:
             card=dict(row);card['roles']=[r[0] for r in self.db.execute('SELECT role FROM counterparty_roles WHERE counterparty_id=? ORDER BY role',(row['id'],))]
+            groups={r[0] for r in self.db.execute('SELECT DISTINCT p.nature_group FROM document_preparations p JOIN documents d ON d.id=p.document_id AND d.company_id=p.company_id WHERE p.company_id=? AND d.counterparty_id=?',(company,card['id']))}
+            default=self.db.execute('SELECT preferred_group FROM counterparty_accounts WHERE company_id=? AND counterparty_id=?',(company,card['id'])).fetchone()
+            if default and default[0]:groups.add(default[0])
+            card['transaction_scope']='Αγορές (2) · εκτός EBS' if groups=={'2'} else 'Έξοδα (6) → EBS' if groups=={'6'} else 'Αγορές και έξοδα (2/6)' if groups=={'2','6'} else 'Χρειάζεται διαχωρισμό'
             if not query or any(query.casefold() in str(card[k]).casefold() for k in ('code','vat','name')):result.append(card)
         return result
 

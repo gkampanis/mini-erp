@@ -181,6 +181,31 @@ class ConnectedWorkflowTests(unittest.TestCase):
             self.assertEqual(service.db.execute('PRAGMA integrity_check').fetchone()[0],'ok')
         finally:service.close()
 
+    def test_purchase_expense_partition_preserves_cards_and_queues_only_expenses(self):
+        from app.application.counterparties import Counterparties
+        self.workspace.approve_many(self.company,[dict(document=self.ids[0],group='2',account='20.01'),dict(document=self.ids[1],group='6',account='64.03')],confirmed=True)
+        before=self.erp.detail(self.company,self.ids[0])[0]
+        scope=self.rpa.expense_scope(self.company,self.ids)
+        self.assertEqual(scope,dict(expenses=[self.ids[1]],purchases=[self.ids[0]],needs_review=[]))
+        job=self.rpa.create(self.company,scope['expenses'],confirmed=True)
+        self.rpa.advance(self.company,job)
+        self.assertEqual([i['document_id'] for i in self.rpa.items(self.company,job)[1]],[self.ids[1]])
+        self.assertEqual(self.erp.detail(self.company,self.ids[0])[0],before)
+        self.assertEqual(self.workspace.rows(self.company)[0]['ebs_state'],'purchase_excluded')
+        self.assertEqual(Counterparties(self.erp).list(self.company,'000000001')[0]['transaction_scope'],'Αγορές (2) · εκτός EBS')
+        with self.assertRaises(ValueError):self.rpa.create(self.company,[self.ids[0]],confirmed=True)
+        with self.assertRaises(ValueError):self.rpa.create(self.company,self.ids,mode='fill_only',confirmed=True)
+
+    def test_purchase_default_is_excluded_but_unknown_scope_needs_review(self):
+        from app.application.counterparties import Counterparties
+        card=Counterparties(self.erp).list(self.company,'000000001')[0]
+        Counterparties(self.erp).save(self.company,card['id'],card['name'],['supplier'],confirmed=True,accounts=dict(purchases_account='20.01',expenses_account='',preferred_group='2'))
+        scope=self.rpa.expense_scope(self.company,self.ids)
+        self.assertEqual(scope['purchases'],[self.ids[0]])
+        self.assertEqual(scope['needs_review'],[self.ids[1]])
+        self.assertEqual(scope['expenses'],[])
+        with self.assertRaises(ValueError):self.rpa.expense_scope(self.other,self.ids)
+
     def test_aade_transport_headers_pagination_read_only_and_safe_errors(self):
         token='<continuationToken><nextPartitionKey>P</nextPartitionKey><nextRowKey>R</nextRowKey></continuationToken>'
         opener=Opener([response(continuation=token),response(mark='10000002')])

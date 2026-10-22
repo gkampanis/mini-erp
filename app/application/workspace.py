@@ -32,6 +32,7 @@ class Workspace:
             row['suggested_group']=defaults['preferred_group'] if defaults else None
             row['suggested_account']=(defaults['purchases_account'] if defaults['preferred_group']=='2' else defaults['expenses_account'] if defaults['preferred_group']=='6' else '') if defaults else ''
             row['ebs_state']=latest.get(row['id'],'not_sent')
+            if (row.get('nature_group') or row['suggested_group'])=='2' and row['ebs_state']=='not_sent':row['ebs_state']='purchase_excluded'
             row['aade_state']=reconciled.get(row['id'],'not_checked')
             row['pdf_state']='Συνδεδεμένο' if row['id'] in pdfs else 'Χωρίς PDF'
         return sorted(rows,key=lambda r:r['source_record_id'])

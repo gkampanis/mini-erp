@@ -11,6 +11,19 @@ def encoded(value):return json.dumps(value,ensure_ascii=False,sort_keys=True)
 class RPA:
     def __init__(self,erp):self.erp=erp;self.db=erp.db
 
+    def expense_scope(self,company,documents):
+        """Partition the same list; purchase cards remain visible but never enter EBS."""
+        from app.application.workspace import Workspace
+        rows={r['id']:r for r in Workspace(self.erp).rows(company)}
+        result=dict(expenses=[],purchases=[],needs_review=[])
+        for document in documents:
+            if document not in rows:raise ValueError('Δεν βρέθηκε παραστατικό στην εταιρεία')
+            row=rows[document];group=row.get('nature_group') or row.get('suggested_group')
+            if group=='2':result['purchases'].append(document)
+            elif group=='6' and row.get('prepared_at'):result['expenses'].append(document)
+            else:result['needs_review'].append(document)
+        return result
+
     def payload(self,company,document):
         row,_=self.erp.detail(company,document)
         reconciliation=self.db.execute("SELECT match_status FROM mydata_records WHERE company_id=? AND document_id=? AND environment='production'",(company,document)).fetchone()
@@ -35,8 +48,8 @@ class RPA:
             if not saved['pilot_at'] and not (pilot is True and len(documents)==1):raise ValueError('Πρώτα δοκίμασε μία εγγραφή και επιβεβαίωσε την αποθήκευσή της στο EBS')
             profile=saved['profile']
         payloads=[self.payload(company,doc) for doc in documents]
+        if any(p['group']!='6' for p in payloads):raise ValueError('Στο EBS καταχωρούνται μόνο έξοδα ομάδας 6. Οι αγορές ομάδας 2 διατηρούνται για διαχωρισμό, εκτός RPA.')
         if mode=='fill_only':
-            if any(p['group']!='6' for p in payloads):raise ValueError('Η δοκιμασμένη ροή ΤΕΔ αφορά έξοδα ομάδας 6. Η ομάδα 2 χρειάζεται ξεχωριστή πιλοτική ροή EBS.')
             if any(p['rounding_minor'] for p in payloads):raise ValueError('Υπάρχει διαφορά στρογγυλοποίησης: χρειάζεται χειροκίνητος έλεγχος EBS πριν συμπλήρωση')
             for document in documents:
                 pending=self.db.execute("SELECT 1 FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND i.document_id=? AND j.mode='fill_only' AND (i.status IN ('started','save_pending','filled_no_save','uncertain') OR (j.execution='save_new' AND i.status IN ('save_invoked','ui_saved_review','reviewed_by_operator')))",(company,document)).fetchone()
@@ -77,6 +90,7 @@ class RPA:
         if meta['mode']=='fill_only' and meta['execution']=='save_new':
             return self._advance_saved(company,job,meta,items,item,live_confirmed,adapter,continue_after_pause)
         current=self.payload(company,item['document_id'])
+        if current['group']!='6':raise ValueError('Η ομάδα 2 είναι εκτός καταχώρισης EBS, ακόμη και σε παλαιότερη ουρά.')
         if current!=item['payload']:raise ValueError('Άλλαξε η εγκεκριμένη προετοιμασία. Δημιούργησε νέα ουρά μετά από έλεγχο.')
         if meta['mode']=='fill_only':
             if live_confirmed is not True:raise ValueError('Απαιτείται ρητή επιβεβαίωση δοκιμασμένου mapper και κενού ΤΕΔ')
@@ -143,6 +157,7 @@ class RPA:
             vat=self.db.execute('SELECT vat FROM companies WHERE id=?',(company,)).fetchone()[0]
             if vat=='000000000' or any(i['payload']['vat'] in ('000000001','000000002','000000003') for i in items if i['status']=='queued'):
                 raise ValueError('Δεν στέλνονται συνθετικά δείγματα DEMO στο EBS. Όρισε πραγματική εταιρεία και επίλεξε πραγματικά παραστατικά.')
+        if current['group']!='6':raise ValueError('Η ομάδα 2 είναι εκτός καταχώρισης EBS')
         backend=adapter or WindowsSession()
         if meta['need_new']:
             if continue_after_pause is not True:raise ValueError('Παύση: έλεγξε το τελευταίο Save και πάτησε Συνέχεια για νέο ΤΕΔ')

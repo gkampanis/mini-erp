@@ -115,7 +115,7 @@ class Desktop:
         ttk.Label(header,textvariable=self.company_caption,style='Subtitle.TLabel').pack(anchor='w',pady=(3,0))
         metrics=ttk.Frame(root,padding=(24,0,24,10));metrics.pack(fill='x')
         self.metrics={}
-        for key,label in [('total','Παραστατικά'),('pending','Χρειάζονται λογαριασμό'),('issues','Έλεγχοι εισαγωγής')]:
+        for key,label in [('total','Παραστατικά'),('pending','Έξοδα / διαχωρισμός για έλεγχο'),('issues','Έλεγχοι εισαγωγής')]:
             var=tk.StringVar(value='0');self.metrics[key]=var
             ttk.Label(metrics,text=label+':',style='Subtitle.TLabel').pack(side='left',padx=(0,5))
             ttk.Label(metrics,textvariable=var).pack(side='left',padx=(0,24))
@@ -262,7 +262,7 @@ class Desktop:
         from app.ui.rpa_panel import LABELS as EBS_LABELS
         rows = Workspace(self.erp).rows(self.company,self.query.get().strip())
         wanted_group = GROUPS.get(self.group_filter.get())
-        rows = [r for r in rows if (wanted_group is None or r.get('nature_group')==wanted_group)
+        rows = [r for r in rows if (wanted_group is None or (r.get('nature_group') or r.get('suggested_group'))==wanted_group)
                 and (self.state_filter.get()!=STATES[1] or not r.get('prepared_at'))
                 and (self.state_filter.get()!=STATES[2] or r.get('prepared_at'))]
         for row in rows:
@@ -282,7 +282,8 @@ class Desktop:
             self.tree.selection_set(selected[0])
         self.result_count.set(f'{len(rows)} από {len(all_rows)} παραστατικά')
         self.metrics['total'].set(str(len(all_rows)))
-        self.metrics['pending'].set(str(sum(not r.get('prepared_at') for r in all_rows)))
+        scope=self.rpa_panel.rpa.expense_scope(self.company,[r['id'] for r in all_rows])
+        self.metrics['pending'].set(str(len(scope['needs_review'])))
         self.metrics['issues'].set(str(sum(len(j['report'].get('rejected',[]))+len(j['report'].get('warnings',[])) for j in jobs)))
         self._jobs = {j['id']:j for j in jobs}
         self.review_tree.delete(*self.review_tree.get_children())

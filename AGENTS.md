@@ -46,3 +46,12 @@ blocks upload or verification, state the precise blocker; never supply an
 unuploaded or hypothetical GitHub download URL as if it works. This authorizes
 routine delivery uploads to this repository, not unrelated publication or
 changes to EBS/production data.
+
+## Expense-only EBS workflow
+
+The user clarified that group 2 purchases are NEVER posted through this app.
+Keep them for supplier/purchase separation and archive/search; only approved
+group 6 expenses enter EBS RPA or its simulation. Mixed-list queue preparation
+must explicitly report excluded purchases, preserve their records/cards and
+require review for unknown/unapproved classifications. Do not add a purchase
+EBS connector or ask again which purchase form to automate.
