@@ -1,0 +1,171 @@
+{
+  "run_id": "20261022T072150Z-e336e3ab",
+  "status": "PASSED",
+  "platform": "Linux-6.18.55-x86_64-with-glibc2.41",
+  "python": "3.13.5",
+  "artifact": {
+    "path": "/workspace/mini-erp/.local/releases/MiniERP-Checked-Demo.zip",
+    "sha256": "c2e7556b9759f0d6d75589dc4e420a48948afd1316ed9cc5b59116b25eedc5cb",
+    "size": 371363
+  },
+  "checks": [
+    {
+      "name": "static_checks",
+      "status": "PASSED",
+      "details": {
+        "python_files": 27,
+        "scope": "Syntax and targeted dangerous-call/credential-literal checks; not a full security audit"
+      }
+    },
+    {
+      "name": "desktop_display",
+      "status": "PASSED"
+    },
+    {
+      "name": "source_tests",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 0.566,
+      "log": "/workspace/mini-erp/.local/verification/20261022T072150Z-e336e3ab/source_tests.log",
+      "counts": {
+        "tests": 26,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      }
+    },
+    {
+      "name": "source_gui",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 2.22,
+      "log": "/workspace/mini-erp/.local/verification/20261022T072150Z-e336e3ab/source_gui.log",
+      "counts": {
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      }
+    },
+    {
+      "name": "source_gui_smoke",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 0.969,
+      "log": "/workspace/mini-erp/.local/verification/20261022T072150Z-e336e3ab/source_gui_smoke.log"
+    },
+    {
+      "name": "package_build",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 0.115,
+      "log": "/workspace/mini-erp/.local/verification/20261022T072150Z-e336e3ab/package_build.log"
+    },
+    {
+      "name": "archive_integrity",
+      "status": "PASSED",
+      "details": {
+        "entries": 49,
+        "crc": "passed",
+        "local_data": "excluded"
+      }
+    },
+    {
+      "name": "package_tests",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 0.616,
+      "log": "/workspace/mini-erp/.local/verification/20261022T072150Z-e336e3ab/package_tests.log",
+      "counts": {
+        "tests": 26,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      }
+    },
+    {
+      "name": "package_gui",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 2.326,
+      "log": "/workspace/mini-erp/.local/verification/20261022T072150Z-e336e3ab/package_gui.log",
+      "counts": {
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      }
+    },
+    {
+      "name": "package_gui_smoke",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 0.967,
+      "log": "/workspace/mini-erp/.local/verification/20261022T072150Z-e336e3ab/package_gui_smoke.log"
+    },
+    {
+      "name": "demo_initialization",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 0.115,
+      "log": "/workspace/mini-erp/.local/verification/20261022T072150Z-e336e3ab/demo_initialization.log"
+    },
+    {
+      "name": "demo_readback",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 0.064,
+      "log": "/workspace/mini-erp/.local/verification/20261022T072150Z-e336e3ab/demo_readback.log"
+    }
+  ],
+  "windows_desktop": "NOT_RUN",
+  "windows_launcher": "NOT_RUN",
+  "ebs_live": "NOT_RUN",
+  "pdf_download": "NOT_IMPLEMENTED",
+  "scope": "Synthetic source demo only; not a certified Windows EXE or EBS integration",
+  "source_code_sha256": "2d16c48f156b5487a3015a8227a77bba95743eedea9f1c50a05c87c65a9d6ad6",
+  "source_files": {
+    "START_DEMO.cmd": "eeea1c77754fc60a78cf701961b52314e957703d3e699957bbc02c60e0478778",
+    "app/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app/__main__.py": "44cdb62723e2e6540e35f5b8796c5f40932933df7028b98230504f5ba8c48d5c",
+    "app/application/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app/application/service.py": "2483e90f8d2495122467da187b761907952cb54d0fbb0a0ac5346a8a87e22856",
+    "app/demo.py": "96e5bc725b01ad3850672f47932d8c42ed4f5f7d6b7d719b54ce5d477925af45",
+    "app/domain/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app/domain/preparation.py": "48fdb19b2f9ea0fcc498dc18962927baa61f5a82a657b0f33793151f5abfc36d",
+    "app/domain/validation.py": "a3cb9ba6b0e8f49e79cad7e2f639c39221a8f4169e326748372674e0871c9621",
+    "app/infrastructure/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app/infrastructure/database.py": "ff75742c5b3e3ee637d2895387d05b1fb37cadcad3db87caf180acce15ff9a62",
+    "app/infrastructure/importers/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app/infrastructure/importers/excel.py": "ec93d6c74aa949ce4df35e93294212f62f9b5d9932557e191be83fcda9347812",
+    "app/infrastructure/importers/legacy_primitives.py": "4ed5e0f5b7450446b2dc86db4dd2b8b10ff5693dac8794684b20280d8bf62011",
+    "app/infrastructure/repository.py": "b9c5721f8fc880411014c384d9737312fc66e766c38b75dbad07b9a8623dbc28",
+    "app/ui/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app/ui/desktop.py": "905f4bf0b31483cb0cb1e5b9ed615113919e2d9335dfa04ac47a53e958f32178",
+    "app/ui/theme.py": "357afaecaf597c85dc72c11e66bc87a849ed422f3ea49f9fc5703337257a0621",
+    "migrations/001_initial.sql": "9a97053499ed0fbd57697436d97498914373a907a0655c5702e916431bcc0265",
+    "migrations/002_preparation.sql": "b8308f2e0a0e16fe39bcbe99178d9e1b9033c141050bd39512603873166b6bdd",
+    "scripts/package_demo.py": "e9b0327965223f55e9550af2e89fe8a5931bc67c7217a758ca440ecc9cb84ee2",
+    "scripts/run_checks.py": "c505a75af7c67ac1708a408bc4a8207d6c44f5981020d42f0c572654ffd10acf",
+    "scripts/verify_delivery.py": "a6887b54bc28ad029e08b7d9111fdb0e69206a99752e0b34ca7a5f6c7d7a65c3",
+    "tests/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tests/fixtures.py": "97c800e2ed0325e770610f0e87b942ed85d910a85efc9d0c7cc3e0759ebe9cde",
+    "tests/gui_regressions.py": "76d2fcb711f368151d344a1431bbe1a47d29ef99998f24b274251e2e9c592344",
+    "tests/gui_smoke.py": "aa9ba8862aee54b1f044860cf40d983daf7e6406d5732c970157a31165b468f0",
+    "tests/test_delivery.py": "685e966af34fa9e01f74519c3d79616039d48a7a8ad129955ac6462642a3f2d6",
+    "tests/test_preparation.py": "6729b66562493796fbff8649abb6e7da5861bd87300d524bffe8a67e85c155c1",
+    "tests/test_slice.py": "61534630ef60da9013cf7536da8e475f9c548fdc1245adb5311f79d3766cf012"
+  }
+}
