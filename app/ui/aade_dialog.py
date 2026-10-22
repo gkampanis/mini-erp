@@ -15,7 +15,7 @@ from app.infrastructure.aade.credentials import OFFICIAL_DOCS,VaultUnavailable
 from app.infrastructure.optional_packages import install
 
 
-def open_settings(owner):
+def open_settings(owner,document=None):
     win=tk.Toplevel(owner.root);win.title('ΑΑΔΕ / myDATA · Σύνδεση και παραστατικά');win.geometry('1060x740');win.minsize(900,630)
     notebook=ttk.Notebook(win);notebook.pack(fill='both',expand=True,padx=16,pady=16)
     panel=ttk.Frame(notebook,padding=18);data_panel=ttk.Frame(notebook,padding=14)
@@ -55,7 +55,9 @@ def open_settings(owner):
     secret=ttk.Entry(form,textvariable=key,show='●');win.api_key_entry=secret;secret.grid(row=2,column=1,sticky='ew',padx=(16,0))
     reveal=tk.BooleanVar(value=False)
     ttk.Checkbutton(panel,text='Εμφάνιση κλειδιού',variable=reveal,command=lambda:secret.configure(show='' if reveal.get() else '●')).pack(anchor='w',pady=8)
+    from app.application.sync import Sync
     represented=tk.BooleanVar(value=False)
+    auto_pdf=tk.BooleanVar(value=True)
     ttk.Checkbutton(panel,text='Εξουσιοδοτημένος λογιστής / εκπρόσωπος (αποστολή ΑΦΜ εταιρείας ως entityVatNumber)',variable=represented).pack(anchor='w',pady=6)
     status=tk.StringVar(value='Δεν έγινε ακόμη έλεγχος σύνδεσης.')
     ttk.Label(panel,textvariable=status,style='Subtitle.TLabel',wraplength=850).pack(anchor='w',pady=10)
@@ -65,12 +67,17 @@ def open_settings(owner):
             values=owner.erp.mydata_credentials(owner.company,choices[environment.get()]);username.set(values['username']);key.set(values['key'])
             status.set('Οι κωδικοί υπάρχουν στο Windows Credential Manager.' if values['key'] else 'Συμπλήρωσε και αποθήκευσε τους κωδικούς για αυτό το περιβάλλον.')
         except VaultUnavailable as exc:status.set(str(exc))
-    box.bind('<<ComboboxSelected>>',load)
+    def load_options(event=None):
+        load();options=Sync(owner.erp).preferences(owner.company,choices[environment.get()]);represented.set(bool(options['represented']));auto_pdf.set(bool(options['auto_pdf']) if owner.erp.db.execute('SELECT 1 FROM sync_preferences WHERE company_id=? AND environment=?',(owner.company,choices[environment.get()])).fetchone() else True)
+    box.bind('<<ComboboxSelected>>',load_options)
+    ttk.Checkbutton(panel,text='Αυτόματη λήψη/εμφάνιση PDF από ΑΑΔΕ όταν ανοίγω παραστατικό',variable=auto_pdf).pack(anchor='w',pady=6)
     def save():
-        if owner.busy:return
+        if owner.busy:return False
         try:owner.erp.save_mydata_credentials(owner.company,choices[environment.get()],username.get(),key.get(),confirmed=True)
-        except (ValueError,VaultUnavailable,sqlite3.Error) as exc:messagebox.showerror('Δεν αποθηκεύτηκαν κωδικοί',str(exc),parent=win);return
+        except (ValueError,VaultUnavailable,sqlite3.Error) as exc:messagebox.showerror('Δεν αποθηκεύτηκαν κωδικοί',str(exc),parent=win);return False
+        Sync(owner.erp).save_preferences(owner.company,choices[environment.get()],represented.get(),auto_pdf.get())
         status.set('Οι κωδικοί αποθηκεύτηκαν. Πάτησε «Έλεγχος σύνδεσης» ή «Εύρεση παραστατικών».');key.set('');reveal.set(False);secret.configure(show='●')
+        return True
     actions=ttk.Frame(panel);actions.pack(side='bottom',fill='x',pady=10)
     ttk.Button(actions,text='Επίσημες οδηγίες ΑΑΔΕ',command=lambda:webbrowser.open(OFFICIAL_DOCS)).pack(side='left')
     ttk.Button(actions,text='Αποθήκευση κωδικών',style='Primary.TButton',command=save).pack(side='right')
@@ -128,6 +135,28 @@ def open_settings(owner):
             owner.refresh();refresh()
         owner.run_worker(execute,done)
     ttk.Button(actions,text='Έλεγχος σύνδεσης',command=lambda:fetch(True)).pack(side='right',padx=8)
+    def full_sync():
+        if owner.busy:return
+        if key.get().strip() and not save():return
+        try:
+            start=iso_date(from_date.get());end=iso_date(to_date.get())
+            env=choices[environment.get()]
+            Sync(owner.erp).save_preferences(owner.company,env,represented.get(),auto_pdf.get())
+        except ValueError as exc:messagebox.showerror('Περίοδος',str(exc),parent=win);return
+        cancel.clear();vault=owner.erp.credential_store;rep=represented.get()
+        output.set('Άντληση βιβλίου, αναλυτικών παραστατικών και PDF…');notebook.select(data_panel)
+        def execute():
+            service=ERP(owner.directory,credential_store=vault)
+            try:return Sync(service).run(owner.company,env,start,end,represented=rep,cancel=cancel,notice=lambda msg:notifications.put(msg))
+            finally:service.close()
+        def done(result):
+            if not win.winfo_exists():return
+            imported=result.get('import',{});pdf=result.get('pdf',{})
+            output.set(f"Νέα στη λίστα: {imported.get('inserted',0)} · Υπήρχαν: {imported.get('duplicates',0)} · Για έλεγχο: {len(imported.get('rejected',[]))} · PDF: {pdf.get('saved',0)} · Εκκρεμή PDF: {pdf.get('pending',0)}"+(' · Βιβλίο: '+result['book_error'] if result.get('book_error') else '')+(' · PDF: '+result['pdf_error'] if result.get('pdf_error') else ''))
+            owner.refresh();refresh()
+        owner.run_worker(execute,done)
+    ttk.Button(panel,text='Αποθήκευση & άντληση εξόδων + PDF',style='Primary.TButton',command=full_sync).pack(fill='x',before=actions,pady=8)
+    ttk.Button(data_panel,text='Άντληση εξόδων στη λίστα + PDF (χωρίς Excel)',style='Primary.TButton',command=full_sync).pack(fill='x',before=controls,pady=(0,8))
     ttk.Button(controls,text='1. Εύρεση παραστατικών',style='Primary.TButton',command=fetch).pack(side='left')
     def pdf(recovery=False):
         if owner.busy:return
@@ -187,6 +216,8 @@ def open_settings(owner):
     win.protocol('WM_DELETE_WINDOW',close)
     stored=owner.erp.db.execute('SELECT environment FROM aade_settings WHERE company_id=?',(owner.company,)).fetchone()
     if stored:environment.set('Παραγωγικό' if stored[0]=='production' else 'Δοκιμαστικό')
-    load();refresh();notifications_poll()
-    win.period_vars=(from_date,to_date);win.environment_var=environment;win.kind_var=kind;win.refresh_records=refresh;win.records_tree=results;win.fetch_aade=fetch
+    if document is not None:
+        row,_=owner.erp.detail(owner.company,document);from_date.set(row['issue_date']);to_date.set(row['issue_date'])
+    load_options();refresh();notifications_poll()
+    win.period_vars=(from_date,to_date);win.environment_var=environment;win.kind_var=kind;win.refresh_records=refresh;win.records_tree=results;win.fetch_aade=fetch;win.sync_expenses=full_sync
     return win

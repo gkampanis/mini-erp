@@ -61,14 +61,12 @@ class MyData:
                         if cp_name and cp['name'] in ('Χωρίς επωνυμία',cp_vat):
                             self.db.execute('UPDATE counterparties SET name=? WHERE id=?',(cp_name,cp['id']))
                             self.erp.repository.audit(company,'counterparty_named',None,dict(counterparty_id=cp['id'],before=cp['name'],after=cp_name,source='myDATA',sync=sync))
-                    document=self.db.execute('SELECT d.*,c.vat FROM documents d JOIN counterparties c ON c.id=d.counterparty_id WHERE d.company_id=? AND d.mark=?',(company,item['mark'])).fetchone()
-                    state='unmatched'
-                    if document and document['direction']!=item['direction']:document=None
-                    if document:
-                        try:equal=(document['vat']==item['vat'] and document['series']==item['series'] and document['number']==item['number'] and document['issue_date']==item['date'] and document['net_minor']==cents(item['net']) and document['tax_minor']==cents(item['tax']) and document['gross_minor']==cents(item['gross']))
-                        except ValueError:equal=False
-                        state='matched' if equal else 'different'
-                    report[state]+=1
+                    from app.application.reconciliation import associate
+                    document,state,identity=associate(self.db,company,item)
+                    item=dict(item,identity_verified=identity)
+                    old=self.db.execute('SELECT match_status FROM mydata_records WHERE company_id=? AND environment=? AND mark=?',(company,environment,item['mark'])).fetchone()
+                    if old and old[0]=='cancelled_at_aade':state='cancelled_at_aade'
+                    report[state if state!='cancelled_at_aade' else 'cancelled']+=1
                     self.db.execute('INSERT INTO mydata_records(company_id,environment,mark,document_id,record_json,match_status,last_sync) VALUES (?,?,?,?,?,?,?) ON CONFLICT(company_id,environment,mark) DO UPDATE SET document_id=excluded.document_id,record_json=excluded.record_json,match_status=excluded.match_status,last_sync=excluded.last_sync',(company,environment,item['mark'],document['id'] if document else None,json.dumps(item,ensure_ascii=False),state,sync))
                 for mark in page['cancellations']:
                     # Cancellation is an observed event only; do not cancel the local invoice.
@@ -84,8 +82,58 @@ class MyData:
 
     def pdf_url(self,company,document,environment):
         self.erp.detail(company,document)
-        row=self.db.execute('SELECT record_json FROM mydata_records WHERE company_id=? AND document_id=? AND environment=? AND match_status=?',(company,document,environment,'matched')).fetchone()
+        row=self.db.execute("SELECT record_json FROM mydata_records WHERE company_id=? AND document_id=? AND environment=? AND match_status IN ('matched','different')",(company,document,environment)).fetchone()
         if row is None:raise ValueError('Χρειάζεται συμφωνημένο παραστατικό ΑΑΔΕ για αυτό το περιβάλλον')
-        url=json.loads(row['record_json']).get('pdf_url','')
+        stored=json.loads(row['record_json'])
+        if not stored.get('identity_verified',False):raise ValueError('Δεν επαληθεύτηκε η ταυτότητα του παραστατικού για σύνδεση PDF')
+        url=stored.get('pdf_url','')
         if not url:raise ValueError('Η ΑΑΔΕ δεν επέστρεψε downloadingInvoiceUrl. Χρειάζεται ο πάροχος ή το τοπικό PDF.')
         return url
+
+
+    def reconcile_stored(self,company,environment=None):
+        from app.application.reconciliation import associate
+        rows=self.db.execute('SELECT * FROM mydata_records WHERE company_id=?'+(' AND environment=?' if environment else ''),(company,environment) if environment else (company,)).fetchall()
+        with self.db:
+            for row in rows:
+                item=json.loads(row['record_json']);document,state,identity=associate(self.db,company,item)
+                if row['match_status']=='cancelled_at_aade':state='cancelled_at_aade'
+                item['identity_verified']=identity
+                self.db.execute('UPDATE mydata_records SET document_id=?,record_json=?,match_status=? WHERE id=?',(document['id'] if document else None,json.dumps(item,ensure_ascii=False),state,row['id']))
+        from app.application.provider_pdf import ProviderDatabase
+        for row in rows:ProviderDatabase(self.erp,company,row['environment']).link_cached(row['mark'])
+        return len(rows)
+
+    def import_incoming(self,company,environment,date_from,date_to,confirmed=False):
+        if confirmed is not True:raise ValueError('Απαιτείται επιλογή άντλησης εξόδων στη λίστα')
+        from types import SimpleNamespace
+        from app.domain.validation import record,rounding_changes
+        payload=[];records=[];rejected=[]
+        rows=self.records(company,environment)
+        for row in rows:
+            item=json.loads(row['record_json'])
+            if item.get('direction')!='incoming' or not date_from<=item['date']<=date_to or row['match_status']=='cancelled_at_aade':continue
+            raw=dict(item,_source='myDATA RequestDocs',_sync=row['last_sync'])
+            payload.append(raw);index=len(payload)
+            try:
+                if item['kind'] not in ('1.1','1.2','1.3','2.1','2.2','2.3'):raise ValueError('Ο τύπος ΑΑΔΕ απαιτεί χωριστό έλεγχο: '+item['kind'])
+                fields=dict(vat=item['vat'],name=item.get('name',''),series=item['series'],number=item['number'],date=item['date'],net=item['net'],tax=item['tax'],gross=item['gross'],mark=item['mark'],kind='invoice')
+                normalized=record(fields)
+                records.append(dict(row=index,raw=raw,document=normalized,rounding_changes=rounding_changes(fields,normalized)))
+            except ValueError as exc:rejected.append(dict(row=index,raw=raw,reason=str(exc)))
+        if not payload:return dict(inserted=0,duplicates=0,rejected=[],warnings=[])
+        data=json.dumps(payload,ensure_ascii=False,sort_keys=True).encode();digest=hashlib.sha256(data).hexdigest()
+        path=self.erp.directory/'sources'/(digest+'.json');path.parent.mkdir(exist_ok=True)
+        if path.exists():
+            if hashlib.sha256(path.read_bytes()).hexdigest()!=digest:raise ValueError('Αλλοιωμένη αρχειοθετημένη πηγή ΑΑΔΕ')
+        else:
+            fd,temp=tempfile.mkstemp(dir=path.parent)
+            try:
+                with os.fdopen(fd,'wb') as stream:stream.write(data);stream.flush();os.fsync(stream.fileno())
+                os.replace(temp,path)
+            finally:
+                if os.path.exists(temp):os.unlink(temp)
+        packet=SimpleNamespace(filename='myDATA RequestDocs '+date_from+' — '+date_to,sha256=digest,records=records,rejected=rejected,headers={},mapping={},source_kind='aade')
+        report=self.erp.repository.persist_import(company,packet,packet)
+        self.reconcile_stored(company,environment)
+        return report

@@ -83,7 +83,7 @@ class Repository:
                 self.db.execute('INSERT INTO source_records(job_id,row_number,raw_json) VALUES (?,?,?)',
                                 (job,rejected['row'],encode(rejected['raw'])))
             self.db.execute('UPDATE import_jobs SET report=? WHERE id=?',(encode(report),job))
-            self.audit(company,'import_completed',None,dict(job=job,inserted=report['inserted'],duplicates=report['duplicates'],rejected=len(report['rejected'])))
+            self.audit(company,'import_completed',None,dict(job=job,inserted=report['inserted'],duplicates=report['duplicates'],rejected=len(report['rejected']),headers=getattr(item,'headers',{}),mapping=getattr(item,'mapping',{}),source_kind=getattr(item,'source_kind','excel')))
         return report
 
     def search(self, company, query=''):

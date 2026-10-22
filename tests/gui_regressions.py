@@ -347,6 +347,24 @@ class DesktopRegressions(unittest.TestCase):
         self.assertIsNone(self.app.erp.preparation(self.app.company,document))
         self.assertTrue(self.button(win,'Έγκριση τοπικής προετοιμασίας').winfo_exists())
 
+    def test_document_aade_button_links_and_renders_without_url_entry(self):
+        from tests.test_workspace import synthetic_pdf,MemoryVault
+        self.import_fixture('combined.xlsx')
+        self.app.erp.credential_store=MemoryVault()
+        self.app.erp.save_mydata_credentials(self.app.company,'test','synthetic','synthetic',confirmed=True)
+        document=int(self.app.tree.get_children()[0])
+        self.app.tree.selection_set(str(document));self.app.open_detail()
+        pane=self.app._details[document].pdf_pane
+        def retrieve(sync,company,identifier):
+            self.assertEqual(identifier,document)
+            sync.erp.attach_pdf(company,identifier,'synthetic.pdf',data=synthetic_pdf(),confirmed=True)
+        with patch('app.application.sync.Sync.document_pdf',retrieve), patch('app.ui.pdf_pane.simpledialog.askstring') as manual:
+            pane.fetch_aade()
+            wait(self.root,lambda:pane.image is not None and not self.app.busy)
+            manual.assert_not_called()
+        self.assertEqual(len(pane.files.get_children()),1)
+        self.assertTrue(pane.canvas.find_all())
+
     def test_aade_settings_mask_and_secure_save_with_synthetic_vault(self):
         from tests.test_workspace import MemoryVault
         self.app.erp.credential_store=MemoryVault()

@@ -15,6 +15,7 @@ class PDFPane:
         self.kind=tk.StringVar(value='Τιμολόγιο')
         ttk.Combobox(top,textvariable=self.kind,values=tuple(KINDS.values()),state='readonly',width=23).pack(anchor='w',pady=8)
         buttons=ttk.Frame(top);buttons.pack(fill='x')
+        ttk.Button(top,text='ΑΑΔΕ → Λήψη PDF',command=self.fetch_aade).pack(anchor='w',pady=(0,6))
         ttk.Button(buttons,text='Προσθήκη PDF',command=self.attach).pack(side='left',padx=(0,6))
         ttk.Button(buttons,text='Άντληση από σύνδεσμο',command=self.fetch).pack(side='left')
         self.files=ttk.Treeview(parent,columns=('kind','file'),show='headings',height=2,selectmode='browse')
@@ -36,6 +37,7 @@ class PDFPane:
         self.canvas.grid(row=0,column=0,sticky='nsew');vertical.grid(row=0,column=1,sticky='ns');horizontal.grid(row=1,column=0,sticky='ew')
         canvas_frame.columnconfigure(0,weight=1);canvas_frame.rowconfigure(0,weight=1)
         self.refresh()
+        self.owner.root.after(350,self.auto_fetch)
 
     def alive(self):return self.parent.winfo_exists() and not self.owner._closing
     def current_kind(self):return next(k for k,v in KINDS.items() if v==self.kind.get())
@@ -51,6 +53,38 @@ class PDFPane:
             self.files.selection_set(str(selected['id']))
         else:self.state.set('Δεν έχει συνδεθεί PDF. Πρόσθεσε αρχείο ή άντλησέ το από έγκυρο σύνδεσμο HTTPS.')
 
+    def auto_fetch(self):
+        if not self.alive() or self.records or self.owner.busy:return
+        from app.application.sync import Sync
+        active=self.owner.erp.db.execute('SELECT environment FROM aade_settings WHERE company_id=?',(self.owner.company,)).fetchone()
+        if active and Sync(self.owner.erp).preferences(self.owner.company,active[0])['auto_pdf']:
+            self.fetch_aade()
+
+    def fetch_aade(self):
+        if not self.alive() or self.owner.busy:return
+        active=self.owner.erp.db.execute('SELECT environment FROM aade_settings WHERE company_id=?',(self.owner.company,)).fetchone()
+        if active is None:
+            self.owner.open_aade(document=self.document);return
+        self.state.set('Άντληση ΑΑΔΕ και σύνδεση PDF με το MARK…')
+        def execute():
+            from app.application.sync import Sync
+            service=ERP(self.owner.directory,credential_store=self.owner.erp.credential_store)
+            try:
+                Sync(service).document_pdf(self.owner.company,self.document)
+                return None
+            except (ValueError,RuntimeError,OSError) as exc:return str(exc)
+            finally:service.close()
+        def done(error):
+            if not self.alive():return
+            self.owner.refresh();self.refresh()
+            if error:self.state.set(error)
+        self.owner.run_worker(execute,done)
+
+    def refresh_if_changed(self):
+        if not self.alive():return
+        current=self.owner.erp.attachments(self.owner.company,self.document)
+        if set(self.records)!={r['id'] for r in current}:self.refresh()
+
     def pick(self,event=None):
         chosen=self.files.selection()
         if not chosen:return
@@ -61,7 +95,7 @@ class PDFPane:
         if not renderer_available():
             self.state.set('Το PDF συνδέθηκε. Πάτησε «Ρύθμιση προβολής PDF» για να εμφανίζεται εδώ.');return
         if self.owner.busy:
-            self.parent.after(150,self.show);return
+            self.owner.root.after(150,self.show);return
         attachment=self.selected;page=self.page
         width=max(100,self.canvas.winfo_width()-20);height=max(100,self.canvas.winfo_height()-20)
         self.state.set('Φόρτωση PDF…')
@@ -74,7 +108,7 @@ class PDFPane:
             self.image=tk.PhotoImage(master=self.canvas,data=result['ppm'],format='PPM')
             self.canvas.delete('all');self.canvas.create_image(8,8,image=self.image,anchor='nw')
             self.canvas.configure(scrollregion=self.canvas.bbox('all'))
-            self.total_pages=result['pages'];self.state.set(f"Σελίδα {page+1} από {result['pages']} · Αρχικό PDF, χωρίς μεταβολή")
+            self.total_pages=result['pages'];self.state.set(f"Σελίδα {page+1} από {result['pages']} · Αρχειοθετημένο PDF · απαιτείται έλεγχος περιεχομένου")
         self.owner.run_worker(execute,done)
 
     def move(self,offset):

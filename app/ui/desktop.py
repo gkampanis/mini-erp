@@ -185,6 +185,8 @@ class Desktop:
         root.bind('<Control-f>',lambda _:(entry.focus_set(),entry.select_range(0,'end')))
         self.refresh()
         self._poll_after = root.after(80,self.poll)
+        from app.application.names import NameRecovery
+        if NameRecovery(self.erp).needed(self.company):root.after(120,self.recover_names)
 
     def _has_preview(self):
         return self.preview_window is not None and self.preview_window.winfo_exists()
@@ -255,6 +257,9 @@ class Desktop:
     def refresh(self):
         identity=self.erp.db.execute('SELECT vat,name FROM companies WHERE id=?',(self.company,)).fetchone()
         self.company_caption.set(identity['name']+' · ΑΦΜ '+identity['vat']+' · Προετοιμασία για EBS')
+        for window in list(self._details.values()):
+            if window.winfo_exists() and hasattr(window,'refresh_identity'):window.refresh_identity()
+            if window.winfo_exists() and hasattr(window,'pdf_pane'):window.pdf_pane.refresh_if_changed()
         selected = self.tree.selection()
         all_rows = self.erp.search(self.company)
         jobs = self.erp.import_reviews(self.company)
@@ -455,7 +460,12 @@ class Desktop:
         header = ttk.Frame(win,padding=18)
         header.pack(fill='x')
         ttk.Label(header,text=reference(row),style='Title.TLabel').pack(anchor='w')
-        ttk.Label(header,text=f"{row['name']}  ·  ΑΦΜ {row['vat']}  ·  {when(row['issue_date'])}",style='Subtitle.TLabel').pack(anchor='w',pady=4)
+        identity_caption=tk.StringVar(value=f"{row['name']}  ·  ΑΦΜ {row['vat']}  ·  {when(row['issue_date'])}")
+        name_caption=tk.StringVar(value=row['name'])
+        def refresh_identity():
+            current,_=self.erp.detail(self.company,document_id);name_caption.set(current['name']);identity_caption.set(f"{current['name']}  ·  ΑΦΜ {current['vat']}  ·  {when(current['issue_date'])}")
+        win.refresh_identity=refresh_identity
+        ttk.Label(header,textvariable=identity_caption,style='Subtitle.TLabel').pack(anchor='w',pady=4)
         ttk.Label(header,text=f"Καθαρή {amount(row['net_minor'])} €    +    ΦΠΑ {amount(row['tax_minor'])} €    +    Στρογγ. {amount(row['rounding_minor'])} €    =    Σύνολο {amount(row['gross_minor'])} €",style='Section.TLabel').pack(anchor='w',pady=(8,0))
         split=ttk.Panedwindow(win,orient='horizontal')
         split.pack(fill='both',expand=True,padx=18,pady=(0,18))
@@ -467,10 +477,13 @@ class Desktop:
         summary,prepare_tab,source,history = [ttk.Frame(pages,padding=12) for _ in range(4)]
         for page,title in ((summary,'Στοιχεία'),(prepare_tab,'Προετοιμασία EBS'),(source,'Προέλευση'),(history,'Ιστορικό')):
             pages.add(page,text=title)
-        details = [('Επωνυμία',row['name']),('ΑΦΜ',row['vat']),('Αριθμός',row['number']),('Σειρά',row['series'] or '—'),('MARK',row['mark'] or '—'),('Νόμισμα',row['currency']),('Κατάσταση','Τοπικά εγκεκριμένη προετοιμασία' if preparation else 'Χρειάζεται έλεγχο'),('EBS','Δεν έχει γίνει αποστολή / καταχώριση')]
+        from app.application.workspace import Workspace
+        from app.ui.rpa_panel import LABELS as EBS_LABELS
+        state=next((r['ebs_state'] for r in Workspace(self.erp).rows(self.company) if r['id']==document_id),'not_sent')
+        details = [('Επωνυμία',row['name']),('ΑΦΜ',row['vat']),('Αριθμός',row['number']),('Σειρά',row['series'] or '—'),('MARK',row['mark'] or '—'),('Νόμισμα',row['currency']),('Κατάσταση','Τοπικά εγκεκριμένη προετοιμασία' if preparation else 'Χρειάζεται έλεγχο'),('EBS',EBS_LABELS.get(state,state))]
         for i,(label,value) in enumerate(details):
             ttk.Label(summary,text=label,style='Subtitle.TLabel').grid(row=i,column=0,sticky='w',padx=12,pady=12)
-            ttk.Label(summary,text=value,wraplength=300).grid(row=i,column=1,sticky='w',padx=18,pady=12)
+            ttk.Label(summary,textvariable=name_caption if label=='Επωνυμία' else None,text='' if label=='Επωνυμία' else value,wraplength=300).grid(row=i,column=1,sticky='w',padx=18,pady=12)
         def card():
             from app.ui.counterparties import open_detail
             return open_detail(self,row['counterparty_id'])
@@ -526,16 +539,29 @@ class Desktop:
                 self.tree.selection_set(str(document_id))
             self.status.set('Η προετοιμασία εγκρίθηκε τοπικά και καταγράφηκε στο ιστορικό. Δεν έγινε αποστολή στο EBS.')
         ttk.Button(prepare_tab,text='Έγκριση τοπικής προετοιμασίας',style='Primary.TButton',command=save).pack(anchor='e',pady=18)
-        read_text(source,f"Αρχείο: {row['filename']}\nSHA-256: {row['sha256']}\n\nΑρχική γραμμή Excel (αμετάβλητη):\n"+json.dumps(json.loads(row['raw_json']),ensure_ascii=False,indent=2))
+        source_kind='Αρχικά στοιχεία ΑΑΔΕ (αμετάβλητα)' if json.loads(row['raw_json']).get('_source') else 'Αρχική γραμμή Excel (αμετάβλητη)'
+        read_text(source,f"Αρχείο: {row['filename']}\nSHA-256: {row['sha256']}\n\n{source_kind}:\n"+json.dumps(json.loads(row['raw_json']),ensure_ascii=False,indent=2))
         timeline = '\n\n'.join(f"{event['created_at']}  ·  {ACTIONS.get(event['action'],event['action'])}\nΧειριστής: {event['actor']}\n{json.dumps(json.loads(event['payload']),ensure_ascii=False,indent=2)}" for event in events)
         read_text(history,timeline or 'Δεν υπάρχουν ενέργειες.')
         from app.ui.pdf_pane import PDFPane
         win.pdf_pane=PDFPane(self,right,document_id,win)
 
-    def open_aade(self):
+    def open_aade(self,document=None):
         from app.ui.aade_dialog import open_settings
-        return open_settings(self)
+        return open_settings(self,document)
 
     def open_counterparties(self):
         from app.ui.counterparties import open_register
         return open_register(self)
+
+    def recover_names(self):
+        if self._closing or self.busy:return
+        def execute():
+            from app.application.names import NameRecovery
+            service=ERP(self.directory)
+            try:return NameRecovery(service).run(self.company)
+            finally:service.close()
+        def done(result):
+            self.refresh()
+            if result['updated']:self.status.set(f"Συμπληρώθηκαν {result['updated']} επωνυμίες από τα ήδη αποθηκευμένα Excel, χωρίς νέα εισαγωγή.")
+        self.run_worker(execute,done)

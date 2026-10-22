@@ -48,11 +48,12 @@ class Client:
         self.opener=opener or urllib.request.build_opener(NoRedirect());self.sleep=sleep
 
     def fetch(self,date_from,date_to,mark='0',entity_vat=None,method='RequestDocs',single_page=False,cancel=None):
-        if method not in ('RequestDocs','RequestTransmittedDocs'):raise ValueError('Επιτρέπεται μόνο λήψη παραστατικών')
+        if method not in ('RequestDocs','RequestTransmittedDocs','RequestMyExpenses'):raise ValueError('Επιτρέπεται μόνο λήψη παραστατικών')
         start=datetime.strptime(date_from,'%Y-%m-%d');end=datetime.strptime(date_to,'%Y-%m-%d')
         if start>end:raise ValueError('Η ημερομηνία από πρέπει να προηγείται της έως')
         if not isinstance(mark,str) or not mark.isascii() or not mark.isdigit():raise ValueError('Μη έγκυρο MARK εκκίνησης')
-        params=dict(mark=mark,dateFrom=start.strftime('%d/%m/%Y'),dateTo=end.strftime('%d/%m/%Y'))
+        params=dict(dateFrom=start.strftime('%d/%m/%Y'),dateTo=end.strftime('%d/%m/%Y'))
+        if method!='RequestMyExpenses':params['mark']=mark
         if entity_vat:
             if len(entity_vat)!=9 or not entity_vat.isascii() or not entity_vat.isdigit():raise ValueError('Μη έγκυρο ΑΦΜ εκπροσωπούμενης εταιρείας')
             params['entityVatNumber']=entity_vat
@@ -69,7 +70,11 @@ class Client:
                     if exc.code in (429,500,502,503,504) and attempt<2:self.sleep(min(2**attempt,4));continue
                     raise APIError('Σφάλμα ΑΑΔΕ HTTP '+str(exc.code)+'. Δεν αποθηκεύτηκε μερική λήψη.') from None
                 except (urllib.error.URLError,TimeoutError,OSError):raise APIError('Δεν επιτεύχθηκε σύνδεση με ΑΑΔΕ. Έλεγξε δίκτυο και περιβάλλον.') from None
-            parsed=parsed_page(data);pages.append((data,parsed));total+=len(data)
+            if method=='RequestMyExpenses':
+                from app.infrastructure.aade.book import parse_book
+                parsed=parse_book(data)
+            else:parsed=parsed_page(data)
+            pages.append((data,parsed));total+=len(data)
             if total>64*1024*1024:raise APIError('Η λήψη υπερβαίνει το όριο. Επίλεξε μικρότερο χρονικό διάστημα.')
             token=parsed['next']
             if single_page or token is None:return pages

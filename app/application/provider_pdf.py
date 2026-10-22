@@ -35,10 +35,29 @@ class ProviderDatabase:
         row=self.erp.db.execute('SELECT * FROM provider_attempts WHERE company_id=? AND environment=? AND mark=? AND source_hash=? ORDER BY id DESC LIMIT 1',(self.company,self.environment,str(mark),source_hash)).fetchone()
         return dict(row) if row and row['state'] in SAVED_STATES else None
 
+    def linkable(self,mark):
+        row=self.erp.db.execute('SELECT document_id,record_json,match_status FROM mydata_records WHERE company_id=? AND environment=? AND mark=?',(self.company,self.environment,str(mark))).fetchone()
+        if not row or not row['document_id']:return None
+        identity=json.loads(row['record_json']).get('identity_verified',row['match_status']=='matched')
+        return row if identity and row['match_status'] in ('matched','different') else None
+
+    def link_cached(self,mark):
+        import hashlib
+        linked=self.linkable(mark)
+        if linked is None:return False
+        item=json.loads(linked['record_json']);source=hashlib.sha256(item.get('pdf_url','').encode()).hexdigest()
+        saved=self.saved_pdf(str(self.company),mark,source)
+        if not saved or not saved['path']:return False
+        path=Path(saved['path'])
+        if not path.is_file() or path.is_symlink() or path.stat().st_size!=saved['byte_count'] or hashlib.sha256(path.read_bytes()).hexdigest()!=saved['sha256']:return False
+        exists=self.erp.db.execute('SELECT 1 FROM attachments WHERE company_id=? AND document_id=? AND kind=? AND sha256=?',(self.company,linked['document_id'],'invoice',saved['sha256'])).fetchone()
+        if not exists:self.erp.attach_pdf(self.company,linked['document_id'],path,source='provider:'+saved['state'],confirmed=True)
+        return True
+
     def record_pdf(self,client_id,mark,state,source_hash,path=None,checksum=None,size=None):
         linked=None;blob=None
         if state in SAVED_STATES and path:
-            linked=self.erp.db.execute('SELECT document_id FROM mydata_records WHERE company_id=? AND environment=? AND mark=? AND match_status=?',(self.company,self.environment,str(mark),'matched')).fetchone()
+            linked=self.linkable(mark)
             if linked and linked[0]:
                 self.erp.detail(self.company,linked[0])
                 from app.infrastructure.pdf_archive import store,MAX_PDF
@@ -62,4 +81,5 @@ def run(erp,company,environment,destination,cancel,marks=None,recovery=False,not
     adapter=ProviderDatabase(erp,company,environment,marks)
     backend=RecoveryPDFDownloader(adapter,notice=notice,marks=marks) if recovery else AutomaticPDFDownloader(adapter,notice=notice)
     if observer:backend.observer=observer
+    for row in adapter.download_candidates(str(company),dates):adapter.link_cached(row['mark'])
     return backend.run(client,Path(destination),cancel,dates=dates)

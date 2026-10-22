@@ -71,7 +71,14 @@ class ERP:
         if not checked.records:
             raise ValueError('Δεν υπάρχουν έγκυρες εγγραφές')
         self._archive(item)  # Content-addressed orphan on rollback is safe; never a partial DB import.
-        return self.repository.persist_import(company, item, checked, fail_after)
+        report=self.repository.persist_import(company, item, checked, fail_after)
+        from app.application.mydata import MyData
+        try:
+            if self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mydata_records'").fetchone():
+                MyData(self).reconcile_stored(company)
+        except (ValueError,OSError) as exc:
+            report['warnings'].append(dict(reason='Η εισαγωγή αποθηκεύτηκε· εκκρεμεί σύνδεση ΑΑΔΕ/PDF: '+str(exc)))
+        return report
 
     def rename_counterparty(self, company, counterparty, name, confirmed=False):
         if confirmed is not True:raise ValueError('Απαιτείται επιβεβαίωση επωνυμίας')

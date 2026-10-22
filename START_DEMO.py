@@ -21,7 +21,7 @@ def probe(root=ROOT, version=None):
     version = sys.version_info[:2] if version is None else version
     if version < MINIMUM:
         raise RuntimeError('Detected Python %s.%s; this build requires Python 3.12 or newer.' % tuple(version))
-    for name in ('app/demo.py','app/__init__.py','migrations/001_initial.sql','migrations/002_preparation.sql','migrations/003_rounding.sql','migrations/004_workspace.sql','migrations/005_workflow.sql','migrations/006_mydata_read.sql','migrations/007_counterparty_cards.sql','migrations/008_account_defaults.sql','migrations/009_registry.sql','tests/fixtures.py'):
+    for name in ('app/demo.py','app/__init__.py','migrations/001_initial.sql','migrations/002_preparation.sql','migrations/003_rounding.sql','migrations/004_workspace.sql','migrations/005_workflow.sql','migrations/006_mydata_read.sql','migrations/007_counterparty_cards.sql','migrations/008_account_defaults.sql','migrations/009_registry.sql', 'migrations/010_aade_workflow.sql','tests/fixtures.py'):
         if not (root/name).is_file():
             raise RuntimeError('Incomplete extraction: missing '+name+'. Extract the entire ZIP, not just the launcher.')
     import sqlite3

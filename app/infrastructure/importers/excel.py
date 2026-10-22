@@ -13,7 +13,7 @@ MAX_FILE = 20 * 1024 * 1024
 MAX_EXPANDED = 64 * 1024 * 1024
 MAX_ROWS = 20000
 MAX_COLUMNS = 200
-NAMES = {**NAMES, 'name': {norm(x) for x in ['επωνυμία', 'επωνυμία εκδότη','επωνυμία προμηθευτή','επωνυμία αντισυμβαλλομένου','ονομασία προμηθευτή','αντισυμβαλλόμενος','προμηθευτής', 'supplier name', 'issuer name','seller name','counterparty name','name']},
+NAMES = {**NAMES, 'name': {norm(x) for x in ['επωνυμία', 'επωνυμία εκδότη','επωνυμία προμηθευτή','επωνυμία αντισυμβαλλομένου','ονομασία προμηθευτή','αντισυμβαλλόμενος','προμηθευτής', 'supplier name', 'issuer name','seller name','counterparty name','name','επωνυμία / ονοματεπώνυμο','επωνυμία/ονοματεπώνυμο εκδότη','επωνυμία - ονοματεπώνυμο','επωνυμία συναλλασσόμενου','επωνυμία αντισυμβαλλόμενου','επωνυμία εκδότη (προμηθευτή)','ονοματεπώνυμο / επωνυμία','ονοματεπώνυμο εκδότη']},
          'currency': {norm(x) for x in ['νόμισμα', 'currency']}}
 REQUIRED = ('vat', 'date', 'net', 'tax')
 
@@ -27,6 +27,26 @@ class Preview:
     mapping: dict
     records: list
     rejected: list
+
+
+def header_mapping(header):
+    mapping={}
+    for key,aliases in NAMES.items():
+        matches=[i for i,label in header.items() if norm(label) in aliases]
+        if len(matches)==1:mapping[key]=matches[0]
+    # Name labels vary across AADE exports; select an issuer name, never recipient name.
+    names=[];issuers=[]
+    for index,label in header.items():
+        value=norm(label)
+        is_name=value.startswith(('επωνυμια','ονοματεπωνυμο','ονομασια')) or value in NAMES['name']
+        recipient=any(word in value for word in ('ληπτη','πελατη','recipient','buyer','customer'))
+        if is_name and not recipient:
+            names.append(index)
+            if any(word in value for word in ('εκδοτη','προμηθευτη','πιστωτη','issuer','supplier','seller')):issuers.append(index)
+    candidates=issuers or names
+    mapping.pop('name',None)
+    if len(candidates)==1:mapping['name']=candidates[0]
+    return mapping
 
 
 def preview(path, manual_mapping=None):
@@ -66,11 +86,7 @@ def preview(path, manual_mapping=None):
             rows = read_sheet(z, location, strings)
             formula_rows = {int(r.get('r', '0')) for r in elements if r.find('.//m:f', NS) is not None}
             for pos, (_, header) in enumerate(rows[:12]):
-                mapping = {}
-                for key, aliases in NAMES.items():
-                    matches = [i for i, label in header.items() if norm(label) in aliases]
-                    if len(matches) == 1:
-                        mapping[key] = matches[0]
+                mapping = header_mapping(header)
                 score = sum(k in mapping for k in REQUIRED)*5 + sum(k in mapping for k in ('invoice','number','series'))
                 choices.append((score, name, rows, pos, header, mapping, formula_rows))
         if not choices:
