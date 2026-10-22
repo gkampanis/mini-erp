@@ -1,3 +1,11 @@
+# Νεότερη δοκιμαστική έκδοση: ΑΑΔΕ, επωνυμίες και PDF
+
+[Λήψη ZIP](MiniERP-AADE-PDF-20261022-112300.zip) · [Έλεγχοι](MiniERP-AADE-PDF-20261022-112300.zip.verification.json) · [SHA-256](MiniERP-AADE-PDF-20261022-112300.zip.sha256)
+
+75 tests κώδικα και 16 GUI, επανάληψη μετά την αποσυμπίεση. Πραγματικά Windows, EBS και παραγωγική ΑΑΔΕ δεν εκτελέστηκαν εδώ.
+
+Source commit: `8097a49`. Οι κωδικοί συμπληρώνονται μόνο τοπικά.
+
 # Mini ERP · Συνδεδεμένη ροή / έξοδα προς EBS
 
 [Λήψη νέας ελεγμένης έκδοσης](https://github.com/gkampanis/mini-erp/raw/refs/heads/downloads/MiniERP-Expenses-20261022-103909.zip)
