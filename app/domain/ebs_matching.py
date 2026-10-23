@@ -58,6 +58,16 @@ def equivalent_reference(left,right):
     return len(tokens)>=2 and any(t.isdigit() for t in tokens) and tokens==reference_tokens(right)
 
 
+def number_only_reference(item,doc):
+    """A bare EBS supplier number can omit the local series, never digits/zeros.
+
+    Acceptance still requires VAT, date, all three amounts and one-to-one
+    ownership in compare(); this is not arbitrary suffix/fuzzy matching.
+    """
+    invoice=item.get('invoice','');number=reference(doc.get('number'))
+    return bool(re.fullmatch('[0-9]+',invoice) and invoice==number)
+
+
 def fingerprint(row):
     keys=('company_id','id','direction','vat','series','number','issue_date','mark','kind','net_minor','tax_minor','gross_minor','currency','invoice_type','is_delivery_note')
     return hashlib.sha256(json.dumps({k:row.get(k) for k in keys},sort_keys=True,ensure_ascii=False).encode()).hexdigest()
@@ -71,8 +81,8 @@ def compare(documents,excel_rows,complete):
         if mark:by_mark.setdefault(mark,[]).append(row)
         if supplier and ref:by_ref.setdefault((supplier,ref),[]).append(row)
         if supplier and ref:by_tokens.setdefault((supplier,reference_tokens(ref)),[]).append(row)
-        # Candidate generation only: a similar numeric suffix can require review,
-        # but can NEVER replace the complete visible reference in the exact rule.
+        # A similar numeric suffix only generates candidates; acceptance below
+        # requires an equivalent full reference or the exact bare supplier number.
         suffix=re.search(r'([0-9]+)$',ref)
         if supplier and suffix:by_number.setdefault((supplier,suffix[1].lstrip('0') or '0'),[]).append(row)
     results={};owners={}
@@ -80,6 +90,8 @@ def compare(documents,excel_rows,complete):
         ref=full_reference(doc);key=(doc['vat'],ref)
         candidates={r['row']:r for r in by_ref.get(key,[])}
         candidates.update({r['row']:r for r in by_tokens.get((doc['vat'],reference_tokens(ref)),[]) if equivalent_reference(full_reference(r['normalized']),ref)})
+        number=reference(doc.get('number'))
+        candidates.update({r['row']:r for r in by_ref.get((doc['vat'],number),[]) if number_only_reference(r['normalized'],doc)})
         if doc.get('mark'):candidates.update({r['row']:r for r in by_mark.get(doc['mark'],[])})
         if not candidates:
             suffix=re.search(r'([0-9]+)$',ref)
@@ -95,7 +107,7 @@ def compare(documents,excel_rows,complete):
             for key,doc_key in (('vat','vat'),('date','issue_date'),('net_minor','net_minor'),('tax_minor','tax_minor'),('gross_minor','gross_minor')):
                 if item.get(key)!=doc[doc_key]:differences.append({'vat':'ΑΦΜ','date':'ημερομηνία','net_minor':'καθαρή αξία','tax_minor':'ΦΠΑ','gross_minor':'συνολική αξία'}[key])
             if item.get('invoice'):
-                if not equivalent_reference(item['invoice'],ref):differences.append('πλήρες αναγνωριστικό / σειρά / αριθμός')
+                if not equivalent_reference(item['invoice'],ref) and not number_only_reference(item,doc):differences.append('πλήρες αναγνωριστικό / σειρά / αριθμός')
                 if 'series' in item and item['series']!=reference(doc['series']):differences.append('χωριστή στήλη σειράς')
                 if 'number' in item and item['number']!=reference(doc['number']):differences.append('χωριστή στήλη αριθμού')
             elif item.get('series')!=reference(doc['series']) or item.get('number')!=reference(doc['number']):differences.append('σειρά/αριθμός')
@@ -104,7 +116,10 @@ def compare(documents,excel_rows,complete):
             if candidate['error']:differences.append('ελλιπή/μη έγκυρα στοιχεία Excel')
             if differences:state='review';reason='Πιθανή αντιστοίχιση — διαφορετικά/ελλιπή: '+', '.join(differences)
             else:
-                state='registered';reason=('Ίδιο MARK και ' if item.get('mark') and item.get('mark')==doc.get('mark') else 'Ίδιο ')+ 'ΑΦΜ, ημερομηνία, καθαρή, ΦΠΑ και συνολική αξία. '+('Ισοδύναμο πλήρες αναγνωριστικό: ίδια γράμματα/ψηφία με διαφορετικούς διαχωριστές' if item.get('invoice') and item['invoice']!=ref else 'Ίδιο πλήρες αναγνωριστικό παραστατικού')
+                if item.get('invoice')!=ref and number_only_reference(item,doc):identity='Ίδιος ακριβής αριθμός προμηθευτή· το Εναλ. παρ/κό δεν περιέχει τη σειρά'
+                elif item.get('invoice') and item['invoice']!=ref:identity='Ισοδύναμο πλήρες αναγνωριστικό: ίδια γράμματα/ψηφία με διαφορετικούς διαχωριστές'
+                else:identity='Ίδιο πλήρες αναγνωριστικό παραστατικού'
+                state='registered';reason=('Ίδιο MARK και ' if item.get('mark') and item.get('mark')==doc.get('mark') else 'Ίδιο ')+ 'ΑΦΜ, ημερομηνία, καθαρή, ΦΠΑ και συνολική αξία. '+identity
                 owners.setdefault(candidate['row'],[]).append(doc['id'])
         results[doc['id']]=dict(status=state,reason=reason,excel_rows=numbers,snapshot_hash=fingerprint(doc))
     for row,ids in owners.items():

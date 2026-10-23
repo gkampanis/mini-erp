@@ -6,8 +6,9 @@ import tkinter as tk
 from tkinter import ttk,filedialog,messagebox,simpledialog
 from app.application.ebs_reconciliation import EBSReconciliation
 from app.application.service import ERP
-from app.domain.ebs_matching import FIELDS,LABELS
 from app.application.periods import MONTHS,month_bounds
+
+COLUMNS={'date':'Ημ/νία','invoice':'Εναλ. παρ/κό','vat':'Α.Φ.Μ.','net':'Αξία','tax':'ΦΠΑ','gross':'Σύνολο'}
 
 STATES={'Όλα':None,'Καταχωρισμένα':'registered','Μη καταχωρισμένα':'not_registered','Χρειάζονται έλεγχο':'review','Δεν εντοπίστηκε στο Excel':'not_found','Χωρίς συμφωνία':'unreconciled'}
 TITLES={v:k for k,v in STATES.items() if v}
@@ -70,7 +71,7 @@ class ReconciliationTab:
         for entry in entries or [None]:
             item=entry['normalized'] if entry else {}
             tree.insert('','end',values=('Γραμμή Excel','',entry['row_number'] if entry else 'Δεν υπάρχει αντιστοίχιση'))
-            values=[('ΑΦΜ',row['vat'],item.get('vat','—')),('Παραστατικό',reference(row),entry['original_reference'] if entry else '—'),('Ημερομηνία',row['issue_date'],item.get('date','—')),('MARK',row.get('mark') or '—',item.get('mark') or '—')]
+            values=[('ΑΦΜ',row['vat'],item.get('vat','—')),('Παραστατικό',reference(row),entry['original_reference'] if entry else '—'),('Ημερομηνία',row['issue_date'],item.get('date','—'))]
             values.extend((label,amount(row[key]),amount(item[key]) if key in item else '—') for label,key in (('Καθαρή €','net_minor'),('ΦΠΑ €','tax_minor'),('Σύνολο €','gross_minor')))
             for values_row in values:tree.insert('','end',values=values_row)
         win.comparison_tree=tree;return win
@@ -125,17 +126,17 @@ class ReconciliationTab:
         mapping_content=ttk.Frame(canvas);mapping_window=canvas.create_window((0,0),window=mapping_content,anchor='nw')
         mapping_content.bind('<Configure>',lambda _:canvas.configure(scrollregion=canvas.bbox('all')))
         canvas.bind('<Configure>',lambda event:canvas.itemconfigure(mapping_window,width=event.width))
-        vars={k:tk.StringVar(value='—') for k in FIELDS};columns={};headers={}
-        for index,key in enumerate(FIELDS):
-            ttk.Label(mapping_content,text=LABELS[key],wraplength=160).grid(row=index//2,column=(index%2)*2,sticky='w',pady=7,padx=8)
+        vars={k:tk.StringVar(value='—') for k in COLUMNS};columns={};headers={}
+        for index,key in enumerate(COLUMNS):
+            ttk.Label(mapping_content,text=COLUMNS[key],wraplength=160).grid(row=index//2,column=(index%2)*2,sticky='w',pady=7,padx=8)
             box=ttk.Combobox(mapping_content,textvariable=vars[key],state='readonly',width=24);box.grid(row=index//2,column=(index%2)*2+1,sticky='ew',padx=8);columns[key]=box
-        hint=tk.StringVar();ttk.Label(mapping_content,textvariable=hint,style='Subtitle.TLabel',wraplength=820).grid(row=6,column=0,columnspan=4,sticky='w',pady=12)
+        hint=tk.StringVar();ttk.Label(mapping_content,textvariable=hint,style='Subtitle.TLabel',wraplength=820).grid(row=3,column=0,columnspan=4,sticky='w',pady=12)
         sample=table(sample_tab,('row','values'),('Γραμμή','Περιεχόμενο / αποτέλεσμα'),{'values':850})
         company_ok=tk.BooleanVar(value=False);complete=tk.BooleanVar(value=False);remember=tk.BooleanVar(value=True)
         ttk.Checkbutton(footer,text=f'Επιβεβαιώνω ότι η εξαγωγή ανήκει στην εταιρεία ΑΦΜ {owner["vat"]} και στον επιλεγμένο μήνα',variable=company_ok).pack(anchor='w',pady=4)
         ttk.Checkbutton(footer,text='Πλήρης κατάλογος όλων των καταχωρισμένων για την εταιρεία και τον μήνα',variable=complete).pack(anchor='w',pady=4)
         ttk.Checkbutton(footer,text='Αποθήκευση αντιστοίχισης για ίδια διάταξη αρχείου',variable=remember).pack(anchor='w',pady=4)
-        status=tk.StringVar(value='Έλεγξε τις πραγματικές επικεφαλίδες. Εσωτερικός τύπος EBS δεν είναι κωδικός ΑΑΔΕ.')
+        status=tk.StringVar(value='Έλεγξε τις έξι στήλες και επίλεξε «Προεπισκόπηση συμφωνίας».')
         ttk.Label(footer,textvariable=status,style='Subtitle.TLabel',wraplength=870).pack(anchor='w',pady=8)
         bottom=ttk.Frame(footer);bottom.pack(fill='x')
         def invalid(*_):
@@ -143,21 +144,22 @@ class ReconciliationTab:
             if hasattr(win,'apply_button'):win.apply_button.state(['disabled'])
         for var in (*vars.values(),year,month,company_ok,complete,sheet,header):var.trace_add('write',invalid)
         def load_headers(event=None):
+            from app.infrastructure.importers.legacy_primitives import norm
             invalid()
             try:line=int(header.get())
             except ValueError:status.set('Γράψε έγκυρο αριθμό γραμμής τίτλων.');return
             selected_sheet=next(s for s in book['sheets'] if s['name']==sheet.get());headers.clear();headers.update(next((raw for number,raw in selected_sheet['rows'] if number==line),{}))
-            labels={f'{index+1}: {title}':index for index,title in headers.items()};win.column_labels=labels
+            # These are explicitly unrelated to reconciliation. Retain their
+            # raw cells, but do not offer them as mapping choices.
+            labels={f'{index+1}: {title}':index for index,title in headers.items() if norm(title) not in ('παρ κο','κατ','συναλλασσομενος','τιτλος')};win.column_labels=labels
             proposed=self.service.saved_mapping(self.owner.company,headers)
             if not proposed:
-                proposed={k:v for k,v in header_mapping(headers).items() if k in ('vat','date','net','tax','gross','mark','series')}
-                from app.infrastructure.importers.legacy_primitives import norm
-                # Examined customer export; user explicitly confirmed this is the
-                # COMPLETE reference displayed in our main list, not the EBS code.
-                alternative=[i for i,label in headers.items() if norm(label)=='εναλ παρ κο']
-                if len(alternative)==1:proposed['invoice']=alternative[0]
-                net=[i for i,label in headers.items() if norm(label)=='αξια']
-                if len(net)==1:proposed['net']=net[0]
+                proposed={k:v for k,v in header_mapping(headers).items() if k in COLUMNS}
+                # Actual EBS export labels; positions may change. Neither the
+                # internal EBS reference nor its category is invoice identity.
+                for key,label in COLUMNS.items():
+                    matches=[i for i,title in headers.items() if norm(title)==norm(label)]
+                    if len(matches)==1:proposed[key]=matches[0]
             for key,box in columns.items():
                 box.configure(values=('—',*labels));vars[key].set(next((label for label,index in labels.items() if index==proposed.get(key)),'—'))
             sample.delete(*sample.get_children())
@@ -165,7 +167,7 @@ class ReconciliationTab:
                 if number<line:continue
                 sample.insert('','end',values=(number,' | '.join(f'{headers.get(i,i+1)}: {v}' for i,v in raw.items())))
                 if len(sample.get_children())>=8:break
-            hint.set('ΑΦΜ EBS ↔ ΑΦΜ Mini ERP. «Εναλ. παρ/κό» ↔ ολόκληρο το «Παραστατικό» της βασικής λίστας. Διατηρούνται σειρά, διαχωριστές και αρχικά μηδενικά. Ο εσωτερικός «Τύπος» EBS δεν είναι invoiceType ΑΑΔΕ.')
+            hint.set('«Εναλ. παρ/κό» ↔ «Παραστατικό» Mini ERP, μαζί με ΑΦΜ, ημερομηνία και τις τρεις αξίες. Το «Κατ.» αγνοείται· δεν ορίζει ομάδα αγορών ή εξόδων. Οι άλλες στήλες διατηρούνται μόνο στο αρχικό αρχείο.')
         sheet_box.bind('<<ComboboxSelected>>',load_headers);header_box.bind('<Return>',load_headers)
         header.trace_add('write',lambda *_:load_headers())
         ttk.Button(top,text='Εμφάνιση στηλών',command=load_headers).pack(side='right')

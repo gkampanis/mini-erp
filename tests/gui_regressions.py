@@ -682,8 +682,8 @@ class DesktopRegressions(unittest.TestCase):
         from app.application.ebs_reconciliation import EBSReconciliation
         from tests.test_ods import ods
         from xml.sax.saxutils import escape
-        headers=['Ημ/νία','Παρ/κό','Εναλ. παρ/κό','Συναλλασσόμενος','Τίτλος','Tύπος συν/νου','Κατ.','Αξία','ΦΠΑ','Σύνολο','Tύπος','ΑΦΜ']
-        values=['2026-10-21','ΤΕΔ-00001','ΔΟΚ/1','SYN - ΣΥΝΘΕΤΙΚΟΣ','Συνθετική εγγραφή','3','2','0,10','0,02','0,12','3','000000001']
+        headers=['Ημ/νία','Παρ/κό','Εναλ. παρ/κό','Συναλλασσόμενος','Α.Φ.Μ.','Τίτλος','Κατ.','Αξία','ΦΠΑ','Σύνολο']
+        values=['2026-10-21','ΤΕΔ-00001','1','SYN - ΣΥΝΘΕΤΙΚΟΣ','000000001','Συνθετική εγγραφή','2','0,10','0,02','0,12']
         rows=''.join('<table:table-row>'+''.join('<table:table-cell office:value-type="string"><text:p>'+escape(v)+'</text:p></table:table-cell>' for v in row)+'</table:table-row>' for row in (headers,values))
         path=self.folder/'synthetic-ebs.ods';ods(path,rows)
         book=EBSReconciliation(self.app.erp).layout(path)
@@ -697,10 +697,15 @@ class DesktopRegressions(unittest.TestCase):
         self.assertTrue(win.apply_button.winfo_ismapped())
         self.assertLessEqual(win.apply_button.winfo_rooty()+win.apply_button.winfo_height(),win.winfo_rooty()+win.winfo_height())
         self.assertEqual(win.mapping_vars['invoice'].get(),'3: Εναλ. παρ/κό')
-        self.assertEqual(win.mapping_vars['invoice_type'].get(),'—')
+        self.assertEqual({k:v.get() for k,v in win.mapping_vars.items()},{'date':'1: Ημ/νία','invoice':'3: Εναλ. παρ/κό','vat':'5: Α.Φ.Μ.','net':'8: Αξία','tax':'9: ΦΠΑ','gross':'10: Σύνολο'})
+        self.assertNotIn('2: Παρ/κό',win.column_labels);self.assertNotIn('7: Κατ.',win.column_labels)
+        self.assertEqual(len(win.column_labels),6)
         win.company_ok_var.set(True);win.complete_var.set(True);win.check()
         wait(self.root,lambda:not self.app.busy)
         self.assertTrue(win.apply_button.instate(['!disabled']))
+        self.assertEqual(win.packet['mapping'],{'date':0,'invoice':2,'vat':4,'net':7,'tax':8,'gross':9})
+        self.assertEqual(win.packet['rows'][0]['raw'][6],'2')
+        self.assertNotIn('invoice_type',win.packet['rows'][0]['normalized'])
         self.assertEqual(self.count('rpa_jobs'),0)
         with patch('app.ui.ebs_reconciliation.messagebox.askyesno',return_value=True):win.apply_button.invoke()
         wait(self.root,lambda:not self.app.busy)

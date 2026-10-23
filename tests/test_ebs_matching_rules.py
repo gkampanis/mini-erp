@@ -17,10 +17,23 @@ class MatchingRuleTests(unittest.TestCase):
         for ref in ('INV/00123',' inv/00123 ','INV00123','INV-00123','INV / 00123'):
             row=excel(ref);row['normalized']['invoice']=ref.strip().casefold()
             with self.subTest(ref=ref):self.assertEqual(self.state(document(),row)['status'],'registered')
-    def test_incomplete_reference_zeros_different_series_remain_review(self):
-        for ref in ('00123','INV/123','OTHER/00123','000123'):
+    def test_zeros_different_series_remain_review(self):
+        for ref in ('INV/123','OTHER/00123','000123'):
             row=excel(ref);row['normalized']['invoice']=ref.casefold()
             with self.subTest(ref=ref):self.assertEqual(self.state(document(),row)['status'],'review')
+    def test_bare_number_omits_series_only_with_all_identity_checks(self):
+        result=self.state(document(),excel('00123'))
+        self.assertEqual(result['status'],'registered');self.assertIn('ακριβής αριθμός',result['reason'])
+        for changes in (dict(net_minor=9999),dict(tax_minor=2401),dict(gross_minor=12401),dict(date='2026-09-16')):
+            with self.subTest(changes=changes):self.assertEqual(self.state(document(),excel('00123',**changes))['status'],'review')
+        self.assertEqual(self.state(document(),excel('123'))['status'],'review')
+        self.assertEqual(self.state(document(),excel('00124'))['status'],'not_registered')
+    def test_bare_number_is_ambiguous_between_series_or_duplicate_excel_rows(self):
+        docs=[document(1,'INV'),document(2,'OTHER')]
+        result=compare(docs,[excel('00123')],True)
+        self.assertEqual([r['status'] for r in result.values()],['review','review'])
+        rows=[excel('00123'),excel('INV/00123')];rows[1]['row']=3
+        self.assertEqual(compare([document()],rows,True)[1]['status'],'review')
     def test_every_financial_component_is_mandatory_even_when_gross_matches(self):
         for changes in (dict(net_minor=9999),dict(tax_minor=2401),dict(gross_minor=12401),dict(net_minor=9900,tax_minor=2500)):
             with self.subTest(changes=changes):self.assertEqual(self.state(document(),excel(**changes))['status'],'review')
