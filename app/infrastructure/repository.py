@@ -86,9 +86,15 @@ class Repository:
             self.audit(company,'import_completed',None,dict(job=job,inserted=report['inserted'],duplicates=report['duplicates'],rejected=len(report['rejected']),headers=getattr(item,'headers',{}),mapping=getattr(item,'mapping',{}),source_kind=getattr(item,'source_kind','excel')))
         return report
 
-    def search(self, company, query=''):
+    def search(self, company, query='', *, counterparty=None, month=None):
         # Python casefold handles accented Greek consistently, unlike SQLite lower().
-        rows = self.db.execute('SELECT d.*,c.vat,c.name,p.nature_group,p.account_code,p.approved_at AS prepared_at FROM documents d JOIN counterparties c ON c.id=d.counterparty_id LEFT JOIN document_preparations p ON p.document_id=d.id AND p.company_id=d.company_id WHERE d.company_id=? ORDER BY d.issue_date DESC,d.id DESC',(company,)).fetchall()
+        where='d.company_id=?';args=[company]
+        if counterparty is not None:where+=' AND d.counterparty_id=?';args.append(counterparty)
+        if month is not None:
+            from datetime import date
+            first=date.fromisoformat(month+'-01');following=date(first.year+first.month//12,first.month%12+1,1)
+            where+=' AND d.issue_date>=? AND d.issue_date<?';args.extend((first.isoformat(),following.isoformat()))
+        rows = self.db.execute('SELECT d.*,c.vat,c.name,p.nature_group,p.account_code,p.approved_at AS prepared_at FROM documents d JOIN counterparties c ON c.id=d.counterparty_id LEFT JOIN document_preparations p ON p.document_id=d.id AND p.company_id=d.company_id WHERE '+where+' ORDER BY d.issue_date DESC,d.id DESC',args).fetchall()
         return [dict(r) for r in rows if not query or any(query.casefold() in str(r[k] or '').casefold() for k in ('vat','name','number','series','mark','issue_date'))]
 
     def detail(self, company, document):

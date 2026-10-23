@@ -1,6 +1,6 @@
 """Greek document preparation workspace. No EBS writes or accounting posting."""
 import json
-from datetime import date
+from datetime import date,timedelta
 from decimal import Decimal
 from pathlib import Path
 import queue
@@ -106,20 +106,20 @@ class Desktop:
             root.state('zoomed')
         except tk.TclError:
             pass
-        header = ttk.Frame(root,padding=(24,20,24,12))
+        header = ttk.Frame(root,padding=(24,12,24,8))
         header.pack(fill='x')
-        self.import_button = ttk.Button(header,text='+  Εισαγωγή Excel',style='Primary.TButton',command=self.choose_excel)
+        self.import_button = ttk.Button(header,text='+  Εισαγωγή Excel',command=self.choose_excel)
         self.import_button.pack(side='right',padx=(8,0))
-        self.acquire_button=ttk.Button(header,text='Άντληση Παραστατικών',style='Primary.TButton',command=self.open_acquisition)
+        self.acquire_button=ttk.Button(header,text='Άντληση εξόδων & PDF',style='Primary.TButton',command=self.open_acquisition)
         self.acquire_button.pack(side='right',padx=(8,0))
         ttk.Button(header,text='Ρυθμίσεις',command=self.open_settings).pack(side='right',padx=6)
         ttk.Button(header,text='ΑΑΔΕ / myDATA',command=self.open_aade).pack(side='right')
         ttk.Label(header,text='Mini ERP',style='Title.TLabel').pack(anchor='w')
         self.company_caption=tk.StringVar(value=f"{company['name']}  ·  Προετοιμασία παραστατικών για EBS")
-        ttk.Label(header,textvariable=self.company_caption,style='Subtitle.TLabel').pack(anchor='w',pady=(3,0))
+        ttk.Label(root,textvariable=self.company_caption,style='Subtitle.TLabel').pack(anchor='w',padx=24,pady=(0,6))
         metrics=ttk.Frame(root,padding=(24,0,24,10));metrics.pack(fill='x')
         self.metrics={}
-        for key,label in [('total','Παραστατικά'),('pending','Έξοδα / διαχωρισμός για έλεγχο'),('issues','Έλεγχοι εισαγωγής')]:
+        for key,label in [('total','Παραστατικά συνολικά'),('pending','Χωρίς έγκριση (περίοδος)'),('issues','Προειδοποιήσεις εισαγωγών')]:
             var=tk.StringVar(value='0');self.metrics[key]=var
             ttk.Label(metrics,text=label+':',style='Subtitle.TLabel').pack(side='left',padx=(0,5))
             ttk.Label(metrics,textvariable=var).pack(side='left',padx=(0,24))
@@ -144,6 +144,15 @@ class Desktop:
         ttk.Button(search_bar,text='Καθαρισμός',command=self.reset_filters).pack(side='left')
         filter_bar = ttk.Frame(filters)
         filter_bar.pack(fill='x',pady=(8,0))
+        ttk.Label(filter_bar,text='Μήνας:').pack(side='left',padx=(0,6))
+        from app.application.periods import MONTHS
+        previous=date.today().replace(day=1)-timedelta(days=1)
+        self.month_filter=tk.StringVar(value=MONTHS[previous.month-1]+' '+str(previous.year))
+        self._month_values={}
+        self._period_initialized=False
+        self.month_box=ttk.Combobox(filter_bar,textvariable=self.month_filter,state='readonly',width=24)
+        self.month_box.pack(side='left',padx=(0,12))
+        self.month_box.bind('<<ComboboxSelected>>',self.month_changed)
         self.state_filter = tk.StringVar(value=STATES[0])
         self.group_filter = tk.StringVar(value='Όλες οι ομάδες')
         for var,options in ((self.state_filter,STATES),(self.group_filter,tuple(GROUPS))):
@@ -152,13 +161,15 @@ class Desktop:
             box.bind('<<ComboboxSelected>>',lambda _:self.refresh())
         self.result_count = tk.StringVar()
         ttk.Label(self.documents_tab,textvariable=self.result_count,style='Subtitle.TLabel').pack(anchor='w',pady=(0,8))
-        columns = ('reference','name','vat','issue_date','gross_minor','account_code','preparation_state','aade_state','pdf_state','ebs_state')
-        titles = ('Παραστατικό','Επωνυμία','ΑΦΜ','Ημερομηνία','Σύνολο €','Λογαριασμός','Έλεγχος','ΑΑΔΕ','PDF','EBS')
-        self.tree = table(self.documents_tab,columns,titles,{'name':190,'reference':100,'vat':95,'issue_date':90,'gross_minor':85,'account_code':120,'preparation_state':120,'aade_state':90,'pdf_state':70,'ebs_state':170})
+        columns = ('reference','name','vat','issue_date','gross_minor','account_code','preparation_state','aade_state','pdf_state')
+        titles = ('Παραστατικό','Επωνυμία','ΑΦΜ','Ημερομηνία','Σύνολο €','Λογαριασμός','Έλεγχος','ΑΑΔΕ','PDF · κλικ για άνοιγμα')
+        self.tree = table(self.documents_tab,columns,titles,{'name':190,'reference':100,'vat':95,'issue_date':90,'gross_minor':85,'account_code':120,'preparation_state':120,'aade_state':90,'pdf_state':200})
         self.tree.configure(selectmode='extended')
         for col in columns:
             self.tree.heading(col,command=lambda key=col:self.sort_documents(key))
-        self.tree.bind('<Double-1>',lambda _:self.open_detail())
+        self.tree.column('pdf_state',width=200)
+        self.tree.bind('<ButtonRelease-1>',self.pdf_click)
+        self.tree.bind('<Double-1>',self.document_double_click)
         self.tree.bind('<Return>',lambda _:self.open_detail())
         actions = ttk.Frame(self.documents_tab)
         actions.pack(side='bottom',fill='x',pady=(12,0))
@@ -166,6 +177,7 @@ class Desktop:
         self.tree.master.pack(fill='both',expand=True)
         ttk.Label(actions,text='Διπλό κλικ ή Enter για στοιχεία και έλεγχο.',style='Subtitle.TLabel').pack(side='left')
         ttk.Button(actions,text='Στοιχεία & προετοιμασία',command=self.open_detail).pack(side='right')
+        ttk.Button(actions,text='Άνοιγμα PDF',command=self.open_pdf).pack(side='right',padx=8)
         ttk.Label(self.reviews_tab,text='Ιστορικό εισαγωγών και εξαιρέσεις',style='Section.TLabel').pack(anchor='w')
         ttk.Label(self.reviews_tab,text='Οι αναφορές διατηρούνται μετά το κλείσιμο της εφαρμογής. Διπλό κλικ για αναλυτικό έλεγχο.',style='Subtitle.TLabel').pack(anchor='w',pady=(4,12))
         self.review_tree = table(self.reviews_tab,('created_at','filename','inserted','duplicates','rejected','warnings'),
@@ -182,13 +194,13 @@ class Desktop:
         self.rpa_panel=RPAPanel(self,self.rpa_tab,table)
         from app.ui.suppliers import Suppliers
         self.suppliers=Suppliers(self,self.suppliers_tab)
+        self.notebook.bind('<<NotebookTabChanged>>',self.tab_changed)
         footer = ttk.Frame(root,padding=(24,12,24,12))
         footer.pack(side='bottom',fill='x')
         self.notebook.pack_forget()
         self.notebook.pack(fill='both',expand=True,padx=24)
         self.progress = ttk.Progressbar(footer,mode='indeterminate',length=110)
         ttk.Label(footer,textvariable=self.status,style='Subtitle.TLabel').pack(anchor='w')
-        ttk.Label(footer,text='Άντληση μήνα ή Excel · Προμηθευτές / λογαριασμοί · Καταχώριση EBS · Ctrl+Shift+F9 παύση / F10 συνέχεια / F12 διακοπή',style='Subtitle.TLabel').pack(anchor='w',pady=(3,0))
         root.protocol('WM_DELETE_WINDOW',self.close)
         root.bind('<Control-f>',lambda _:(entry.focus_set(),entry.select_range(0,'end')))
         self.refresh()
@@ -204,6 +216,7 @@ class Desktop:
             return
         self.import_button.state(['disabled'] if self.busy or self.rpa_panel.running or self._has_preview() else ['!disabled'])
         self.acquire_button.state(['disabled'] if self.busy or self.rpa_panel.running else ['!disabled'])
+        self.month_box.configure(state='disabled' if self.busy or self.rpa_panel.running else 'readonly')
         self.rpa_panel.refresh()
 
     def close(self):
@@ -270,6 +283,30 @@ class Desktop:
         self._sort = (key,not self._sort[1] if key==self._sort[0] else False)
         self.refresh()
 
+    def tab_changed(self,event=None):
+        if self.notebook.select()==str(self.suppliers_tab):self.suppliers.refresh()
+
+    def month_changed(self,event=None):
+        self._period_initialized=True
+        self.refresh()
+
+    def open_pdf(self,document=None):
+        selected=self.tree.selection()
+        if document is None and not selected:return
+        from app.ui.pdf_pane import open_document
+        return open_document(self,document if document is not None else int(selected[0]),self.root)
+
+    def pdf_click(self,event):
+        if self.tree.identify_region(event.x,event.y)!='cell':return
+        column=self.tree.identify_column(event.x)
+        if column!='#'+str(list(self.tree['columns']).index('pdf_state')+1):return
+        row=self.tree.identify_row(event.y)
+        if row:self.tree.selection_set(row);self.open_pdf(int(row))
+
+    def document_double_click(self,event):
+        if self.tree.identify_column(event.x)=='#'+str(list(self.tree['columns']).index('pdf_state')+1):return 'break'
+        self.open_detail()
+
     def refresh(self):
         identity=self.erp.db.execute('SELECT vat,name FROM companies WHERE id=?',(self.company,)).fetchone()
         self.company_caption.set(identity['name']+' · ΑΦΜ '+identity['vat']+' · Προετοιμασία για EBS')
@@ -277,11 +314,21 @@ class Desktop:
             if window.winfo_exists() and hasattr(window,'refresh_identity'):window.refresh_identity()
             if window.winfo_exists() and hasattr(window,'pdf_pane'):window.pdf_pane.refresh_if_changed()
         selected = self.tree.selection()
-        all_rows = self.erp.search(self.company)
+        months=[r[0] for r in self.erp.db.execute('SELECT DISTINCT substr(issue_date,1,7) FROM documents WHERE company_id=? ORDER BY 1 DESC',(self.company,))]
+        from app.application.periods import MONTHS
+        available=set(months)|set(self._month_values.values())|{f'{year}-{month:02d}' for year in (date.today().year-1,date.today().year) for month in range(1,13)}
+        periods={MONTHS[int(m[5:])-1]+' '+m[:4]:m for m in sorted(available,reverse=True)}
+        self._month_values=periods
+        self.month_box.configure(values=('Όλοι οι μήνες',*periods))
+        if months and not self._period_initialized:self.month_filter.set(MONTHS[int(months[0][5:])-1]+' '+months[0][:4]);self._period_initialized=True
+        month=periods.get(self.month_filter.get()) if self.month_filter.get()!='Όλοι οι μήνες' else None
+        total=self.erp.db.execute('SELECT count(*) FROM documents WHERE company_id=?',(self.company,)).fetchone()[0]
         jobs = self.erp.import_reviews(self.company)
         from app.application.workspace import Workspace
         from app.ui.rpa_panel import LABELS as EBS_LABELS
-        rows = Workspace(self.erp).rows(self.company,self.query.get().strip())
+        month_rows=Workspace(self.erp).rows(self.company,month=month)
+        query=self.query.get().strip().casefold()
+        rows=[r for r in month_rows if not query or any(query in str(r[k] or '').casefold() for k in ('vat','name','number','series','mark','issue_date'))]
         wanted_group = GROUPS.get(self.group_filter.get())
         rows = [r for r in rows if (wanted_group is None or (r.get('nature_group') or r.get('suggested_group'))==wanted_group)
                 and (self.state_filter.get()!=STATES[1] or not r.get('prepared_at'))
@@ -299,19 +346,17 @@ class Desktop:
         self.tree.delete(*self.tree.get_children())
         for i,row in enumerate(rows):
             self.tree.insert('','end',iid=str(row['id']),values=[amount(row[k]) if k.endswith('_minor') else when(row[k]) if k=='issue_date' else row.get(k) or '—' for k in self.tree['columns']],tags=('alternate',) if i%2 else ())
-        if selected and self.tree.exists(selected[0]):
-            self.tree.selection_set(selected[0])
-        self.result_count.set(f'{len(rows)} από {len(all_rows)} παραστατικά')
-        self.metrics['total'].set(str(len(all_rows)))
-        scope=self.rpa_panel.rpa.expense_scope(self.company,[r['id'] for r in all_rows])
-        self.metrics['pending'].set(str(len(scope['needs_review'])))
+        self.tree.selection_set([key for key in selected if self.tree.exists(key)])
+        self.result_count.set(f'{len(rows)} παραστατικά στη λίστα · {self.month_filter.get()} · {total} συνολικά. Το RPA χρησιμοποιεί αυτή τη λίστα.')
+        self.metrics['total'].set(str(total))
+        self.metrics['pending'].set(str(sum(r['direction']=='incoming' and (r.get('nature_group') or r.get('suggested_group'))!='2' and not r.get('prepared_at') for r in month_rows)))
         self.metrics['issues'].set(str(sum(len(j['report'].get('rejected',[]))+len(j['report'].get('warnings',[])) for j in jobs)))
         self._jobs = {j['id']:j for j in jobs}
         self.review_tree.delete(*self.review_tree.get_children())
         for job in jobs:
             report = job['report']
             self.review_tree.insert('','end',iid=str(job['id']),values=(job['created_at'],job['filename'],report.get('inserted',0),report.get('duplicates',0),len(report.get('rejected',[])),len(report.get('warnings',[]))))
-        self.suppliers.refresh();self.rpa_panel.refresh()
+        self.tab_changed();self.rpa_panel.refresh()
         if not self.busy:
             self.status.set('Τα παραστατικά και οι αναφορές έχουν φορτωθεί από τη βάση.')
 
@@ -494,10 +539,7 @@ class Desktop:
         summary,prepare_tab,source,history = [ttk.Frame(pages,padding=12) for _ in range(4)]
         for page,title in ((summary,'Στοιχεία'),(prepare_tab,'Προετοιμασία EBS'),(source,'Προέλευση'),(history,'Ιστορικό')):
             pages.add(page,text=title)
-        from app.application.workspace import Workspace
-        from app.ui.rpa_panel import LABELS as EBS_LABELS
-        state=next((r['ebs_state'] for r in Workspace(self.erp).rows(self.company) if r['id']==document_id),'not_sent')
-        details = [('Επωνυμία',row['name']),('ΑΦΜ',row['vat']),('Αριθμός',row['number']),('Σειρά',row['series'] or '—'),('MARK',row['mark'] or '—'),('Νόμισμα',row['currency']),('Κατάσταση','Τοπικά εγκεκριμένη προετοιμασία' if preparation else 'Χρειάζεται έλεγχο'),('EBS',EBS_LABELS.get(state,state))]
+        details = [('Επωνυμία',row['name']),('ΑΦΜ',row['vat']),('Αριθμός',row['number']),('Σειρά',row['series'] or '—'),('MARK',row['mark'] or '—'),('Νόμισμα',row['currency']),('Κατάσταση','Τοπικά εγκεκριμένη προετοιμασία' if preparation else 'Χρειάζεται έλεγχο')]
         for i,(label,value) in enumerate(details):
             ttk.Label(summary,text=label,style='Subtitle.TLabel').grid(row=i,column=0,sticky='w',padx=12,pady=12)
             ttk.Label(summary,textvariable=name_caption if label=='Επωνυμία' else None,text='' if label=='Επωνυμία' else value,wraplength=300).grid(row=i,column=1,sticky='w',padx=18,pady=12)
@@ -568,9 +610,9 @@ class Desktop:
         return open_settings(self,section)
 
     def open_acquisition(self):
-        if self.rpa_panel.running:return
+        if self.busy or self.rpa_panel.running:return
         from app.ui.aade_dialog import open_settings
-        return open_settings(self,acquire=True)
+        return open_settings(self,acquire=True,period=self._month_values.get(self.month_filter.get()))
 
     def open_aade(self,document=None):
         from app.ui.aade_dialog import open_settings

@@ -24,6 +24,13 @@ HEADERS = ['ΑΦΜ','Επωνυμία','Σειρά','Αριθμός','Ημερο
 ROW = ['000000001','ΣΥΝΘΕΤΙΚΟΣ ΠΡΟΜΗΘΕΥΤΗΣ Α','ΔΟΚ','1','21/10/2026','0,10','0,02','0,12','10000001']
 
 
+def volume_workbook(path,count=2500,suppliers=300):
+    """Two calendar months and synthetic VATs, for repeatable volume checks."""
+    rows=[HEADERS]+[[f'{1+i%suppliers:09d}',f'ΣΥΝΘΕΤΙΚΟΣ {i%suppliers}', 'Δ',str(i+1),
+                     f'2026-{9+i%2:02d}-15','10','2.40','12.40',str(100000000+i)] for i in range(count)]
+    workbook(path,rows)
+
+
 def demos(directory):
     directory.mkdir(parents=True,exist_ok=True)
     workbook(directory/'separate.xlsx',[HEADERS,ROW,['000000002','ΣΥΝΘΕΤΙΚΟΣ ΠΡΟΜΗΘΕΥΤΗΣ Β','Β','2','20/10/2026','100,00','24,00','124,00','10000002'],['BAD','ΑΠΟΡΡΙΠΤΕΑ','','3','21/10/2026','10','2,40','12,40','']])

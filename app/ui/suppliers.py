@@ -10,7 +10,7 @@ class Suppliers:
         self.owner=owner;self.service=SupplierAccounts(owner.erp)
         header=ttk.Frame(parent);header.pack(fill='x',pady=(0,12))
         ttk.Label(header,text='Προμηθευτές και λογαριασμοί EBS',style='Section.TLabel').pack(anchor='w')
-        ttk.Label(header,text='Αντιστοίχιση → έγκριση εκκρεμών → προσομοίωση → EBS. Οι αγορές ομάδας 2 δεν καταχωρούνται.',style='Subtitle.TLabel',wraplength=1000).pack(anchor='w',pady=6)
+        ttk.Label(header,text='Αποθήκευσε λογαριασμό ανά προμηθευτή για τα εκκρεμή και επόμενα παραστατικά του. Οι αγορές ομάδας 2 δεν καταχωρούνται στο EBS.',style='Subtitle.TLabel',wraplength=1000).pack(anchor='w',pady=6)
         filters=ttk.Frame(header);filters.pack(fill='x')
         self.query=tk.StringVar();entry=ttk.Entry(filters,textvariable=self.query);entry.pack(side='left',fill='x',expand=True)
         entry.bind('<Return>',lambda _:self.refresh());self.filter=tk.StringVar(value='Όλοι')

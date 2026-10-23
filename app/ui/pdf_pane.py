@@ -5,6 +5,30 @@ from app.application.service import ERP
 from app.infrastructure.pdf_archive import KINDS,render,renderer_available
 
 
+def open_document(owner,document,window,selected_attachment=None):
+    import os
+    import sys
+    import webbrowser
+    from urllib.parse import urlsplit
+    try:
+        attachments=owner.erp.attachments(owner.company,document)
+        if attachments:
+            selected=next((a for a in attachments if a['id']==selected_attachment),next((a for a in attachments if a['kind']=='invoice'),attachments[0]))
+            path=owner.erp.attachment_path(owner.company,document,selected['id'])
+            if sys.platform=='win32':os.startfile(str(path))
+            elif not webbrowser.open(path.resolve().as_uri()):raise ValueError('Δεν άνοιξε το τοπικό PDF. Όρισε εφαρμογή προβολής PDF στο λειτουργικό.')
+            return
+        from app.application.mydata import MyData
+        active=owner.erp.db.execute('SELECT environment FROM aade_settings WHERE company_id=?',(owner.company,)).fetchone()
+        url=MyData(owner.erp).pdf_url(owner.company,document,active[0] if active else 'production')
+        parsed=urlsplit(url)
+        if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password or any(ord(c)<33 for c in url):raise ValueError('Δεν υπάρχει έγκυρος HTTPS σύνδεσμος παρόχου.')
+        if not webbrowser.open(url):raise ValueError('Δεν άνοιξε ο browser. Έλεγξε την προεπιλεγμένη εφαρμογή του λειτουργικού.')
+    except (ValueError,OSError,RuntimeError) as exc:
+        messagebox.showinfo('Άνοιγμα παραστατικού',str(exc)+'\nΜπορείς να δοκιμάσεις «ΑΑΔΕ → Λήψη PDF».',parent=window)
+
+
+
 class PDFPane:
     def __init__(self,owner,parent,document,window):
         self.owner,self.parent,self.document,self.window=owner,parent,document,window
@@ -53,27 +77,7 @@ class PDFPane:
         else:self.state.set('Δεν έχει συνδεθεί PDF. Πάτησε «ΑΑΔΕ → Λήψη PDF» για αυτόματη εύρεση ή πρόσθεσε τοπικό PDF.')
 
     def open_document(self):
-        if not self.alive():return
-        import os
-        import sys
-        import webbrowser
-        from urllib.parse import urlsplit
-        try:
-            attachments=self.owner.erp.attachments(self.owner.company,self.document)
-            if attachments:
-                selected=next((a for a in attachments if a['id']==self.selected),next((a for a in attachments if a['kind']=='invoice'),attachments[0]))
-                path=self.owner.erp.attachment_path(self.owner.company,self.document,selected['id'])
-                if sys.platform=='win32':os.startfile(str(path))
-                elif not webbrowser.open(path.resolve().as_uri()):raise ValueError('Δεν άνοιξε το τοπικό PDF. Όρισε εφαρμογή προβολής PDF στο λειτουργικό.')
-                return
-            from app.application.mydata import MyData
-            active=self.owner.erp.db.execute('SELECT environment FROM aade_settings WHERE company_id=?',(self.owner.company,)).fetchone()
-            url=MyData(self.owner.erp).pdf_url(self.owner.company,self.document,active[0] if active else 'production')
-            parsed=urlsplit(url)
-            if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password or any(ord(c)<33 for c in url):raise ValueError('Δεν υπάρχει έγκυρος HTTPS σύνδεσμος παρόχου.')
-            if not webbrowser.open(url):raise ValueError('Δεν άνοιξε ο browser. Έλεγξε την προεπιλεγμένη εφαρμογή του λειτουργικού.')
-        except (ValueError,OSError,RuntimeError) as exc:
-            messagebox.showinfo('Άνοιγμα παραστατικού',str(exc)+'\nΜπορείς να δοκιμάσεις «ΑΑΔΕ → Λήψη PDF».',parent=self.window)
+        if self.alive():return open_document(self.owner,self.document,self.window,self.selected)
 
     def auto_fetch(self):
         if not self.alive() or self.records or self.owner.busy:return

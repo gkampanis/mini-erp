@@ -4,12 +4,14 @@ class Counterparties:
 
     def list(self,company,query=''):
         rows=self.db.execute('SELECT c.*,count(d.id) AS document_count FROM counterparties c LEFT JOIN documents d ON d.counterparty_id=c.id AND d.company_id=c.company_id WHERE c.company_id=? GROUP BY c.id ORDER BY c.name,c.vat',(company,)).fetchall()
+        roles={};groups_by_card={}
+        for r in self.db.execute('SELECT r.counterparty_id,r.role FROM counterparty_roles r JOIN counterparties c ON c.id=r.counterparty_id WHERE c.company_id=? ORDER BY r.role',(company,)):roles.setdefault(r[0],[]).append(r[1])
+        for r in self.db.execute('SELECT DISTINCT d.counterparty_id,p.nature_group FROM document_preparations p JOIN documents d ON d.id=p.document_id AND d.company_id=p.company_id WHERE p.company_id=?',(company,)):groups_by_card.setdefault(r[0],set()).add(r[1])
+        for r in self.db.execute('SELECT counterparty_id,preferred_group FROM counterparty_accounts WHERE company_id=? AND preferred_group IS NOT NULL',(company,)):groups_by_card.setdefault(r[0],set()).add(r[1])
         result=[]
         for row in rows:
-            card=dict(row);card['roles']=[r[0] for r in self.db.execute('SELECT role FROM counterparty_roles WHERE counterparty_id=? ORDER BY role',(row['id'],))]
-            groups={r[0] for r in self.db.execute('SELECT DISTINCT p.nature_group FROM document_preparations p JOIN documents d ON d.id=p.document_id AND d.company_id=p.company_id WHERE p.company_id=? AND d.counterparty_id=?',(company,card['id']))}
-            default=self.db.execute('SELECT preferred_group FROM counterparty_accounts WHERE company_id=? AND counterparty_id=?',(company,card['id'])).fetchone()
-            if default and default[0]:groups.add(default[0])
+            card=dict(row);card['roles']=roles.get(row['id'],[])
+            groups=groups_by_card.get(card['id'],set())
             card['transaction_scope']='Αγορές (2) · εκτός EBS' if groups=={'2'} else 'Έξοδα (6) → EBS' if groups=={'6'} else 'Αγορές και έξοδα (2/6)' if groups=={'2','6'} else 'Χρειάζεται διαχωρισμό'
             if not query or any(query.casefold() in str(card[k]).casefold() for k in ('code','vat','name')):result.append(card)
         return result
@@ -20,7 +22,7 @@ class Counterparties:
         card=dict(row);card['roles']=[r[0] for r in self.db.execute('SELECT role FROM counterparty_roles WHERE counterparty_id=? ORDER BY role',(counterparty,))]
         account_row=self.db.execute('SELECT * FROM counterparty_accounts WHERE company_id=? AND counterparty_id=?',(company,counterparty)).fetchone()
         card['accounts']=dict(account_row) if account_row else dict(purchases_account='',expenses_account='',preferred_group=None)
-        documents=[r for r in self.erp.search(company) if r['counterparty_id']==counterparty]
+        documents=self.erp.search(company,counterparty=counterparty)
         return card,documents
 
     def save(self,company,counterparty,name,roles,confirmed=False,accounts=None,apply_pending=False):

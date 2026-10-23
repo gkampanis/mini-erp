@@ -8,14 +8,17 @@ class SupplierAccounts:
 
     def rows(self,company,query=''):
         cards=Counterparties(self.erp);result=[];api={}
+        documents={}
+        for doc in self.erp.search(company):
+            if doc['direction']=='incoming':documents.setdefault(doc['counterparty_id'],[]).append(doc)
+        accounts={r['counterparty_id']:dict(r) for r in self.db.execute('SELECT * FROM counterparty_accounts WHERE company_id=?',(company,))}
         for source in self.db.execute('SELECT mark,record_json FROM mydata_records WHERE company_id=?',(company,)):
             item=json.loads(source['record_json'])
             if item.get('direction')=='incoming':api.setdefault(item['vat'],set()).add(source['mark'])
         for card in cards.list(company,query):
-            full,docs=cards.detail(company,card['id'])
-            incoming=[d for d in docs if d['direction']=='incoming']
+            incoming=documents.get(card['id'],[])
             if not incoming and card['vat'] not in api:continue
-            values=full['accounts'];group=values['preferred_group']
+            values=accounts.get(card['id'],dict(purchases_account='',expenses_account='',preferred_group=None));group=values['preferred_group']
             account=values['purchases_account' if group=='2' else 'expenses_account'] if group else ''
             pending=any(not d.get('prepared_at') or (d.get('nature_group')==group and d.get('account_code')!=account) for d in incoming)
             state='Εκκρεμή προς έγκριση / ενημέρωση' if account and pending else 'Αντιστοιχισμένος' if account else 'Χρειάζεται λογαριασμό'

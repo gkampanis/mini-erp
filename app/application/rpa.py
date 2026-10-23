@@ -13,14 +13,14 @@ class RPA:
 
     def expense_scope(self,company,documents):
         """Partition the same list; purchase cards remain visible but never enter EBS."""
-        from app.application.workspace import Workspace
-        rows={r['id']:r for r in Workspace(self.erp).rows(company)}
+        rows={r['id']:r for r in self.erp.search(company)}
+        defaults={r['counterparty_id']:r['preferred_group'] for r in self.db.execute('SELECT counterparty_id,preferred_group FROM counterparty_accounts WHERE company_id=?',(company,))}
         result=dict(expenses=[],purchases=[],needs_review=[],outgoing=[])
         for document in documents:
             if document not in rows:raise ValueError('Δεν βρέθηκε παραστατικό στην εταιρεία')
             row=rows[document]
             if row['direction']!='incoming':result['outgoing'].append(document);continue
-            group=row.get('nature_group') or row.get('suggested_group')
+            group=row.get('nature_group') or defaults.get(row['counterparty_id'])
             if group=='2':result['purchases'].append(document)
             elif group=='6' and row.get('prepared_at'):result['expenses'].append(document)
             else:result['needs_review'].append(document)

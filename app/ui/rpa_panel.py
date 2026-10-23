@@ -7,7 +7,7 @@ from app.application.rpa import RPA
 from app.application.workspace import Workspace
 from app.infrastructure.ebs_adapter.adapter import load_mapper
 
-LABELS={'outgoing_excluded':'Εκδοθέν · εκτός εξόδων','purchase_excluded':'Αγορές · εκτός EBS','not_sent':'Δεν στάλθηκε','queued':'Σε αναμονή','started':'Συμπλήρωση','save_pending':'Save σε εξέλιξη','simulated':'Προσομοίωση','filled_no_save':'Συμπληρώθηκε χωρίς Save','uncertain':'Έλεγχος στο EBS','failed':'Απέτυχε','save_invoked':'Στάλθηκε Save · έλεγχος','ui_saved_review':'Save → νέο ΤΕΔ · έλεγχος','reviewed_by_operator':'Ελέγχθηκε από χειριστή'}
+LABELS={'outgoing_excluded':'Εκδοθέν · εκτός εξόδων','purchase_excluded':'Αγορές · εκτός EBS','not_sent':'Χωρίς προσπάθεια','queued':'Σε αναμονή','started':'Συμπλήρωση','save_pending':'Save σε εξέλιξη','simulated':'Ελέγχθηκε χωρίς καταχώριση','filled_no_save':'Συμπληρώθηκε χωρίς Save','uncertain':'Έλεγχος στο EBS','failed':'Απέτυχε','save_invoked':'Εντολή Save · οπτικός έλεγχος','ui_saved_review':'Save → νέο ΤΕΔ · έλεγχος','reviewed_by_operator':'Ελέγχθηκε από χειριστή'}
 
 
 class RPAPanel:
@@ -19,20 +19,23 @@ class RPAPanel:
         self.mode=tk.StringVar(value='Προσομοίωση');self.live_ack=tk.BooleanVar(value=False)
         self.mapping=None;self.hotkeys=set();self.tree=owner.tree
         row=ttk.Frame(parent);row.pack(fill='x',pady=(4,6))
-        self.buttons['accounts']=ttk.Button(row,text='Λογαριασμοί & έγκριση',command=self.accounts);self.buttons['accounts'].pack(side='left')
+        self.buttons['accounts']=ttk.Button(row,text='Έλεγχος λογαριασμών',command=self.accounts);self.buttons['accounts'].pack(side='left')
         self.buttons['pilot']=ttk.Button(row,text='Δοκιμή 1 εγγραφής',command=self.pilot);self.buttons['pilot'].pack(side='left',padx=6)
         self.buttons['post']=ttk.Button(row,text='Έξοδα → EBS',style='Primary.TButton',command=self.post);self.buttons['post'].pack(side='left')
-        ttk.Button(row,text='Ρυθμίσεις EBS',command=self.settings).pack(side='right')
+        options=ttk.Menubutton(row,text='Ρυθμίσεις & ιστορικό')
+        self.options_menu=tk.Menu(options,tearoff=False)
+        self.options_menu.add_command(label='Ρυθμίσεις EBS',command=self.settings)
+        self.options_menu.add_command(label='Προβολή ουράς',command=self.preview)
+        self.options_menu.add_command(label='Ιστορικό / οπτικός έλεγχος EBS',command=self.history)
+        options.configure(menu=self.options_menu);options.pack(side='right')
         row=ttk.Frame(parent);row.pack(fill='x')
         self.scope=tk.StringVar(value='Εκκρεμή προς EBS')
-        ttk.Combobox(row,textvariable=self.scope,values=('Εκκρεμή προς EBS','Όλες της λίστας','Μόνο επιλεγμένες','Από επιλεγμένη και μετά'),state='readonly',width=26).pack(side='left')
-        self.buttons['simulation']=ttk.Button(row,text='Προσομοίωση',command=self.simulate);self.buttons['simulation'].pack(side='left',padx=6)
-        self.buttons['pause']=ttk.Button(row,text='Παύση',command=self.pause);self.buttons['pause'].pack(side='left')
-        self.buttons['resume']=ttk.Button(row,text='Συνέχεια',command=self.start);self.buttons['resume'].pack(side='left',padx=6)
-        self.buttons['stop']=ttk.Button(row,text='Διακοπή',command=self.stop);self.buttons['stop'].pack(side='left')
-        ttk.Button(row,text='Ιστορικό / έλεγχος EBS',command=self.history).pack(side='right')
-        ttk.Button(row,text='Προεπισκόπηση',command=self.preview).pack(side='left',padx=6)
-        self.state=tk.StringVar(value='Άντληση μήνα ή Excel → Προμηθευτές / λογαριασμοί → Προσομοίωση → EBS.')
+        ttk.Combobox(row,textvariable=self.scope,values=('Εκκρεμή προς EBS','Όλες της λίστας','Μόνο επιλεγμένες','Από επιλεγμένη και μετά'),state='readonly',width=22).pack(side='left')
+        self.buttons['simulation']=ttk.Button(row,text='Έλεγχος χωρίς καταχώριση',command=self.simulate);self.buttons['simulation'].pack(side='left',padx=6)
+        self.buttons['pause']=ttk.Button(row,text='Παύση',width=8,command=self.pause);self.buttons['pause'].pack(side='left')
+        self.buttons['resume']=ttk.Button(row,text='Συνέχεια',width=8,command=self.start);self.buttons['resume'].pack(side='left',padx=6)
+        self.buttons['stop']=ttk.Button(row,text='Διακοπή',width=8,command=self.stop);self.buttons['stop'].pack(side='left')
+        self.state=tk.StringVar(value='«Έλεγχος χωρίς καταχώριση»: ελέγχει τα δεδομένα χωρίς πληκτρολόγηση ή Save στο EBS.')
         state_label=ttk.Label(parent,textvariable=self.state,style='Subtitle.TLabel',wraplength=1100);state_label.pack(anchor='w',pady=(7,0))
         parent.bind('<Configure>',lambda event:state_label.configure(wraplength=max(200,event.width-8)),add='+')
         from app.ui.help import tooltip
@@ -61,14 +64,16 @@ class RPAPanel:
         meta=None;items=[]
         if self.job is not None:
             meta,items=self.rpa.items(self.owner.company,self.job);p=self.rpa.progress(self.owner.company,self.job)
-            mode='Προσομοίωση' if meta['mode']=='simulation' else 'Εκτέλεση EBS'
+            mode='Έλεγχος χωρίς καταχώριση' if meta['mode']=='simulation' else 'Εκτέλεση EBS'
             state={'running':'Σε εξέλιξη','paused':'Σε παύση','stopped':'Διακόπηκε','completed':'Τέλος ουράς','queued':'Έτοιμη ουρά'}.get(meta['status'],meta['status'])
-            self.state.set(f"{mode} · {state} · Σύνολο {p['total']} · Τρέχον {p['current']} · Προσομοιώθηκαν {p['simulated']} · Εντολές Save {p['save_requested']} · Έλεγχος χειριστή {p['operator_reviewed']} · Επιβεβαιωμένα EBS (χειριστής) {p['verified_in_ebs']} · Αποτυχίες/αβέβαια {p['failed']}")
+            self.state.set(f"{mode} · {state} · {p['total']} εγγραφές · Τρέχον {p['current']} · Αποτυχίες/αβέβαια {p['failed']}. "+('Καμία ενέργεια στο EBS.' if meta['mode']=='simulation' else 'Η αποθήκευση ελέγχεται οπτικά στο EBS.'))
         blocked=any(i['status'] in ('started','save_pending','uncertain','filled_no_save') for i in items)
         for key in ('accounts','pilot','post','simulation'):self.buttons[key].state(['disabled'] if self.owner.busy or self.running else ['!disabled'])
         self.buttons['pause'].state(['!disabled'] if self.running and not self.pause_requested else ['disabled'])
         self.buttons['resume'].state(['!disabled'] if meta and meta['status'] in ('queued','paused') and not blocked and not self.running and not self.owner.busy else ['disabled'])
         self.buttons['stop'].state(['!disabled'] if meta and meta['status'] not in ('stopped','completed') and not self.stop_requested else ['disabled'])
+        self.options_menu.entryconfigure(0,state='disabled' if self.owner.busy or self.running else 'normal')
+        self.options_menu.entryconfigure(1,state='normal' if self.job is not None else 'disabled')
         if self._preview and self._preview.winfo_exists():self.fill_preview()
 
     def preview(self):
@@ -87,24 +92,19 @@ class RPAPanel:
 
     def accounts(self):
         if self.owner.busy or self.running:return
+        if getattr(self,'_accounts',None) and self._accounts.winfo_exists():self._accounts.lift();return self._accounts
         chosen=self.owner.tree.selection()
         ids=[int(x) for x in chosen] if chosen else list(self.owner._documents)
         if not ids:messagebox.showinfo('Excel','Φόρτωσε πρώτα το Excel.',parent=self.owner.root);return
         rows=[self.owner._documents[x] for x in ids if self.owner._documents[x]['direction']=='incoming']
         if not rows:messagebox.showinfo('Έξοδα','Τα εκδοθέντα δεν καταχωρούνται στη ροή εξόδων EBS.',parent=self.owner.root);return
         ids=[r['id'] for r in rows]
-        win=tk.Toplevel(self.owner.root);win.title('Λογαριασμοί · '+str(len(ids))+' παραστατικά');win.geometry('900x630');win.minsize(780,520)
+        win=tk.Toplevel(self.owner.root);win.title('Έλεγχος λογαριασμών · '+str(len(ids))+' παραστατικά');win.geometry('900x630');win.minsize(780,520)
+        win.transient(self.owner.root);win.grab_set()
         body=ttk.Frame(win,padding=18);body.pack(fill='both',expand=True)
         ttk.Label(body,text=f'{len(ids)} παραστατικά · Έλεγχος λογαριασμών',style='Section.TLabel').pack(anchor='w')
-        ttk.Label(body,text='Κοινός λογαριασμός ή διαφορετικός ανά ΑΦΜ. Η εφαρμογή δεν μαντεύει λογαριασμούς.',style='Subtitle.TLabel').pack(anchor='w',pady=(6,12))
-        shared=ttk.Frame(body);shared.pack(fill='x')
-        common=tk.StringVar();group=tk.StringVar(value='6 · Έξοδα')
-        ttk.Combobox(shared,textvariable=group,values=('2 · Αγορές','6 · Έξοδα'),state='readonly',width=16).pack(side='left')
-        ttk.Entry(shared,textvariable=common,width=25).pack(side='left',padx=8)
+        ttk.Label(body,text='Μία γραμμή ανά προμηθευτή: επίλεξε Αγορές ή Έξοδα και γράψε τον λογαριασμό. Η έγκριση αφορά μόνο τα παραστατικά που επέλεξες στη λίστα.',style='Subtitle.TLabel',wraplength=820).pack(anchor='w',pady=(6,12))
         forms={}
-        def apply_common():
-            for g,a in forms.values():g.set(group.get());a.set(common.get())
-        ttk.Button(shared,text='Εφαρμογή σε όλα εδώ',command=apply_common).pack(side='left')
         frame=ttk.Frame(body);frame.pack(fill='both',expand=True,pady=14)
         canvas=tk.Canvas(frame,highlightthickness=0,background='#f3f6fc');scroll=ttk.Scrollbar(frame,command=canvas.yview)
         inner=ttk.Frame(canvas);item=canvas.create_window((0,0),window=inner,anchor='nw')
@@ -112,7 +112,8 @@ class RPAPanel:
         inner.bind('<Configure>',lambda e:canvas.configure(scrollregion=canvas.bbox('all')));canvas.bind('<Configure>',lambda e:canvas.itemconfigure(item,width=e.width))
         suppliers={}
         for row in rows:suppliers.setdefault(row['vat'],[]).append(row)
-        for index,(vat,documents) in enumerate(suppliers.items()):
+        for column,label in enumerate(('Προμηθευτής','Ομάδα','Λογαριασμός EBS')):ttk.Label(inner,text=label).grid(row=0,column=column,sticky='w',padx=8,pady=6)
+        for index,(vat,documents) in enumerate(suppliers.items(),1):
             approved={r['account_code'] for r in documents if r.get('account_code')}
             if not approved:approved={r['suggested_account'] for r in documents if r.get('suggested_account')}
             account=next(iter(approved)) if len(approved)==1 else ''
@@ -121,16 +122,8 @@ class RPAPanel:
             ttk.Combobox(inner,textvariable=g,values=('2 · Αγορές','6 · Έξοδα'),state='readonly',width=16).grid(row=index,column=1,padx=8)
             ttk.Entry(inner,textvariable=a,width=25).grid(row=index,column=2,padx=8)
         remember=tk.BooleanVar(value=False)
-        ttk.Checkbutton(body,text='Αποθήκευση αυτών των επιλογών ως εγκεκριμένα mappings ανά ΑΦΜ',variable=remember).pack(anchor='w')
+        ttk.Checkbutton(body,text='Να θυμάται τον λογαριασμό στην καρτέλα του προμηθευτή για τα επόμενα παραστατικά',variable=remember).pack(anchor='w')
         bottom=ttk.Frame(body);bottom.pack(fill='x',pady=(12,0))
-        def suggest():
-            conflicts=[]
-            for vat,(g,a) in forms.items():
-                candidates=self.workspace.suggestions(self.owner.company,vat)
-                if len(candidates)==1:a.set(candidates[0]);g.set('2 · Αγορές' if candidates[0].startswith('2') else '6 · Έξοδα')
-                elif len(candidates)>1:conflicts.append(vat)
-            if conflicts:messagebox.showwarning('Διαφορετικές προηγούμενες επιλογές','Έλεγξε χειροκίνητα τα ΑΦΜ: '+', '.join(conflicts),parent=win)
-        ttk.Button(bottom,text='Πρόταση από εγκεκριμένο ιστορικό',command=suggest).pack(side='left')
         def approve():
             decisions=[dict(document=r['id'],group=forms[r['vat']][0].get()[0],account=forms[r['vat']][1].get()) for r in rows]
             if not messagebox.askyesno('Έγκριση λογαριασμών',f'Έλεγξες ομάδα και λογαριασμό για τα {len(rows)} παραστατικά; Θα εγκριθούν μαζί. Δεν γίνεται ακόμη καταχώριση.',parent=win):return
@@ -138,6 +131,7 @@ class RPAPanel:
             except (ValueError,RuntimeError) as exc:messagebox.showerror('Έλεγχος',str(exc),parent=win);return
             win.destroy();self.owner.refresh();self.state.set(f'Εγκρίθηκαν {len(rows)} παραστατικά. Συνέχισε με δοκιμή ή καταχώριση στο EBS.')
         ttk.Button(bottom,text='Έγκριση λογαριασμών',style='Primary.TButton',command=approve).pack(side='right')
+        self._accounts=win
         return win
 
     def settings(self):
@@ -191,12 +185,16 @@ class RPAPanel:
             if not ids:raise ValueError('Δεν υπάρχουν εγγραφές. Φόρτωσε πρώτα Excel.')
             scope=self.rpa.expense_scope(self.owner.company,ids)
             excluded=len(scope['purchases']);issued=len(scope['outgoing'])
-            if scope['needs_review']:raise ValueError(f"{len(scope['needs_review'])} εγγραφές χρειάζονται διαχωρισμό ή έγκριση λογαριασμού. {excluded} αγορές ομάδας 2 είναι εκτός EBS. Πάτησε «Λογαριασμοί & έγκριση».")
+            if scope['needs_review']:
+                self.owner.tree.selection_set([str(d) for d in scope['needs_review']])
+                self.owner.tree.see(str(scope['needs_review'][0]))
+                messagebox.showinfo('Χρειάζονται λογαριασμό',f"{len(scope['needs_review'])} παραστατικά της επιλογής δεν έχουν εγκεκριμένο λογαριασμό. Επιλέχθηκαν στη λίστα.\nΣτο επόμενο παράθυρο όρισε ομάδα και λογαριασμό ανά προμηθευτή και πάτησε «Έγκριση λογαριασμών».\nΟι {excluded} αγορές ομάδας 2 παραμένουν εκτός καταχώρισης.",parent=self.owner.root)
+                self.accounts();return
             ids=scope['expenses']
             if not ids:raise ValueError('Δεν υπάρχουν εγκεκριμένα έξοδα ομάδας 6 σε αυτή την επιλογή. Οι αγορές ομάδας 2 παραμένουν στη βάση, εκτός EBS.')
             real=mode=='fill_only'
             if real and sys.platform!='win32':raise ValueError('Η πραγματική καταχώριση απαιτεί Windows με Entersoft. Η προσομοίωση λειτουργεί εδώ.')
-            if not messagebox.askyesno('Έναρξη '+('EBS' if real else 'προσομοίωσης'),f'{len(ids)} έξοδα ομάδας 6, με τους εγκεκριμένους λογαριασμούς τους.\n{excluded} αγορές ομάδας 2 εξαιρέθηκαν και παραμένουν στη βάση. {issued} εκδοθέντα είναι εκτός ροής εξόδων.\n'+('Θα εκτελεστεί η ροή συμπλήρωση → Save → νέο ΤΕΔ. Επιβεβαιώνεις κενό ΤΕΔ και πραγματικές καταχωρίσεις;' if real else 'Δεν θα γίνει καμία ενέργεια στο EBS. Συνέχεια;'),parent=self.owner.root):return
+            if not messagebox.askyesno('Έναρξη '+('EBS' if real else 'ελέγχου χωρίς καταχώριση'),f'{len(ids)} έξοδα ομάδας 6, με τους εγκεκριμένους λογαριασμούς τους.\n{excluded} αγορές ομάδας 2 εξαιρέθηκαν και παραμένουν στη βάση. {issued} εκδοθέντα είναι εκτός ροής εξόδων.\n'+('Θα εκτελεστεί η ροή συμπλήρωση → Save → νέο ΤΕΔ. Επιβεβαιώνεις κενό ΤΕΔ και πραγματικές καταχωρίσεις;' if real else 'Δεν θα γίνει καμία ενέργεια στο EBS. Συνέχεια;'),parent=self.owner.root):return
             self.job=self.rpa.create(self.owner.company,ids,mode,confirmed=True,execution='save_new' if real else 'fill_only',pilot=pilot)
         except ValueError as exc:messagebox.showwarning('Πριν την έναρξη',str(exc),parent=self.owner.root);return
         if mode=='simulation':self.preview()

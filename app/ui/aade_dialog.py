@@ -14,7 +14,7 @@ from app.application.periods import MONTHS,month_bounds
 from app.infrastructure.aade.credentials import OFFICIAL_DOCS,VaultUnavailable
 
 
-def open_settings(owner,document=None,acquire=False):
+def open_settings(owner,document=None,acquire=False,period=None):
     win=tk.Toplevel(owner.root);win.title('ΑΑΔΕ / myDATA · Σύνδεση και παραστατικά');win.geometry('1060x740');win.minsize(900,630)
     notebook=ttk.Notebook(win);notebook.pack(fill='both',expand=True,padx=16,pady=16)
     panel=ttk.Frame(notebook,padding=18);data_panel=ttk.Frame(notebook,padding=14)
@@ -80,14 +80,16 @@ def open_settings(owner,document=None,acquire=False):
     ttk.Button(actions,text='Αποθήκευση κωδικών',style='Primary.TButton',command=save).pack(side='right')
     first=date.today().replace(day=1);last=first-timedelta(days=1)
     year=tk.StringVar(value=str(last.year));month=tk.StringVar(value=MONTHS[last.month-1])
+    if period:
+        selected=date.fromisoformat(period+'-01');year.set(str(selected.year));month.set(MONTHS[selected.month-1])
     def selected_period():return month_bounds(year.get(),MONTHS.index(month.get())+1)
     header=ttk.Frame(data_panel);header.pack(fill='x')
     ttk.Label(header,text='Έτος').pack(side='left');year_box=ttk.Combobox(header,textvariable=year,values=tuple(str(y) for y in range(2000,date.today().year+2)),state='readonly',width=7);year_box.pack(side='left',padx=6)
     ttk.Label(header,text='Μήνας').pack(side='left');month_box=ttk.Combobox(header,textvariable=month,values=MONTHS,state='readonly',width=16);month_box.pack(side='left',padx=6)
-    kind=tk.StringVar(value='Ληφθέντα και εκδοθέντα')
+    kind=tk.StringVar(value='Ληφθέντα' if acquire else 'Ληφθέντα και εκδοθέντα')
     kind_box=ttk.Combobox(header,textvariable=kind,values=('Ληφθέντα και εκδοθέντα','Ληφθέντα','Εκδοθέντα'),state='readonly',width=25);kind_box.pack(side='left',padx=6)
     cancel=threading.Event();notifications=queue.Queue()
-    output=tk.StringVar(value='1. Σύνδεση → 2. Εύρεση παραστατικών → 3. Λήψη PDF. Οι εγγραφές συμφωνούνται με MARK, χωρίς δεύτερη φόρτωση.')
+    output=tk.StringVar(value='Άντληση εξόδων μήνα → εγγραφές στη βασική λίστα → λήψη και σύνδεση PDF. Υπάρχουσες εγγραφές Excel αντιστοιχίζονται με MARK και έλεγχο στοιχείων.')
     ttk.Label(data_panel,textvariable=output,style='Subtitle.TLabel',wraplength=950).pack(anchor='w',pady=10)
     controls=ttk.Frame(data_panel);controls.pack(fill='x',pady=(0,10))
     from app.ui.desktop import table
@@ -101,14 +103,15 @@ def open_settings(owner,document=None,acquire=False):
         activate()
         from app.infrastructure.providers.pdf_downloads import state_label
         start,end=selected_period()
+        attempts={r['mark']:r['state'] for r in owner.erp.db.execute('SELECT mark,state FROM provider_attempts WHERE company_id=? AND environment=? ORDER BY id',(owner.company,choices[environment.get()]))}
         for row in MyData(owner.erp).records(owner.company,choices[environment.get()]):
             item=json.loads(row['record_json'])
             if not start<=item['date']<=end:continue
             if kind.get()=='Ληφθέντα' and item.get('direction')!='incoming':continue
             if kind.get()=='Εκδοθέντα' and item.get('direction')!='outgoing':continue
             row['item']=item;records[str(row['id'])]=row
-            attempt=owner.erp.db.execute('SELECT state FROM provider_attempts WHERE company_id=? AND environment=? AND mark=? ORDER BY id DESC LIMIT 1',(owner.company,choices[environment.get()],row['mark'])).fetchone()
-            results.insert('','end',iid=str(row['id']),values=('Ληφθέν' if item.get('direction')=='incoming' else 'Εκδοθέν',row['mark'],'/'.join(x for x in [item['series'],item['number']] if x),item['vat'] if item.get('direction')=='incoming' else item['receiver'],labels.get(row['match_status'],row['match_status']),state_label(attempt['state']) if attempt else 'Διαθέσιμος σύνδεσμος' if item.get('pdf_url') else 'Χωρίς σύνδεσμο'))
+            attempt=attempts.get(row['mark'])
+            results.insert('','end',iid=str(row['id']),values=('Ληφθέν' if item.get('direction')=='incoming' else 'Εκδοθέν',row['mark'],'/'.join(x for x in [item['series'],item['number']] if x),item['vat'] if item.get('direction')=='incoming' else item['receiver'],labels.get(row['match_status'],row['match_status']),state_label(attempt) if attempt else 'Διαθέσιμος σύνδεσμος' if item.get('pdf_url') else 'Χωρίς σύνδεσμο'))
     def fetch(test=False):
         if owner.busy or owner.rpa_panel.running:return
         vat=owner.erp.db.execute('SELECT vat FROM companies WHERE id=?',(owner.company,)).fetchone()[0]
@@ -155,10 +158,14 @@ def open_settings(owner,document=None,acquire=False):
             finally:service.close()
         def done(result):
             if not win.winfo_exists():return
+            while not notifications.empty():notifications.get_nowait()
             imported=result.get('import',{});pdf=result.get('pdf',{})
             output.set(f"Νέα στη λίστα: {imported.get('inserted',0)} · Υπήρχαν: {imported.get('duplicates',0)} · Για έλεγχο: {len(imported.get('rejected',[]))} · PDF: {pdf.get('saved',0)} · Εκκρεμή PDF: {pdf.get('pending',0)}"+(' · Βιβλίο: '+result['book_error'] if result.get('book_error') else '')+(' · PDF: '+result['pdf_error'] if result.get('pdf_error') else ''))
             if result.get('errors'):output.set(output.get()+' · Δεν ολοκληρώθηκαν: '+' · '.join(v['method']+': '+v['error'] for v in result['errors']))
             if result.get('cancelled'):output.set('Η άντληση διακόπηκε. Οι ολοκληρωμένες λήψεις διατηρούνται. '+output.get())
+            if acquire:
+                label=MONTHS[int(start[5:7])-1]+' '+start[:4]
+                owner.month_filter.set(label);owner._month_values[label]=start[:7];owner._period_initialized=True
             owner.refresh();refresh()
         owner.run_worker(execute,done)
     ttk.Button(panel,text='Αποθήκευση & άντληση παραστατικών + PDF',style='Primary.TButton',command=full_sync).pack(fill='x',before=actions,pady=8)

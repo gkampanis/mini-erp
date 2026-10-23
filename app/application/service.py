@@ -20,8 +20,8 @@ class ERP:
     def company(self, vat, name):
         return self.repository.company(vat, name)
 
-    def search(self, company, query=''):
-        return self.repository.search(company, query)
+    def search(self, company, query='', **filters):
+        return self.repository.search(company, query, **filters)
 
     def detail(self, company, document):
         return self.repository.detail(company, document)

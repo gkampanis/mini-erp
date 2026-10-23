@@ -62,8 +62,14 @@ class DesktopRegressions(unittest.TestCase):
                 if worker is not threading.current_thread():
                     worker.join(timeout=5)
                     self.assertFalse(worker.is_alive(), 'GUI worker survived test teardown')
+            owners=(self.display_root,self.root,*widgets(self.root)) if self.root.winfo_exists() else (self.display_root,)
             for timer in self.root.tk.call('after', 'info'):
-                self.root.after_cancel(timer)
+                script=self.root.tk.call('after','info',timer)[0]
+                # Native ttk scrolling timers can contain Tcl argument tuples.
+                # Delete Python callbacks through their registering widget only.
+                owner=next((w for w in owners if script in (w._tclCommands or [])),None)
+                if owner is not None:owner.after_cancel(timer)
+                else:self.root.tk.call('after','cancel',timer)
             self.app.close()
             self.temp.cleanup()
             # The interpreter's exception callback and app callbacks otherwise retain
@@ -305,6 +311,9 @@ class DesktopRegressions(unittest.TestCase):
         action = self.button(self.root,'Στοιχεία & προετοιμασία')
         self.assertGreater(action.winfo_height(),1)
         self.assertLessEqual(action.winfo_rooty()+action.winfo_height(),self.root.winfo_rooty()+self.root.winfo_height())
+        for button in self.app.rpa_panel.buttons.values():
+            self.assertTrue(button.winfo_ismapped())
+            self.assertGreaterEqual(button.winfo_width(),button.winfo_reqwidth())
         preview = self.open_preview()
         preview.geometry('900x620')
         self.root.update()
@@ -437,6 +446,7 @@ class DesktopRegressions(unittest.TestCase):
         from tests.test_workspace import MemoryVault
         self.app.erp.credential_store=MemoryVault()
         self.assertTrue(self.app.acquire_button.winfo_exists())
+        self.app.month_filter.set('Μάιος 2025');self.app.month_changed()
         win=self.app.open_acquisition();win.year_var.set('2024');win.month_var.set('Φεβρουάριος')
         self.assertEqual(win.selected_period(),('2024-02-01','2024-02-29'))
         labels=[w.cget('text') for w in widgets(win) if isinstance(w,ttk.Label)]
@@ -445,12 +455,24 @@ class DesktopRegressions(unittest.TestCase):
         with patch('app.application.sync.Sync.run',return_value=result) as sync:
             win.sync_expenses();wait(self.root,lambda:not self.app.busy)
         self.assertEqual(sync.call_args.args[2:4],('2024-02-01','2024-02-29'))
-        self.assertEqual(sync.call_args.kwargs['methods'],['RequestDocs','RequestTransmittedDocs'])
+        self.assertEqual(sync.call_args.kwargs['methods'],['RequestDocs'])
+        self.assertEqual(self.app.month_filter.get(),'Φεβρουάριος 2024')
+
+    def test_month_acquisition_opens_on_selected_main_month_with_received_default(self):
+        from tests.test_workspace import MemoryVault
+        self.app.erp.credential_store=MemoryVault()
+        self.app.month_filter.set('Μάιος 2025');self.app.month_changed()
+        win=self.app.open_acquisition()
+        self.assertEqual(win.selected_period(),('2025-05-01','2025-05-31'))
+        self.assertEqual(win.kind_var.get(),'Ληφθέντα')
+        win.destroy();general=self.app.open_aade()
+        self.assertEqual(general.kind_var.get(),'Ληφθέντα και εκδοθέντα')
 
     def test_supplier_tab_bulk_update_reaches_same_document_ids(self):
         self.import_fixture('separate.xlsx')
         titles=[self.app.notebook.tab(t,'text') for t in self.app.notebook.tabs()]
         self.assertEqual(titles[titles.index('Έλεγχοι εισαγωγής')+1],'Προμηθευτές')
+        self.app.notebook.select(self.app.suppliers_tab);self.root.update()
         tab=self.app.suppliers;tab.tree.selection_set(tab.tree.get_children());original=set(self.app.tree.get_children())
         win=tab.bulk();win.account_var.set('64.09')
         with patch('app.ui.suppliers.messagebox.askyesno',return_value=True):self.button(win,'Έγκριση & ενημέρωση εκκρεμών').invoke()
@@ -471,7 +493,7 @@ class DesktopRegressions(unittest.TestCase):
         self.assertEqual(panel.rpa.progress(self.app.company,panel.job)['simulated'],1)
         panel.start();wait(self.root,lambda:not self.app.busy and not panel.running)
         self.assertEqual(panel.rpa.progress(self.app.company,panel.job)['simulated'],2)
-        self.assertTrue(panel.buttons['resume'].instate(['disabled']));self.assertIn('Επιβεβαιωμένα EBS (χειριστής) 0',panel.state.get())
+        self.assertTrue(panel.buttons['resume'].instate(['disabled']));self.assertIn('Καμία ενέργεια στο EBS',panel.state.get())
 
     def test_open_document_uses_verified_source_url_or_archived_pdf(self):
         from app.application.mydata import MyData
@@ -524,7 +546,7 @@ class DesktopRegressions(unittest.TestCase):
         wait(self.root,lambda:not self.app.busy)
         meta,items=panel.rpa.items(self.app.company,panel.job)
         self.assertEqual(meta['status'],'completed');self.assertEqual(items[0]['status'],'simulated')
-        self.assertIn('Προσομοίωση',panel.state.get())
+        self.assertIn('Έλεγχος χωρίς καταχώριση',panel.state.get())
 
     def test_one_excel_register_card_and_bulk_accounts_share_document_ids(self):
         self.import_fixture('separate.xlsx')
@@ -583,6 +605,71 @@ class DesktopRegressions(unittest.TestCase):
         self.assertEqual([i['document_id'] for i in items],[ids[1]])
         self.assertEqual(self.count('documents'),2)
         self.assertEqual(self.app.erp.preparation(self.app.company,ids[0])['nature_group'],'2')
+
+    def test_main_month_filter_limits_editing_and_rpa_queue(self):
+        from app.infrastructure.importers.excel import preview
+        rows=[]
+        for index,day in enumerate(('2026-09-30','2026-10-01','2025-09-30')):
+            row=list(ROW);row[3]=str(index+100);row[4]=day;row[8]=str(90000000+index);rows.append(row)
+        workbook(self.folder/'months.xlsx',[HEADERS,*rows])
+        self.app.erp.commit_import(self.app.company,preview(self.folder/'months.xlsx'),confirmed=True)
+        self.app.refresh();self.assertEqual(self.app.month_filter.get(),'Οκτώβριος 2026')
+        self.app.month_filter.set('Σεπτέμβριος 2026');self.app.refresh()
+        ids=[int(key) for key in self.app.tree.get_children()];self.assertEqual(len(ids),1)
+        self.assertEqual(self.app._documents[ids[0]]['issue_date'],'2026-09-30')
+        accounts=self.app.rpa_panel.accounts()
+        fields=[w for w in widgets(accounts) if isinstance(w,ttk.Entry) and not isinstance(w,ttk.Combobox)]
+        self.assertEqual(len(fields),1);fields[0].insert(0,'64.03')
+        self.assertIs(self.app.rpa_panel.accounts(),accounts)
+        with patch('app.ui.rpa_panel.messagebox.askyesno',return_value=True):self.button(accounts,'Έγκριση λογαριασμών').invoke()
+        self.assertEqual(self.count('document_preparations'),1)
+        self.assertEqual(self.app.rpa_panel.ids(),ids)
+        with patch('app.ui.rpa_panel.messagebox.askyesno',return_value=True):self.app.rpa_panel.simulate()
+        wait(self.root,lambda:not self.app.busy and not self.app.rpa_panel.running)
+        items=self.app.rpa_panel.rpa.items(self.app.company,self.app.rpa_panel.job)[1]
+        self.assertEqual([r['document_id'] for r in items],ids)
+        self.app.reset_filters();self.assertEqual(self.app.month_filter.get(),'Σεπτέμβριος 2026')
+        self.app.month_filter.set('Όλοι οι μήνες');self.app.refresh()
+        self.assertEqual(len(self.app.tree.get_children()),3)
+        self.assertEqual(self.count('documents'),3)
+
+    def test_missing_accounts_lead_to_single_clear_form_without_queue(self):
+        self.import_fixture('separate.xlsx');panel=self.app.rpa_panel
+        with patch('app.ui.rpa_panel.messagebox.showinfo') as info:panel.simulate()
+        self.assertIn('2 παραστατικά',info.call_args.args[1])
+        self.assertEqual(self.count('rpa_jobs'),0)
+        self.assertEqual(len(self.app.tree.selection()),2)
+        win=panel._accounts
+        fields=[w for w in widgets(win) if isinstance(w,ttk.Entry) and not isinstance(w,ttk.Combobox)]
+        self.assertEqual(len(fields),2)
+        self.assertFalse(any(isinstance(w,ttk.Button) and w.cget('text')=='Εφαρμογή σε όλα εδώ' for w in widgets(win)))
+        self.assertEqual(panel.buttons['simulation'].cget('text'),'Έλεγχος χωρίς καταχώριση')
+
+    def test_pdf_cell_opens_archived_file_and_no_visible_sent_status(self):
+        from types import SimpleNamespace
+        from tests.test_workspace import synthetic_pdf
+        self.import_fixture('combined.xlsx');document=int(self.app.tree.get_children()[0])
+        self.app.erp.attach_pdf(self.app.company,document,'synthetic.pdf',data=synthetic_pdf(),confirmed=True)
+        self.app.refresh();self.root.update()
+        self.assertNotIn('ebs_state',self.app.tree['columns'])
+        self.app.tree.xview_moveto(1);self.root.update()
+        box=self.app.tree.bbox(str(document),'pdf_state');self.assertTrue(box)
+        with patch('sys.platform','linux'),patch('webbrowser.open',return_value=True) as browser:
+            self.app.pdf_click(SimpleNamespace(x=box[0]+5,y=box[1]+5))
+            self.assertTrue(browser.call_args.args[0].startswith('file:'))
+        self.assertEqual(self.app._details,{})
+        self.assertEqual(self.count('rpa_jobs'),0)
+        self.app.open_detail();labels=[w.cget('text') for w in widgets(self.app._details[document]) if isinstance(w,ttk.Label)]
+        self.assertNotIn('EBS',labels);self.assertNotIn('Δεν στάλθηκε',labels)
+        self.root.update();wait(self.root,lambda:not self.app.busy)
+
+    def test_inactive_supplier_tab_does_not_reload_on_search_or_sort(self):
+        self.import_fixture('separate.xlsx')
+        with patch.object(self.app.suppliers,'refresh',wraps=self.app.suppliers.refresh) as refresh:
+            self.app.refresh();self.app.sort_documents('name');refresh.assert_not_called()
+            self.app.notebook.select(self.app.suppliers_tab);self.root.update()
+            self.assertGreater(refresh.call_count,0)
+        self.assertEqual(len(self.app.suppliers.tree.get_children()),2)
 
 
 if __name__ == '__main__':

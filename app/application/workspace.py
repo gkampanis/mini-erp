@@ -20,8 +20,8 @@ def validate_profile(profile):
 class Workspace:
     def __init__(self,erp):self.erp=erp;self.db=erp.db
 
-    def rows(self,company,query=''):
-        rows=self.erp.search(company,query)
+    def rows(self,company,query='',*,month=None):
+        rows=self.erp.search(company,query,month=month)
         latest={}
         for row in self.db.execute("SELECT i.document_id,i.status,j.mode FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? ORDER BY i.id",(company,)):
             if row['mode']!='simulation':latest[row['document_id']]=row['status']
@@ -31,8 +31,9 @@ class Workspace:
         for attempt in self.db.execute('SELECT mark,state FROM provider_attempts WHERE company_id=? AND environment=? ORDER BY id',(company,environment)):attempts[attempt['mark']]=attempt['state']
         reconciled={r['document_id']:r['match_status'] for r in self.db.execute("SELECT document_id,match_status FROM mydata_records WHERE company_id=? AND environment='production' AND document_id IS NOT NULL",(company,))}
         pdfs={r[0] for r in self.db.execute('SELECT DISTINCT document_id FROM attachments WHERE company_id=?',(company,))}
+        accounts={r['counterparty_id']:r for r in self.db.execute('SELECT * FROM counterparty_accounts WHERE company_id=?',(company,))}
         for row in rows:
-            defaults=self.db.execute('SELECT * FROM counterparty_accounts WHERE company_id=? AND counterparty_id=?',(company,row['counterparty_id'])).fetchone()
+            defaults=accounts.get(row['counterparty_id'])
             row['suggested_group']=defaults['preferred_group'] if defaults else None
             row['suggested_account']=(defaults['purchases_account'] if defaults['preferred_group']=='2' else defaults['expenses_account'] if defaults['preferred_group']=='6' else '') if defaults else ''
             row['ebs_state']=latest.get(row['id'],'not_sent')

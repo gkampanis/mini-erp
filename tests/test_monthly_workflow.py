@@ -105,6 +105,42 @@ class MonthlyWorkflowTests(unittest.TestCase):
         self.assertEqual(seen,['64.09']);self.assertEqual(rpa.progress(self.company,job)['verified_in_ebs'],0)
         self.assertEqual(rpa.progress(self.company,job)['save_requested'],1)
 
+    def test_month_book_then_details_then_pdf_reuses_existing_excel_document(self):
+        import socket
+        from io import BytesIO
+        from email.message import Message
+        from app.application.sync import Sync
+        from app.infrastructure.aade.client import Client
+        from tests.test_workspace import synthetic_pdf
+        book=b'<RequestedBookInfo><bookInfo><counterVatNumber>000000001</counterVatNumber><issueDate>2026-10-21</issueDate><invType>1.1</invType><count>1</count><netValue>0.10</netValue></bookInfo></RequestedBookInfo>'
+        raw=response(receiver='000000008')
+        class PDFResponse(BytesIO):
+            def __init__(self):
+                super().__init__(synthetic_pdf());self.status=200;self.headers=Message();self.headers['Content-Type']='application/pdf'
+            def geturl(self):return 'https://example.com/synthetic.pdf'
+        class PDFOpener:
+            def __init__(self):self.calls=[]
+            def open(self,request,timeout):self.calls.append(request);return PDFResponse()
+        provider=PDFOpener();public=[(socket.AF_INET,socket.SOCK_STREAM,6,'',('93.184.216.34',443))]
+        notices=[];opener=Opener([book,raw])
+        document=self.erp.search(self.company,'10000001')[0]['id']
+        with patch('app.infrastructure.providers.pdf_downloads.build_opener',return_value=provider),patch('app.infrastructure.providers.pdf_downloads.socket.getaddrinfo',return_value=public):
+            for current in (opener,Opener([book,raw])):
+                result=Sync(self.erp).run(self.company,'test','2026-10-01','2026-10-31',client=Client('test','synthetic','synthetic',opener=current),notice=notices.append)
+                self.assertEqual(result['import']['inserted'],0)
+                self.assertEqual(len(self.erp.search(self.company)),2)
+            self.assertEqual(len(provider.calls),1)
+        self.assertIn('/RequestMyExpenses?',opener.requests[0].full_url)
+        self.assertIn('/RequestDocs?',opener.requests[1].full_url)
+        self.assertIn('dateFrom=01%2F10%2F2026',opener.requests[1].full_url)
+        self.assertEqual(result['book']['count'],1)
+        self.assertEqual(result['pdf']['skipped'],1)
+        self.assertIn('βιβλίου',notices[0]);self.assertIn('αντιστοίχιση MARK',notices[1]);self.assertIn('σύνδεση PDF',notices[2])
+        attachments=self.erp.attachments(self.company,document)
+        self.assertEqual(len(attachments),1)
+        self.assertEqual(self.erp.attachment_path(self.company,document,attachments[0]['id']).read_bytes(),synthetic_pdf())
+        self.assertEqual({r['document_id'] for r in MyData(self.erp).records(self.company,'test')},{document})
+
     def test_account_change_during_native_prepare_blocks_old_payload_before_typing(self):
         from app.application.supplier_accounts import SupplierAccounts
         from app.infrastructure.ebs_adapter.adapter import FIELDS
