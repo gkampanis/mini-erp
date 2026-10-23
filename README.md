@@ -1,3 +1,11 @@
+# Νεότερη έκδοση — Επαλήθευση εισαγωγής και σωστής περιόδου EBS
+
+[Λήψη ZIP](MiniERP-EBS-Validated-Import-20261023.zip) · [Οδηγίες](MiniERP-EBS-Validated-Import-20261023-guide.md) · [Αναλυτικός έλεγχος](MiniERP-EBS-Validated-Import-20261023-review.md) · [Έλεγχοι πακέτου](MiniERP-EBS-Validated-Import-20261023.verification.json) · [SHA-256](MiniERP-EBS-Validated-Import-20261023.zip.sha256)
+
+Αυτόματη αναγνώριση μήνα, έλεγχος διαφορετικής περιόδου και διάγνωση ανά κελί. Συμφωνία μόνο με Εναλ. παρ/κό, ΑΦΜ, Αξία, ΦΠΑ, Σύνολο. Ελλείψεις εμφανίζονται χωριστά. Μερικός κατάλογος δεν τεκμηριώνει απουσία από EBS και δεν επιτρέπει νέα RPA. Δεν συμπληρώνονται εικαζόμενα στοιχεία.
+
+148 backend + 35 GUI checks πέρασαν και επαναλήφθηκαν μέσα στο ZIP. Ελέγχθηκε το νέο πραγματικό ODS ως προς την εισαγωγή, χωρίς να συμπεριληφθεί στο πακέτο ή στα tests. Windows/EBS/παραγωγική ΑΑΔΕ δεν εκτελέστηκαν εδώ.
+
 # Νεότερη έκδοση — Συμφωνία μόνο με πέντε πεδία
 
 [Λήψη ZIP](MiniERP-EBS-Five-Fields-20261023.zip) · [Οδηγίες](MiniERP-EBS-Five-Fields-20261023-guide.md) · [Κανόνες](MiniERP-EBS-Five-Fields-20261023-rules.md) · [Έλεγχοι](MiniERP-EBS-Five-Fields-20261023.verification.json) · [SHA-256](MiniERP-EBS-Five-Fields-20261023.zip.sha256)
