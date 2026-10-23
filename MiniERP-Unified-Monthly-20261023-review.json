@@ -1,0 +1,106 @@
+{
+  "source_commit": "ebb08d5",
+  "verification_run": "20261023T210148Z-4a174269",
+  "artifact_sha256": "39ea51bc46cc90a70699db8e65955ec91c77f3f526e90318738b2d849dd14eef",
+  "before_gui": {
+    "tests": 35,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "expected_failures": 0,
+    "unexpected_successes": 0,
+    "successful": true
+  },
+  "before_backend": {
+    "tests": 148,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "expected_failures": 0,
+    "unexpected_successes": 0,
+    "successful": true
+  },
+  "before_flow": {
+    "actions": 9,
+    "steps": [
+      "Καρτέλα συμφωνίας",
+      "Εισαγωγή Excel EBS",
+      "Επιλογή αρχείου",
+      "Επιβεβαιώνω ότι",
+      "Πλήρης κατάλογος",
+      "Προεπισκόπηση",
+      "Αποθήκευση συμφωνίας",
+      "Πρόσθετη επιβεβαίωση αποθήκευσης",
+      "Μεταφορά μη καταχωρισμένων στην κύρια λίστα"
+    ],
+    "remaining": [
+      2
+    ],
+    "ebs_writes": 0
+  },
+  "after_flow": {
+    "actions": 6,
+    "steps": [
+      "Εισαγωγή Excel EBS",
+      "Επιλογή αρχείου",
+      "Επιβεβαιώνω ότι",
+      "Πλήρης κατάλογος",
+      "Προεπισκόπηση",
+      "Αποθήκευση συμφωνίας"
+    ],
+    "remaining": [
+      2
+    ],
+    "ebs_writes": 0
+  },
+  "before_performance": {
+    "documents": 2500,
+    "suppliers": 300,
+    "workspace": {
+      "seconds": 0.0212,
+      "queries": 8,
+      "rows": 2500
+    },
+    "suppliers_list": {
+      "seconds": 0.022,
+      "queries": 7,
+      "rows": 300
+    },
+    "desktop_initial_seconds": 0.1048,
+    "desktop_all_2500_refresh_seconds": 0.0865
+  },
+  "after_performance": {
+    "documents": 2500,
+    "suppliers": 300,
+    "workspace": {
+      "seconds": 0.0235,
+      "queries": 9,
+      "rows": 2500
+    },
+    "suppliers_list": {
+      "seconds": 0.0171,
+      "queries": 7,
+      "rows": 300
+    },
+    "desktop_initial_seconds": 0.1026,
+    "desktop_all_2500_refresh_seconds": 0.1285
+  },
+  "scaling": [
+    {
+      "scale_percent": 125,
+      "window": "1450x900",
+      "visible_tabs": 7,
+      "main_buttons": "visible",
+      "platform": "Linux Tk scaling simulation, not Windows DPI acceptance"
+    },
+    {
+      "scale_percent": 150,
+      "window": "1450x900",
+      "visible_tabs": 7,
+      "main_buttons": "visible",
+      "platform": "Linux Tk scaling simulation, not Windows DPI acceptance"
+    }
+  ],
+  "production_calls": "NOT_RUN",
+  "ebs_live": "NOT_RUN"
+}
