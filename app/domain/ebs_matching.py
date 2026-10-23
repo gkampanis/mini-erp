@@ -15,9 +15,10 @@ def reference(value):return unicodedata.normalize('NFKC',str(value or '')).strip
 
 def vat(value):
     value=''.join(str(value or '').split()).upper()
+    if not value:raise ValueError('Κενό ΑΦΜ')
     if value.startswith('EL'):value=value[2:]
     if re.fullmatch(r'[0-9]{9}\.0+',value):value=value.split('.')[0]
-    if not re.fullmatch('[0-9]{9}',value):raise ValueError('Χρειάζεται ΑΦΜ 9 ψηφίων· δεν συμπληρώνονται χαμένα αρχικά μηδενικά')
+    if not re.fullmatch('[0-9]{9}',value):raise ValueError('Εκτός υποστηριζόμενης μορφής ΑΦΜ 9 ψηφίων· έλεγξε αν είναι αλλοδαπό ή ελλιπές. Η αρχική τιμή διατηρείται χωρίς αλλαγή ψηφίων')
     return value
 
 

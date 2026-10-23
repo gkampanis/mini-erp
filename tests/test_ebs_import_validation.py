@@ -112,3 +112,25 @@ class ImportValidationTests(unittest.TestCase):
         packet=self.service.preview(self.company,path,'Συνθετικά',1,MAPPING,'2026-10-01','2026-10-31','000000000',complete=True,company_confirmed=True)
         self.assertFalse(packet['can_commit']);self.assertFalse(packet['ignored_rows'])
         self.assertTrue(any(i['row']==3 and i['field']=='vat' for i in packet['blocking_issues']))
+    def test_source_date_checks_period_without_becoming_a_matching_field(self):
+        path=self.folder/'synthetic-period.ods';headers=[*HEADERS,'Ημ/νία']
+        ods(path,row([cell(v) for v in headers])+row(self.cells()+[cell('2026-10-22')]))
+        sheet=read_workbook(path)['sheets'][0]
+        self.assertEqual(self.service.source_months(sheet,1),{'2026-10'})
+        packet=self.service.preview(self.company,path,'Συνθετικά',1,MAPPING,'2026-10-01','2026-10-31','000000000',complete=True,company_confirmed=True)
+        self.assertEqual(packet['results'][self.document]['status'],'registered');self.assertNotIn('date',packet['mapping'])
+        with self.assertRaisesRegex(ValueError,'2026-10.*2026-09'):
+            self.service.preview(self.company,path,'Συνθετικά',1,MAPPING,'2026-09-01','2026-09-30','000000000',complete=True,company_confirmed=True)
+    def test_unknown_identity_cannot_create_negative_evidence_from_different_amounts(self):
+        values=self.cells();values[0]=cell('');values[1]=cell('');values[4]=cell('999')
+        packet=self.packet([values]);self.assertFalse(packet['can_commit'])
+        self.assertNotIn('not_registered',[r['status'] for r in packet['results'].values()])
+        partial=self.packet([values],complete=False);self.service.commit(partial,confirmed=True)
+        with self.assertRaises(ValueError):self.service.assert_rpa(self.company,list(partial['results']),required=True)
+    def test_period_formula_cache_cannot_select_or_certify_the_source_month(self):
+        path=self.folder/'synthetic-period-formula.ods';headers=[*HEADERS,'Ημ/νία']
+        ods(path,row([cell(v) for v in headers])+row(self.cells()+[cell('21/10/2026',formula=True)]))
+        sheet=read_workbook(path)['sheets'][0]
+        self.assertEqual(self.service.source_months(sheet,1),set())
+        with self.assertRaisesRegex(ValueError,'περίοδος.*τύπο'):
+            self.service.preview(self.company,path,'Συνθετικά',1,MAPPING,'2026-10-01','2026-10-31','000000000',complete=True,company_confirmed=True)

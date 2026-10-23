@@ -164,6 +164,10 @@ class ReconciliationTab:
             try:line=int(header.get())
             except ValueError:status.set('Γράψε έγκυρο αριθμό γραμμής τίτλων.');return
             selected_sheet=next(s for s in book['sheets'] if s['name']==sheet.get());headers.clear();headers.update(next((raw for number,raw in selected_sheet['rows'] if number==line),{}))
+            periods=self.service.source_months(selected_sheet,line,book['epoch1904'])
+            if len(periods)==1:
+                period=next(iter(periods));year.set(period[:4]);month.set(MONTHS[int(period[5:])-1])
+                status.set(f'Το αρχείο αφορά {month.get()} {year.get()}. Η περίοδος επιλέχθηκε από τις ημερομηνίες· η συμφωνία χρησιμοποιεί μόνο τα πέντε πεδία.')
             # These are explicitly unrelated to reconciliation. Retain their
             # raw cells, but do not offer them as mapping choices.
             labels={f'{index+1}: {title}':index for index,title in headers.items() if norm(title) not in NAMES['date'] and norm(title) not in ('παρ κο','κατ','συναλλασσομενος','τιτλος')};win.column_labels=labels
@@ -209,8 +213,8 @@ class ReconciliationTab:
                     result_tree.insert('','end',iid=str(document),values=(TITLES[result['status']],reference(row),row['vat'],amount(row['net_minor']),amount(row['tax_minor']),amount(row['gross_minor']),result['reason']))
                 counts=Counter(r['status'] for r in packet['results'].values());summary=' · '.join(f'{TITLES[k]}: {v}' for k,v in counts.items())
                 if not packet['can_commit']:
-                    status.set(f'Δεν αποθηκεύεται ως πλήρης: {len({i["row"] for i in packet["blocking_issues"]})} γραμμές με πρόβλημα. Δες τα ακριβή κελιά στον «Έλεγχο αρχείου». Διόρθωσε την εξαγωγή ή κάνε νέα προεπισκόπηση χωρίς «Πλήρης κατάλογος».')
-                else:status.set(f'Αρχείο: {len(packet["rows"])} γραμμές δεδομένων · {len(packet["ignored_rows"])} επικεφαλίδες / σημειώσεις. '+(summary or 'Δεν υπάρχουν παραστατικά Mini ERP στον επιλεγμένο μήνα.'))
+                    status.set(f'Δεν αποθηκεύεται ως πλήρης: {len({i["row"] for i in packet["blocking_issues"]})} γραμμές με πρόβλημα. Δες τα ακριβή κελιά στον «Έλεγχο αρχείου». Έλεγξε τις εξαιρέσεις ή κάνε νέα προεπισκόπηση χωρίς «Πλήρης κατάλογος».')
+                else:status.set(('Μερική συμφωνία· δεν τεκμηριώνει απουσία από EBS και δεν επιτρέπει νέα RPA. ' if not packet['complete'] else '')+f'Αρχείο: {len(packet["rows"])} γραμμές δεδομένων · {sum(bool(r["error"]) for r in packet["rows"])} με ελλείψεις. '+(summary or 'Δεν υπάρχουν παραστατικά Mini ERP στον επιλεγμένο μήνα.'))
                 pages.select(sample_tab if any(r['error'] for r in packet['rows']) else results_tab)
             self.owner.run_worker(execute,done)
         def apply():
@@ -224,9 +228,11 @@ class ReconciliationTab:
                 finally:erp.close()
             def done(result):
                 if win.winfo_exists():win.destroy()
+                label=next((label for label,value in self.owner._month_values.items() if value==packet['start'][:7]),None)
+                if label:self.owner.month_filter.set(label)
                 self.owner.refresh();self.refresh()
             self.owner.run_worker(execute,done)
         ttk.Button(bottom,text='Προεπισκόπηση συμφωνίας',command=check).pack(side='left')
         win.apply_button=ttk.Button(bottom,text='Αποθήκευση συμφωνίας',style='Primary.TButton',command=apply,state='disabled');win.apply_button.pack(side='right')
         load_headers();win.mapping_vars=vars;win.complete_var=complete;win.company_ok_var=company_ok;win.check=check
-        win.validation_tree=sample;win.results_tree=result_tree;win.problems_only_var=problems_only;win.status_var=status;return win
+        win.validation_tree=sample;win.results_tree=result_tree;win.problems_only_var=problems_only;win.status_var=status;win.period_vars=(year,month);return win

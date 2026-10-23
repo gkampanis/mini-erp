@@ -7,7 +7,8 @@ import os
 from pathlib import Path
 import tempfile
 from app.infrastructure.importers.excel import read_workbook
-from app.infrastructure.importers.legacy_primitives import norm
+from app.infrastructure.importers.legacy_primitives import norm,NAMES
+from app.domain.validation import iso_date
 from app.domain.ebs_matching import FIELDS,normalize,compare,fingerprint,vat
 from app.domain.invoice_types import classify
 
@@ -33,6 +34,23 @@ class EBSReconciliation:
 
     def layout(self,path,*,data=None):return read_workbook(path,data=data)
 
+    @staticmethod
+    def date_column(headers):
+        columns=[c for c,label in headers.items() if norm(label) in NAMES['date']]
+        return columns[0] if len(columns)==1 else None
+
+    @classmethod
+    def source_months(cls,sheet,header_row,epoch1904=False):
+        headers=next((raw for line,raw in sheet['rows'] if line==header_row),{})
+        column=cls.date_column(headers);months=set()
+        if column is None:return months
+        for line,raw in sheet['rows']:
+            if line<=header_row or not raw.get(column):continue
+            if column in sheet['formula_cells'].get(line,set()):continue
+            try:months.add(iso_date(raw[column],epoch1904)[:7])
+            except ValueError:pass
+        return months
+
     def preview(self,company,path,sheet,header_row,mapping,start,end,company_vat,*,complete=False,company_confirmed=False,data=None):
         owner=self.db.execute('SELECT vat FROM companies WHERE id=?',(company,)).fetchone()
         if owner is None or vat(company_vat)!=owner['vat']:raise ValueError('Το ΑΦΜ της εξαγωγής δεν συμφωνεί με την εταιρεία')
@@ -45,7 +63,7 @@ class EBSReconciliation:
         if headers is None:raise ValueError('Δεν βρέθηκε η γραμμή επικεφαλίδων')
         if not mapping or any(k not in FIELDS or type(v) is not int or v not in headers for k,v in mapping.items()) or len(set(mapping.values()))!=len(mapping):raise ValueError('Έλεγξε την αντιστοίχιση στηλών· κάθε στήλη χρησιμοποιείται μία φορά')
         if 'vat' not in mapping or not any(k in mapping for k in ('mark','number','invoice')):raise ValueError('Χρειάζεται ΑΦΜ προμηθευτή και MARK ή αριθμός παραστατικού')
-        rows=[];ignored=[];fatal=[];blocking=[]
+        rows=[];ignored=[];fatal=[];blocking=[];period_column=self.date_column(headers)
         note_columns={c for c,label in headers.items() if norm(label) in ('σημειωση','σημειωσεις','παρατηρησεις','σχολιο','σχολια','note','notes','comments')}
         for line,raw in selected['rows']:
             formulas=selected['formula_cells'].get(line,set()) & set(mapping.values())
@@ -56,10 +74,20 @@ class EBSReconciliation:
             if not formulas and (note or repeated):
                 ignored.append(dict(row=line,raw=raw,reason='Κενά όλα τα πεδία συμφωνίας' if note else 'Επανάληψη επικεφαλίδων'))
                 continue
+            if period_column is not None and raw.get(period_column):
+                if period_column in selected['formula_cells'].get(line,set()):
+                    fatal.append(f'{cell_address(period_column,line)}: η περίοδος προέρχεται από τύπο υπολογισμού· χρειάζεται σταθερή ημερομηνία στην εξαγωγή')
+                    continue
+                try:
+                    source_date=iso_date(raw[period_column],book['epoch1904'])
+                    if not start<=source_date<=end:fatal.append(f'{cell_address(period_column,line)}: το αρχείο περιέχει περίοδο {source_date[:7]}, ενώ επιλέχθηκε {start[:7]}')
+                except ValueError:fatal.append(f'{cell_address(period_column,line)}: δεν αναγνωρίζεται η ημερομηνία για έλεγχο περιόδου')
             issues=[]
             item,error=normalize(raw,mapping,book['epoch1904'],numeric_columns=selected['numeric_cells'].get(line,set()),issues=issues)
             for field,column in mapping.items():
-                if column in formulas:issues.append(dict(field=field,column=column,value=raw.get(column,''),message='Τύπος υπολογισμού σε πεδίο συμφωνίας· απαιτείται εξαγωγή σταθερής τιμής',formula=True))
+                if column in formulas:
+                    item.pop(field+'_minor' if field in ('net','tax','gross') else field,None)
+                    issues.append(dict(field=field,column=column,value=raw.get(column,''),message='Τύπος υπολογισμού σε πεδίο συμφωνίας· απαιτείται εξαγωγή σταθερής τιμής',formula=True))
             for issue in issues:
                 issue.update(row=line,cell=cell_address(issue['column'],line),header=headers.get(issue['column'],issue['field']))
                 if issue.get('formula') or (issue['field']=='vat' and not item.get('vat')):blocking.append(issue)

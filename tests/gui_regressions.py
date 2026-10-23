@@ -678,12 +678,12 @@ class DesktopRegressions(unittest.TestCase):
             self.assertGreater(refresh.call_count,0)
         self.assertEqual(len(self.app.suppliers.tree.get_children()),2)
 
-    def ebs_fixture_dialog(self,*,vat='000000001'):
+    def ebs_fixture_dialog(self,*,vat='000000001',source_date='2026-10-22'):
         from app.application.ebs_reconciliation import EBSReconciliation
         from tests.test_ods import ods
         from xml.sax.saxutils import escape
         headers=['Ημ/νία','Παρ/κό','Εναλ. παρ/κό','Συναλλασσόμενος','Α.Φ.Μ.','Τίτλος','Κατ.','Αξία','ΦΠΑ','Σύνολο']
-        values=['2026-10-22','ΤΕΔ-00001','1','SYN - ΣΥΝΘΕΤΙΚΟΣ',vat,'Συνθετική εγγραφή','2','0,10','0,02','0,12']
+        values=[source_date,'ΤΕΔ-00001','1','SYN - ΣΥΝΘΕΤΙΚΟΣ',vat,'Συνθετική εγγραφή','2','0,10','0,02','0,12']
         rows=''.join('<table:table-row>'+''.join('<table:table-cell office:value-type="string"><text:p>'+escape(v)+'</text:p></table:table-cell>' for v in row)+'</table:table-row>' for row in (headers,values))
         path=self.folder/'synthetic-ebs.ods';ods(path,rows)
         book=EBSReconciliation(self.app.erp).layout(path)
@@ -775,6 +775,13 @@ class DesktopRegressions(unittest.TestCase):
         document=int(tab.tree.get_children()[0]);tab.sort_by('net_minor');tab.sort_by('invoice')
         tab.tree.selection_set(str(document));tab.open();self.assertTrue(self.app._details[document].winfo_exists())
         self.assertEqual(self.count('documents'),2)
+
+    def test_reconciliation_detects_source_month_without_sixth_mapping_field(self):
+        self.import_fixture('separate.xlsx');win=self.ebs_fixture_dialog(source_date='2026-09-22')
+        self.assertEqual(tuple(v.get() for v in win.period_vars),('2026','Σεπτέμβριος'))
+        self.assertEqual(set(win.mapping_vars),{'invoice','vat','net','tax','gross'})
+        win.company_ok_var.set(True);win.complete_var.set(True);win.check();wait(self.root,lambda:not self.app.busy)
+        self.assertEqual(win.packet['start'],'2026-09-01');self.assertEqual(win.packet['results'],{})
 
 
 if __name__ == '__main__':
