@@ -40,8 +40,6 @@ def open_settings(owner,document=None):
         except sqlite3.Error:messagebox.showerror('Εταιρεία','Δεν αποθηκεύτηκε η εταιρεία. Έλεγξε αν υπάρχει ήδη το ΑΦΜ.',parent=win);return
         company_label.set(name+' · ΑΦΜ '+vat);username.set('');key.set('');owner.refresh()
     ttk.Button(panel,text='Ορισμός πραγματικής εταιρείας αντί DEMO',command=identify).pack(anchor='w',pady=(0,10))
-    from app.ui.registry import settings as registry_settings
-    ttk.Button(panel,text='Ειδικοί κωδικοί Μητρώου · αναζήτηση επωνυμίας',command=lambda:registry_settings(owner,win)).pack(anchor='w',pady=(0,10))
     ttk.Label(panel,text='API username και subscription key myDATA. Δεν χρειάζονται οι προσωπικοί κωδικοί TAXISnet.',style='Subtitle.TLabel',wraplength=850).pack(anchor='w',pady=(0,12))
     environment=tk.StringVar(value='Παραγωγικό');username=tk.StringVar();key=tk.StringVar()
     choices={'Δοκιμαστικό':'test','Παραγωγικό':'production'}

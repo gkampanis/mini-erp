@@ -35,11 +35,10 @@ def open_detail(owner,counterparty,on_saved=lambda:None):
     win=tk.Toplevel(owner.root);win.title(card['code']+' · '+card['name']);win.geometry('1020x700');win.minsize(850,550)
     body=ttk.Frame(win,padding=18);body.pack(fill='both',expand=True)
     ttk.Label(body,text=f"{card['code']} · ΑΦΜ {card['vat']}",style='Section.TLabel').pack(anchor='w')
-    from app.ui.registry import find as registry_find,settings as registry_settings
+    from app.ui.registry import find as registry_find
     registry_buttons=ttk.Frame(body);registry_buttons.pack(fill='x',pady=5)
     name=tk.StringVar(value=card['name'])
     ttk.Button(registry_buttons,text='Άντληση στοιχείων από ΑΦΜ',command=lambda:registry_find(owner,counterparty,win,on_saved=lambda values:name.set(values['onomasia']))).pack(side='left')
-    ttk.Button(registry_buttons,text='Κωδικοί Μητρώου',command=lambda:registry_settings(owner,win)).pack(side='left',padx=8)
     ttk.Entry(body,textvariable=name).pack(fill='x',pady=10)
     role_vars={role:tk.BooleanVar(value=role in card['roles']) for role in ROLES}
     line=ttk.Frame(body);line.pack(fill='x')

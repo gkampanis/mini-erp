@@ -27,7 +27,7 @@ class Registry:
         card,_=Counterparties(self.erp).detail(company,counterparty);called_by,_=self.identity(company)
         if called_by=='000000000':raise ValueError('Όρισε πρώτα το πραγματικό ΑΦΜ εταιρείας στις ρυθμίσεις ΑΑΔΕ')
         value=self.read_credentials(company)
-        if value is None:raise ValueError('Λείπουν ειδικοί κωδικοί Μητρώου. Δεν είναι οι κωδικοί myDATA.')
+        if value is None:raise ValueError('Λείπουν ειδικοί κωδικοί Μητρώου. Άνοιξε Ρυθμίσεις → Συνδέσεις → Μητρώο ΑΑΔΕ. Δεν είναι οι κωδικοί myDATA.')
         return transport(value['username'],value['key'],called_by,card['vat'])
     def apply(self,company,counterparty,values,confirmed=False):
         if confirmed is not True:raise ValueError('Απαιτείται έλεγχος στοιχείων Μητρώου')

@@ -358,7 +358,7 @@ class DesktopRegressions(unittest.TestCase):
         def retrieve(sync,company,identifier):
             self.assertEqual(identifier,document)
             sync.erp.attach_pdf(company,identifier,'synthetic.pdf',data=synthetic_pdf(),confirmed=True)
-        with patch('app.application.sync.Sync.document_pdf',retrieve), patch('app.ui.pdf_pane.simpledialog.askstring') as manual:
+        with patch('app.application.sync.Sync.document_pdf',retrieve), patch('tkinter.simpledialog.askstring') as manual:
             pane.fetch_aade()
             wait(self.root,lambda:pane.image is not None and not self.app.busy)
             manual.assert_not_called()
@@ -385,6 +385,53 @@ class DesktopRegressions(unittest.TestCase):
         with patch('app.ui.aade_dialog.messagebox.showinfo') as info,patch('app.application.camoufox_pdf.run') as recover:
             self.button(win,'Ανάκτηση εκκρεμών με Camoufox (προαιρετικό)').invoke()
             info.assert_called_once();recover.assert_not_called()
+
+    def test_text_fields_support_shortcuts_context_menu_and_greek_layout(self):
+        from types import SimpleNamespace
+        from app.ui.text_editing import shortcut
+        win=tk.Toplevel(self.root)
+        entries=[ttk.Entry(win),tk.Entry(win),ttk.Entry(win,show='●'),tk.Text(win,height=2),ttk.Combobox(win),tk.Spinbox(win),ttk.Spinbox(win)]
+        for field in entries:
+            if not isinstance(field,tk.Text):field.delete(0,'end')
+            field.pack()
+        win.update();sample='Συνθετικό κείμενο'
+        for field in entries:
+            field.focus_force();self.root.update()
+            field.clipboard_clear();field.clipboard_append(sample)
+            field.event_generate('<Control-v>');self.root.update()
+            self.assertEqual(field.get('1.0','end-1c') if isinstance(field,tk.Text) else field.get(),sample)
+            field.event_generate('<Control-a>');field.event_generate('<Control-x>');self.root.update()
+            self.assertEqual(field.get('1.0','end-1c') if isinstance(field,tk.Text) else field.get(),'')
+            # Native password fields may copy masking glyphs; paste must accept external text.
+            field.clipboard_clear();field.clipboard_append(sample)
+            shortcut(SimpleNamespace(widget=field,keysym='Greek_omega'));self.root.update()
+            self.assertEqual(field.get('1.0','end-1c') if isinstance(field,tk.Text) else field.get(),sample)
+        field=entries[0];field.delete(0,'end');field.focus_force();self.root.update()
+        field.event_generate('<Button-3>',x=4,y=4);self.root.update()
+        menu=next(w for w in self.display_root.winfo_children() if isinstance(w,tk.Menu))
+        self.assertEqual(menu.entrycget(1,'label'),'Επικόλληση')
+        menu.invoke(1);menu.unpost();self.root.update();self.assertEqual(field.get(),sample)
+        readonly=ttk.Entry(win);readonly.insert(0,'Σταθερό');readonly.configure(state='readonly');readonly.pack()
+        readonly.selection_range(0,'end');shortcut(SimpleNamespace(widget=readonly,keysym='c'))
+        self.assertEqual(readonly.clipboard_get(),'Σταθερό')
+        shortcut(SimpleNamespace(widget=readonly,keysym='v'));self.assertEqual(readonly.get(),'Σταθερό')
+        source=tk.Text(win,height=2);source.insert('1.0','Αμετάβλητη προέλευση');source.configure(state='disabled');source.pack()
+        shortcut(SimpleNamespace(widget=source,keysym='a'));shortcut(SimpleNamespace(widget=source,keysym='c'))
+        self.assertEqual(source.clipboard_get(),'Αμετάβλητη προέλευση')
+        shortcut(SimpleNamespace(widget=source,keysym='v'));self.assertEqual(source.get('1.0','end-1c'),'Αμετάβλητη προέλευση')
+
+    def test_document_and_card_only_offer_automatic_lookup_and_shared_settings(self):
+        self.import_fixture('combined.xlsx')
+        document=int(self.app.tree.get_children()[0]);self.app.tree.selection_set(str(document));self.app.open_detail()
+        detail=self.app._details[document]
+        captions=[w.cget('text') for w in widgets(detail) if isinstance(w,ttk.Button)]
+        self.assertNotIn('Άντληση από σύνδεσμο',captions);self.assertIn('ΑΑΔΕ → Λήψη PDF',captions)
+        from app.ui.counterparties import open_detail
+        row,_=self.app.erp.detail(self.app.company,document);card=open_detail(self.app,row['counterparty_id'])
+        captions=[w.cget('text') for w in widgets(card) if isinstance(w,ttk.Button)]
+        self.assertNotIn('Κωδικοί Μητρώου',captions);self.assertIn('Άντληση στοιχείων από ΑΦΜ',captions)
+        settings=self.app.open_settings()
+        self.assertTrue(self.button(settings,'Μητρώο ΑΑΔΕ · ειδικοί κωδικοί').winfo_exists())
 
     def test_aade_settings_mask_and_secure_save_with_synthetic_vault(self):
         from tests.test_workspace import MemoryVault

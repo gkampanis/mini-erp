@@ -74,6 +74,8 @@ class Desktop:
     def __init__(self, root, directory):
         self.root, self.directory = root, Path(directory)
         self.style = apply(root)
+        from app.ui.text_editing import install
+        install(root)
         self.erp = ERP(directory)
         company = self.erp.db.execute('SELECT id,name FROM companies ORDER BY id').fetchone()
         if company is None:

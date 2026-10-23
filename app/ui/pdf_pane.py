@@ -1,6 +1,6 @@
 """Inline, raster-only PDF preview beside document details."""
 import tkinter as tk
-from tkinter import ttk,filedialog,messagebox,simpledialog
+from tkinter import ttk,filedialog,messagebox
 from app.application.service import ERP
 from app.infrastructure.pdf_archive import KINDS,render,renderer_available
 
@@ -16,7 +16,6 @@ class PDFPane:
         buttons=ttk.Frame(top);buttons.pack(fill='x')
         ttk.Button(top,text='ΑΑΔΕ → Λήψη PDF',command=self.fetch_aade).pack(anchor='w',pady=(0,6))
         ttk.Button(buttons,text='Προσθήκη PDF',command=self.attach).pack(side='left',padx=(0,6))
-        ttk.Button(buttons,text='Άντληση από σύνδεσμο',command=self.fetch).pack(side='left')
         self.files=ttk.Treeview(parent,columns=('kind','file'),show='headings',height=2,selectmode='browse')
         self.files.heading('kind',text='Είδος');self.files.heading('file',text='Συνδεδεμένο αρχείο')
         self.files.column('kind',width=120);self.files.column('file',width=200)
@@ -50,7 +49,7 @@ class PDFPane:
         if records:
             selected=next((r for r in records if r['id']==self.selected),next((r for r in records if r['kind']=='invoice'),records[0]))
             self.files.selection_set(str(selected['id']))
-        else:self.state.set('Δεν έχει συνδεθεί PDF. Πρόσθεσε αρχείο ή άντλησέ το από έγκυρο σύνδεσμο HTTPS.')
+        else:self.state.set('Δεν έχει συνδεθεί PDF. Πάτησε «ΑΑΔΕ → Λήψη PDF» για αυτόματη εύρεση ή πρόσθεσε τοπικό PDF.')
 
     def auto_fetch(self):
         if not self.alive() or self.records or self.owner.busy:return
@@ -125,18 +124,6 @@ class PDFPane:
         def execute():
             service=ERP(self.owner.directory)
             try:return service.attach_pdf(self.owner.company,self.document,path,kind,confirmed=True)
-            finally:service.close()
-        self.owner.run_worker(execute,lambda result:self.linked(result))
-
-    def fetch(self):
-        if self.owner.busy:return
-        url=simpledialog.askstring('Άντληση PDF','Πλήρης σύνδεσμος HTTPS από τον εκδότη/πάροχο:',parent=self.window)
-        if not url:return
-        if not messagebox.askyesno('Λήψη PDF','Να ληφθεί το PDF και να συνδεθεί με αυτό το παραστατικό; Δεν θα σταλούν κωδικοί ΑΑΔΕ σε αυτόν τον σύνδεσμο.',parent=self.window):return
-        kind=self.current_kind()
-        def execute():
-            service=ERP(self.owner.directory)
-            try:return service.download_pdf(self.owner.company,self.document,url,kind,confirmed=True)
             finally:service.close()
         self.owner.run_worker(execute,lambda result:self.linked(result))
 
