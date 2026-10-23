@@ -52,3 +52,9 @@ credentials, PDFs πελατών ή profiles. Βλέπε docs/CONNECTED_WORKFLOW
 και άδειες επιμέρους συστατικών). Τα τρίτα binaries/source δεν περιλαμβάνονται
 στο ZIP Mini ERP. Η εγκατάσταση διατηρεί τα περιλαμβανόμενα license notices.
 https://github.com/daijro/camoufox — https://pypi.org/project/camoufox/0.5.8/
+
+Developer quality tools are installed separately through requirements-quality.txt:
+Hypothesis (MPL-2.0, https://github.com/HypothesisWorks/hypothesis),
+RapidFuzz (MIT, https://github.com/rapidfuzz/RapidFuzz) and python-calamine
+(MIT, https://github.com/dimastbk/python-calamine). Their binaries are not
+bundled with the desktop runtime. No code was copied from these repositories.

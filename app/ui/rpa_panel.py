@@ -200,7 +200,7 @@ class RPAPanel:
                 raise ValueError('Δεν υπάρχουν επιβεβαιωμένα μη καταχωρισμένα στην επιλογή. Κάνε «Συμφωνία EBS» με πλήρη κατάλογο για τον μήνα. Καταχωρισμένα και αμφίβολα εξαιρούνται.')
             scope=self.rpa.expense_scope(self.owner.company,ids)
             excluded=len(scope['purchases']);issued=len(scope['outgoing'])
-            if scope['needs_review']:
+            if scope['needs_review'] and not scope['expenses']:
                 self.owner.tree.selection_set([str(d) for d in scope['needs_review']])
                 self.owner.tree.see(str(scope['needs_review'][0]))
                 messagebox.showinfo('Χρειάζονται λογαριασμό',f"{len(scope['needs_review'])} παραστατικά της επιλογής δεν έχουν εγκεκριμένο λογαριασμό. Επιλέχθηκαν στη λίστα.\nΣτο επόμενο παράθυρο όρισε ομάδα και λογαριασμό ανά προμηθευτή και πάτησε «Έγκριση λογαριασμών».\nΟι {excluded} αγορές ομάδας 2 παραμένουν εκτός καταχώρισης.",parent=self.owner.root)
@@ -209,7 +209,7 @@ class RPAPanel:
             if not ids:raise ValueError('Δεν υπάρχουν εγκεκριμένα έξοδα ομάδας 6 σε αυτή την επιλογή. Οι αγορές ομάδας 2 παραμένουν στη βάση, εκτός EBS.')
             real=mode=='fill_only'
             if real and sys.platform!='win32':raise ValueError('Η πραγματική καταχώριση απαιτεί Windows με Entersoft. Η προσομοίωση λειτουργεί εδώ.')
-            if not messagebox.askyesno('Έναρξη '+('EBS' if real else 'ελέγχου χωρίς καταχώριση'),f'{len(ids)} έξοδα ομάδας 6, με τους εγκεκριμένους λογαριασμούς τους.\n{excluded_registered} καταχωρισμένα και {excluded_review} χωρίς ασφαλή συμφωνία εξαιρέθηκαν.\n{excluded} αγορές ομάδας 2 εξαιρέθηκαν και παραμένουν στη βάση. {issued} εκδοθέντα και {len(scope["excluded_types"])} μη υποστηριζόμενα είδη είναι εκτός ροής εξόδων.\n'+('Θα εκτελεστεί η ροή συμπλήρωση → Save → νέο ΤΕΔ. Επιβεβαιώνεις κενό ΤΕΔ και πραγματικές καταχωρίσεις;' if real else 'Δεν θα γίνει καμία ενέργεια στο EBS. Συνέχεια;'),parent=self.owner.root):return
+            if not messagebox.askyesno('Έναρξη '+('EBS' if real else 'ελέγχου χωρίς καταχώριση'),f'{len(ids)} έξοδα ομάδας 6, με τους εγκεκριμένους λογαριασμούς τους.\n{excluded_registered} καταχωρισμένα και {excluded_review} χωρίς ασφαλή συμφωνία εξαιρέθηκαν.\n{len(scope["needs_review"])} χωρίς έγκριση λογαριασμού εξαιρέθηκαν· τα έτοιμα συνεχίζουν.\n{excluded} αγορές ομάδας 2 εξαιρέθηκαν και παραμένουν στη βάση. {issued} εκδοθέντα και {len(scope["excluded_types"])} μη υποστηριζόμενα είδη είναι εκτός ροής εξόδων.\n'+('Θα εκτελεστεί η ροή συμπλήρωση → Save → νέο ΤΕΔ. Επιβεβαιώνεις κενό ΤΕΔ και πραγματικές καταχωρίσεις;' if real else 'Δεν θα γίνει καμία ενέργεια στο EBS. Συνέχεια;'),parent=self.owner.root):return
             self.job=self.rpa.create(self.owner.company,ids,mode,confirmed=True,execution='save_new' if real else 'fill_only',pilot=pilot,reconciled_only=True)
         except ValueError as exc:messagebox.showwarning('Πριν την έναρξη',str(exc),parent=self.owner.root);return
         if mode=='simulation':self.preview()

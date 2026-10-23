@@ -28,8 +28,8 @@ class ODSTests(unittest.TestCase):
             self.assertEqual(raw,{0:'1.0',1:'000000001',2:'1.23456789E+8',3:'1.0'})
             self.assertEqual(sheet['numeric_cells'],{1:{0,1,2}})
             from app.domain.ebs_matching import normalize
-            raw.update({4:'1',5:'0.24',6:'1.24'})
-            mapping={'invoice':0,'vat':2,'net':4,'tax':5,'gross':6}
+            raw.update({4:'1',5:'0.24',6:'1.24',7:'2026-09-15'})
+            mapping={'invoice':0,'vat':2,'net':4,'tax':5,'gross':6,'date':7}
             item,error=normalize(raw,mapping,numeric_columns=sheet['numeric_cells'][1])
             self.assertFalse(error);self.assertEqual((item['invoice'],item['vat']),('1','123456789'))
             mapping.update(invoice=3,vat=1)

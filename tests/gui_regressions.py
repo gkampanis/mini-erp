@@ -684,12 +684,12 @@ class DesktopRegressions(unittest.TestCase):
             self.assertGreater(refresh.call_count,0)
         self.assertEqual(len(self.app.suppliers.tree.get_children()),2)
 
-    def ebs_fixture_dialog(self,*,vat='000000001',source_date='2026-10-22'):
+    def ebs_fixture_dialog(self,*,vat='000000001',source_date='2026-10-21'):
         from app.application.ebs_reconciliation import EBSReconciliation
         from tests.test_ods import ods
         from xml.sax.saxutils import escape
         headers=['Ημ/νία','Παρ/κό','Εναλ. παρ/κό','Συναλλασσόμενος','Α.Φ.Μ.','Τίτλος','Κατ.','Αξία','ΦΠΑ','Σύνολο']
-        values=[source_date,'ΤΕΔ-00001','1','SYN - ΣΥΝΘΕΤΙΚΟΣ',vat,'Συνθετική εγγραφή','2','0,10','0,02','0,12']
+        values=[source_date,'ΤΕΔ-00001','ΔΟΚ/1','SYN - ΣΥΝΘΕΤΙΚΟΣ',vat,'Συνθετική εγγραφή','2','0,10','0,02','0,12']
         rows=''.join('<table:table-row>'+''.join('<table:table-cell office:value-type="string"><text:p>'+escape(v)+'</text:p></table:table-cell>' for v in row)+'</table:table-row>' for row in (headers,values))
         path=self.folder/'synthetic-ebs.ods';ods(path,rows)
         book=EBSReconciliation(self.app.erp).layout(path)
@@ -703,19 +703,19 @@ class DesktopRegressions(unittest.TestCase):
         self.assertTrue(win.apply_button.winfo_ismapped())
         self.assertLessEqual(win.apply_button.winfo_rooty()+win.apply_button.winfo_height(),win.winfo_rooty()+win.winfo_height())
         self.assertEqual(win.mapping_vars['invoice'].get(),'3: Εναλ. παρ/κό')
-        self.assertEqual({k:v.get() for k,v in win.mapping_vars.items()},{'invoice':'3: Εναλ. παρ/κό','vat':'5: Α.Φ.Μ.','net':'8: Αξία','tax':'9: ΦΠΑ','gross':'10: Σύνολο'})
+        self.assertEqual({k:v.get() for k,v in win.mapping_vars.items()},{'date':'1: Ημ/νία','invoice':'3: Εναλ. παρ/κό','vat':'5: Α.Φ.Μ.','net':'8: Αξία','tax':'9: ΦΠΑ','gross':'10: Σύνολο'})
         self.assertNotIn('2: Παρ/κό',win.column_labels);self.assertNotIn('7: Κατ.',win.column_labels)
-        self.assertNotIn('1: Ημ/νία',win.column_labels);self.assertEqual(len(win.column_labels),5)
+        self.assertIn('1: Ημ/νία',win.column_labels);self.assertEqual(len(win.column_labels),6)
         win.mapping_vars['tax'].set('—')
         with patch.object(self.app,'run_worker') as worker:win.check();worker.assert_not_called()
         win.mapping_vars['tax'].set('9: ΦΠΑ')
         win.company_ok_var.set(True);win.complete_var.set(True);win.check()
         wait(self.root,lambda:not self.app.busy)
         self.assertTrue(win.apply_button.instate(['!disabled']))
-        self.assertEqual(win.packet['mapping'],{'invoice':2,'vat':4,'net':7,'tax':8,'gross':9})
+        self.assertEqual(win.packet['mapping'],{'date':0,'invoice':2,'vat':4,'net':7,'tax':8,'gross':9})
         self.assertEqual(win.packet['rows'][0]['raw'][6],'2')
-        self.assertEqual(win.packet['rows'][0]['raw'][0],'2026-10-22')
-        self.assertNotIn('date',win.packet['rows'][0]['normalized'])
+        self.assertEqual(win.packet['rows'][0]['raw'][0],'2026-10-21')
+        self.assertEqual(win.packet['rows'][0]['normalized']['date'],'2026-10-21')
         self.assertNotIn('invoice_type',win.packet['rows'][0]['normalized'])
         self.assertEqual(self.count('rpa_jobs'),0)
         with patch('app.ui.ebs_reconciliation.messagebox.askyesno') as confirm:
@@ -728,7 +728,7 @@ class DesktopRegressions(unittest.TestCase):
         self.assertEqual((len(registered),len(pending)),(1,1))
         tab=self.app.reconciliation;tab.tree.selection_set(str(registered[0]));comparison=tab.details()
         labels=[comparison.comparison_tree.item(i,'values')[0] for i in comparison.comparison_tree.get_children()]
-        self.assertTrue({'Καθαρή €','ΦΠΑ €','Σύνολο €'}<=set(labels));self.assertNotIn('Ημερομηνία',labels);comparison.destroy()
+        self.assertTrue({'Καθαρή €','ΦΠΑ €','Σύνολο €'}<=set(labels));self.assertIn('Ημερομηνία',labels);comparison.destroy()
         tab.pending();self.root.update()
         self.assertEqual([int(i) for i in self.app.tree.get_children()],pending)
         self.app.erp.prepare_document(self.app.company,pending[0],'6','64.03',confirmed=True)
@@ -761,19 +761,20 @@ class DesktopRegressions(unittest.TestCase):
         win.company_ok_var.set(True);win.complete_var.set(True)
         with patch('app.ui.desktop.messagebox.showerror') as popup:
             win.check();wait(self.root,lambda:not self.app.busy);popup.assert_not_called()
-        self.assertFalse(win.packet['can_commit']);self.assertTrue(win.apply_button.instate(['disabled']))
+        self.assertTrue(win.packet['can_commit']);self.assertTrue(win.apply_button.instate(['!disabled']))
         values=win.validation_tree.item(win.validation_tree.get_children()[0],'values')
-        self.assertEqual(values[:6],('2','1','123','0,10','0,02','0,12'))
-        self.assertIn('E2',values[-1]);self.assertIn('Α.Φ.Μ.',values[-1]);self.assertIn('Δεν αποθηκεύεται ως πλήρης',win.status_var.get())
+        self.assertEqual(values[:7],('2','2026-10-21','ΔΟΚ/1','123','0,10','0,02','0,12'))
+        self.assertIn('E2',values[-1]);self.assertIn('Α.Φ.Μ.',values[-1]);self.assertIn('με ελλείψεις',win.status_var.get())
         self.assertEqual(len(win.results_tree.get_children()),2)
         self.assertEqual(self.count('ebs_reconciliation_runs'),runs_before);self.assertEqual(self.count('rpa_jobs'),0)
-        win.complete_var.set(False);win.check();wait(self.root,lambda:not self.app.busy)
-        self.assertTrue(win.apply_button.instate(['!disabled']))
         with patch('app.ui.ebs_reconciliation.messagebox.askyesno',return_value=True):win.apply_button.invoke()
         wait(self.root,lambda:not self.app.busy)
         service=EBSReconciliation(self.app.erp)
-        self.assertNotIn('not_registered',[r['status'] for r in service.results(self.app.company).values()])
+        states=service.results(self.app.company)
+        self.assertEqual(sum(r['status']=='not_registered' for r in states.values()),1)
+        self.assertEqual(sum(r['status']=='review' for r in states.values()),1)
         with self.assertRaises(ValueError):service.assert_rpa(self.app.company,list(service.results(self.app.company)),required=True)
+        service.assert_rpa(self.app.company,[d for d,r in states.items() if r['status']=='not_registered'],required=True)
         self.assertEqual(self.count('documents'),2);self.assertEqual(self.count('rpa_jobs'),0)
 
     def test_reconciliation_filters_sort_and_open_document_keep_same_identity(self):
@@ -785,10 +786,10 @@ class DesktopRegressions(unittest.TestCase):
         tab.tree.selection_set(str(document));tab.open();self.assertTrue(self.app._details[document].winfo_exists())
         self.assertEqual(self.count('documents'),2)
 
-    def test_reconciliation_detects_source_month_without_sixth_mapping_field(self):
+    def test_reconciliation_detects_source_month_and_required_date_mapping(self):
         self.import_fixture('separate.xlsx');win=self.ebs_fixture_dialog(source_date='2026-09-22')
         self.assertEqual(tuple(v.get() for v in win.period_vars),('2026','Σεπτέμβριος'))
-        self.assertEqual(set(win.mapping_vars),{'invoice','vat','net','tax','gross'})
+        self.assertEqual(set(win.mapping_vars),{'date','invoice','vat','net','tax','gross'})
         win.company_ok_var.set(True);win.complete_var.set(True);win.check();wait(self.root,lambda:not self.app.busy)
         self.assertEqual(win.packet['start'],'2026-09-01');self.assertEqual(win.packet['results'],{})
 
@@ -855,6 +856,46 @@ class DesktopRegressions(unittest.TestCase):
         self.close_children();self.app.company_filter.set(label);self.app.company_changed()
         self.assertEqual(self.app.company,other);self.assertEqual(self.app._documents,{})
         self.assertTrue(all(not v.rows for v in self.app.document_views.values()))
+
+    def test_partial_matching_is_saved_excluded_and_confirmed_inline_without_popups(self):
+        from app.application.ebs_reconciliation import EBSReconciliation
+        from app.ui.desktop import STATES
+        self.import_fixture('separate.xlsx');win=self.ebs_fixture_dialog()
+        # Change only the frozen synthetic source, never the customer workbook.
+        from tests.test_ods import ods
+        from xml.sax.saxutils import escape
+        headers=['Ημ/νία','Εναλ. παρ/κό','Α.Φ.Μ.','Αξία','ΦΠΑ','Σύνολο']
+        values=['2026-10-21','ΔΟΚ-0001','000000001','0,10','0,02','0,12']
+        path=self.folder/'partial.ods'
+        ods(path,''.join('<table:table-row>'+''.join('<table:table-cell office:value-type="string"><text:p>'+escape(v)+'</text:p></table:table-cell>' for v in row)+'</table:table-row>' for row in (headers,values)))
+        win.destroy();service=EBSReconciliation(self.app.erp);book=service.layout(path)
+        win=self.app.reconciliation.import_dialog(book);win.company_ok_var.set(True);win.complete_var.set(True)
+        win.check();wait(self.root,lambda:not self.app.busy)
+        with patch('app.ui.ebs_reconciliation.messagebox.askyesno') as popup:
+            win.apply_button.invoke();wait(self.root,lambda:not self.app.busy);popup.assert_not_called()
+        rows=service.results(self.app.company);partial=next(r for r in rows.values() if r['match_kind']=='normalized')
+        self.assertNotIn(str(partial['id']),self.app.tree.get_children())
+        self.assertEqual(len(self.app.tree.get_children()),1)
+        with self.assertRaises(ValueError):service.assert_rpa(self.app.company,[partial['id']],required=True)
+        tab=self.app.reconciliation;self.app.notebook.select(self.app.reconciliation_tab);self.root.update()
+        tab.tree.selection_set(str(partial['id']));self.root.update()
+        self.assertEqual(tab.confirm_button.cget('text'),'Επιβεβαίωση αντιστοίχισης')
+        with patch('app.ui.ebs_reconciliation.messagebox.askyesno') as popup:
+            tab.confirm_button.invoke();self.root.update();popup.assert_not_called()
+        self.assertEqual(service.results(self.app.company)[partial['id']]['match_kind'],'normalized_confirmed')
+        self.assertEqual(self.count('rpa_jobs'),0)
+
+    def test_ready_expenses_continue_when_another_invoice_has_no_account_approval(self):
+        self.import_fixture('separate.xlsx');ids=list(self.app._documents)
+        self.app.erp.prepare_document(self.app.company,ids[0],'6','64.03',confirmed=True)
+        self.app.refresh();panel=self.app.rpa_panel
+        with patch('app.ui.rpa_panel.messagebox.askyesno',return_value=True),patch.object(panel,'accounts') as accounts:
+            panel.simulate();wait(self.root,lambda:not self.app.busy and not panel.running)
+            accounts.assert_not_called()
+        _,items=panel.rpa.items(self.app.company,panel.job)
+        self.assertEqual([i['document_id'] for i in items],[ids[0]])
+        self.assertEqual(items[0]['status'],'simulated')
+        self.assertIsNone(self.app.erp.preparation(self.app.company,ids[1]))
 
 
 if __name__ == '__main__':

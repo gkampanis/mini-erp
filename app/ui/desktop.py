@@ -16,7 +16,7 @@ LABELS = {'vat':'ΑΦΜ', 'name':'Επωνυμία', 'date':'Ημερομηνί�
           'series':'Σειρά', 'number':'Αριθμός', 'net':'Καθαρή', 'tax':'ΦΠΑ', 'gross':'Σύνολο',
           'mark':'MARK', 'kind':'Είδος', 'description':'Περιγραφή', 'currency':'Νόμισμα'}
 GROUPS = {'Όλες οι ομάδες':None,'Ομάδα 2 · Αγορές':'2','Ομάδα 6 · Έξοδα':'6'}
-STATES = ('Όλα τα παραστατικά','Χωρίς προετοιμασία','Με τοπική έγκριση','Μη καταχωρισμένα','Καταχωρισμένα','Χρειάζονται έλεγχο','Δεν βρέθηκαν στο Excel')
+STATES = ('Όλα τα παραστατικά','Χωρίς προετοιμασία','Με τοπική έγκριση','Μη καταχωρισμένα','Καταχωρισμένα','Χρειάζονται έλεγχο','Δεν βρέθηκαν στο Excel','Μερική συμφωνία')
 ACTIONS = {'document_imported':'Εισαγωγή παραστατικού','import_duplicate':'Παράλειψη διπλοτύπου',
            'import_conflict':'Σύγκρουση εισαγωγής','document_prepared':'Τοπική έγκριση προετοιμασίας',
            'import_warning':'Προειδοποίηση εισαγωγής','amounts_rounded':'Στρογγυλοποίηση ποσών', 'pdf_linked':'Σύνδεση PDF','counterparty_named':'Συμπλήρωση επωνυμίας'}
@@ -381,8 +381,10 @@ class Desktop:
             rows=[r for r in rows if evidence[r['id']]['status']=='not_registered' and r['direction']=='incoming'
                   and r['kind']=='invoice' and (not r['invoice_type'] or r['rpa_allowed'])
                   and (r.get('nature_group') or r.get('suggested_group'))!='2']
-        elif self.state_filter.get() in STATES[4:]:
-            wanted=dict(zip(STATES[4:],('registered','review','not_found')))[self.state_filter.get()]
+        elif self.state_filter.get()==STATES[7]:
+            rows=[r for r in rows if evidence[r['id']]['status']=='review' and evidence[r['id']].get('match_kind')=='normalized']
+        elif self.state_filter.get() in STATES[4:7]:
+            wanted=dict(zip(STATES[4:7],('registered','review','not_found')))[self.state_filter.get()]
             rows=[r for r in rows if evidence[r['id']]['status']==wanted and r['direction']=='incoming']
         for row in rows:
             row['reference'] = reference(row)

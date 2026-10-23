@@ -13,30 +13,21 @@ def excel(ref='INV/00123',**changes):
 
 class MatchingRuleTests(unittest.TestCase):
     def state(self,doc,row):return compare([doc],[row],True)[doc['id']]
-    def test_five_columns_need_no_date_and_still_check_each_amount(self):
-        mapping={'invoice':0,'vat':1,'net':2,'tax':3,'gross':4}
-        raw={0:'00123',1:'000000001',2:'100,00',3:'24,00',4:'124,00'}
-        item,error=normalize(raw,mapping)
-        self.assertFalse(error);self.assertNotIn('date',item)
-        row=dict(row=2,normalized=item,error=error)
-        result=self.state(document(),row)
-        self.assertEqual(result['status'],'registered');self.assertNotIn('ημερομηνία',result['reason'])
-        for key in ('net_minor','tax_minor','gross_minor'):
-            altered=dict(row,normalized=dict(item,**{key:item[key]+1}))
-            with self.subTest(key=key):self.assertEqual(self.state(document(),altered)['status'],'review')
-        second=document(2);second['issue_date']='2026-09-16'
-        self.assertEqual([r['status'] for r in compare([document(),second],[row],True).values()],['review','review'])
+    def test_five_columns_without_date_require_review(self):
+        item,error=normalize({0:'00123',1:'000000001',2:'100',3:'24',4:'124'},dict(invoice=0,vat=1,net=2,tax=3,gross=4))
+        self.assertIn('Ημερομηνία',error)
+        self.assertEqual(self.state(document(),dict(row=2,normalized=item,error=error))['status'],'review')
     def test_exact_full_display_and_safe_format_equivalents(self):
         for ref in ('INV/00123',' inv/00123 ','INV00123','INV-00123','INV / 00123'):
             row=excel(ref);row['normalized']['invoice']=ref.strip().casefold()
-            with self.subTest(ref=ref):self.assertEqual(self.state(document(),row)['status'],'registered')
+            with self.subTest(ref=ref):self.assertEqual(self.state(document(),row)['status'],'registered' if ref.strip().casefold()=='inv/00123' else 'review')
     def test_zeros_different_series_remain_review(self):
         for ref in ('INV/123','OTHER/00123','000123'):
             row=excel(ref);row['normalized']['invoice']=ref.casefold()
             with self.subTest(ref=ref):self.assertEqual(self.state(document(),row)['status'],'review')
     def test_bare_number_omits_series_only_with_all_identity_checks(self):
         result=self.state(document(),excel('00123'))
-        self.assertEqual(result['status'],'registered');self.assertIn('ακριβής αριθμός',result['reason'])
+        self.assertEqual(result['status'],'review');self.assertEqual(result['match_kind'],'normalized')
         for changes in (dict(net_minor=9999),dict(tax_minor=2401),dict(gross_minor=12401),dict(date='2026-09-16')):
             with self.subTest(changes=changes):self.assertEqual(self.state(document(),excel('00123',**changes))['status'],'review')
         self.assertEqual(self.state(document(),excel('123'))['status'],'review')

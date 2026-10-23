@@ -60,7 +60,7 @@ class DocumentView:
 
     def refresh(self,*,render=True):
         from app.ui.desktop import amount,when,reference
-        from app.ui.ebs_reconciliation import TITLES
+        from app.ui.ebs_reconciliation import result_title
         query=self.query.get().strip().casefold();wanted=self.kind.get();rows=[]
         for source in getattr(self.owner,'_month_rows',[]):
             if not belongs(source,self.view):continue
@@ -77,7 +77,7 @@ class DocumentView:
                      receiver=' · '.join(x for x in (source['receiver_name'],source['receiver_vat']) if x) or 'Δεν δόθηκε',
                      correlated=', '.join(source['correlated_marks']) or '—',
                      delivery=DELIVERY_STATUS.get(source['delivery_status'],'Δεν δόθηκε' if not source['delivery_status'] else 'Κωδικός ΑΑΔΕ '+source['delivery_status']),
-                     reconciliation=TITLES.get(getattr(self.owner,'_evidence',{}).get(source['id'],{}).get('status'),'—'))
+                     reconciliation=result_title(self.owner._evidence[source['id']]) if source['id'] in getattr(self.owner,'_evidence',{}) else '—')
             rows.append(row)
         key,reverse=self.sort;rows.sort(key=lambda r:r.get(key) or (0 if key.endswith('_minor') else ''),reverse=reverse)
         self.rows={r['id']:r for r in rows}

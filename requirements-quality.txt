@@ -1,0 +1,4 @@
+# Developer verification only; the desktop app and RPA do not import these.
+hypothesis==6.130.5
+python-calamine==0.6.2
+rapidfuzz==3.14.3

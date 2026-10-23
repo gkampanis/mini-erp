@@ -29,18 +29,12 @@ class ReconciliationTests(unittest.TestCase):
         owner=self.erp.db.execute('SELECT vat FROM companies WHERE id=?',(company,)).fetchone()[0]
         return self.service.preview(company,path,'Συνθετικά',1,mapping or MAPPING,'2026-10-01','2026-10-31',owner,complete=complete,company_confirmed=True)
     def save(self,rows,**kwargs):return self.service.commit(self.packet(rows,**kwargs),confirmed=True,remember=True)
-    def test_five_column_export_commits_without_date_and_keeps_selected_period(self):
+    def test_five_column_export_without_date_cannot_certify_matches_or_absence(self):
         path=self.root/'five-columns.xlsx'
         workbook(path,[['Εναλ. παρ/κό','Α.Φ.Μ.','Αξία','ΦΠΑ','Σύνολο'],['1','000000001','0,10','0,02','0,12']])
-        mapping={'invoice':0,'vat':1,'net':2,'tax':3,'gross':4}
-        def preview(start,end):return self.service.preview(self.company,path,'Συνθετικά',1,mapping,start,end,'000000000',complete=True,company_confirmed=True)
-        self.assertEqual(preview('2026-09-01','2026-09-30')['results'],{})
-        packet=preview('2026-10-01','2026-10-31')
-        self.assertFalse(packet['rows'][0]['error']);self.assertNotIn('date',packet['rows'][0]['normalized'])
-        self.service.commit(packet,confirmed=True,remember=True)
-        self.assertEqual(self.service.results(self.company)[self.document]['status'],'registered')
-        self.assertEqual(self.service.saved_mapping(self.company,{i:h for i,h in enumerate(['Εναλ. παρ/κό','Α.Φ.Μ.','Αξία','ΦΠΑ','Σύνολο'])}),mapping)
-        self.assertEqual(self.ids,[r['id'] for r in self.erp.search(self.company)])
+        with self.assertRaisesRegex(ValueError,'ημερομηνία'):
+            self.service.preview(self.company,path,'Συνθετικά',1,dict(invoice=0,vat=1,net=2,tax=3,gross=4),'2026-10-01','2026-10-31','000000000',complete=True,company_confirmed=True)
+        self.assertEqual(self.erp.db.execute('SELECT count(*) FROM ebs_reconciliation_runs').fetchone()[0],0)
     def test_exact_match_missing_vs_complete_and_mapping_persist(self):
         result=self.save([ROW]);states=self.service.results(self.company)
         self.assertEqual(states[self.document]['status'],'registered')
@@ -68,11 +62,14 @@ class ReconciliationTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.service.preview(self.company,path,'Συνθετικά',1,MAPPING,'2026-10-01','2026-10-31','000000009',company_confirmed=True)
         row=list(ROW);row[0]='123'
         blocked=self.packet([row],complete=True)
-        self.assertFalse(blocked['can_commit'])
-        with self.assertRaises(ValueError):self.service.commit(blocked,confirmed=True)
+        self.assertTrue(blocked['can_commit'])
+        self.service.commit(blocked,confirmed=True)
         self.assertTrue(self.packet([row])['rows'][0]['error'])
         self.assertEqual(self.service.results(self.other),{})
-        self.assertTrue(all(r['status']=='unreconciled' for r in self.service.results(self.company).values()))
+        states=self.service.results(self.company)
+        self.assertEqual(states[self.document]['status'],'review')
+        self.assertTrue(any(r['status']=='not_registered' for r in states.values()))
+        with self.assertRaises(ValueError):self.service.assert_rpa(self.company,[self.document],required=True)
     def test_source_is_reparsed_and_rollback_preserves_history(self):
         p=self.packet([ROW],complete=True);p['rows']=[];p['results']={}
         self.service.commit(p,confirmed=True)

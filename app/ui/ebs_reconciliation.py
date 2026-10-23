@@ -8,11 +8,18 @@ from app.application.ebs_reconciliation import EBSReconciliation
 from app.application.service import ERP
 from app.application.periods import MONTHS,month_bounds
 
-COLUMNS={'invoice':'Εναλ. παρ/κό','vat':'Α.Φ.Μ.','net':'Αξία','tax':'ΦΠΑ','gross':'Σύνολο'}
+COLUMNS={'date':'Ημ/νία','invoice':'Εναλ. παρ/κό','vat':'Α.Φ.Μ.','net':'Αξία','tax':'ΦΠΑ','gross':'Σύνολο'}
 
-STATES={'Όλα':None,'Καταχωρισμένα':'registered','Μη καταχωρισμένα':'not_registered','Χρειάζονται έλεγχο':'review','Δεν εντοπίστηκε στο Excel':'not_found','Χωρίς συμφωνία':'unreconciled'}
+STATES={'Όλα':None,'Καταχωρισμένα':'registered','Μερική συμφωνία — Πιθανώς καταχωρισμένο':'partial','Μη καταχωρισμένα':'not_registered','Χρειάζονται έλεγχο':'review','Δεν εντοπίστηκε στο Excel':'not_found','Χωρίς συμφωνία':'unreconciled'}
 TITLES={v:k for k,v in STATES.items() if v}
-SOURCES={'excel_ebs':'Excel EBS','rpa_operator':'RPA · οπτικός έλεγχος','rpa_attempt':'Προσπάθεια RPA · εκκρεμεί έλεγχος','manual_operator':'Χειροκίνητη επιβεβαίωση','':'—'}
+SOURCES={'excel_ebs':'Excel EBS','normalization_operator':'Επιβεβαίωση μερικής αντιστοίχισης','rpa_operator':'RPA · οπτικός έλεγχος','rpa_attempt':'Προσπάθεια RPA · εκκρεμεί έλεγχος','manual_operator':'Χειροκίνητη επιβεβαίωση','':'—'}
+
+def display_state(row):return 'partial' if row['status']=='review' and row.get('match_kind')=='normalized' else row['status']
+
+def result_title(row):
+    if row.get('match_kind')=='exact' and row['status']=='registered':return 'Καταχωρισμένο — Ακριβής συμφωνία'
+    if row.get('match_kind')=='normalized_confirmed' and row['status']=='registered':return 'Καταχωρισμένο — Επιβεβαιωμένη μερική συμφωνία'
+    return TITLES.get(display_state(row),row['status'])
 
 class ReconciliationTab:
     def __init__(self,owner,parent):
@@ -31,12 +38,13 @@ class ReconciliationTab:
         ttk.Button(bottom,text='Άνοιγμα PDF',command=self.pdf).pack(side='left',padx=6)
         ttk.Button(bottom,text='Σύγκριση στοιχείων',command=self.details).pack(side='left')
         checks=ttk.Frame(parent);checks.pack(side='bottom',fill='x',pady=4)
-        ttk.Button(checks,text='Οπτική επιβεβαίωση στο EBS',command=self.confirm).pack(side='left')
+        self.confirm_button=ttk.Button(checks,text='Οπτική επιβεβαίωση στο EBS',command=self.confirm);self.confirm_button.pack(side='left')
         ttk.Button(checks,text='Ιστορικό συμφωνιών',command=self.history).pack(side='left',padx=6)
         ttk.Button(checks,text='Μη καταχωρισμένα → κύρια λίστα',command=self.pending).pack(side='right')
         self.tree=table(parent,('status','invoice','name','vat','issue_date','net_minor','tax_minor','gross_minor','reason','source','filename','when'),('Κατάσταση','Παραστατικό','Επωνυμία','ΑΦΜ','Ημερομηνία','Καθαρή €','ΦΠΑ €','Σύνολο €','Αιτιολόγηση','Πηγή','Αρχείο','Χρόνος'),{'reason':420,'status':200,'source':180,'name':240})
         self.tree.bind('<Double-1>',lambda _:self.open())
         self.tree.bind('<Return>',lambda _:self.open())
+        self.tree.bind('<<TreeviewSelect>>',self.selection_changed)
         for key in self.tree['columns']:self.tree.heading(key,command=lambda k=key:self.sort_by(k))
     def sort_by(self,key):self.sort=(key,not self.sort[1] if self.sort[0]==key else False);self.refresh()
     def refresh(self,results=None,*,render=True):
@@ -44,17 +52,20 @@ class ReconciliationTab:
         selected=self.tree.selection();self.rows=self.service.results(self.owner.company) if results is None else results
         month=self.owner._month_values.get(self.owner.month_filter.get());query=self.query.get().strip().casefold()
         rows=[r for r in self.rows.values() if r['direction']=='incoming' and (not month or r['issue_date'].startswith(month))]
-        counts=Counter(r['status'] for r in rows)
+        counts=Counter(display_state(r) for r in rows)
         self.counts.set(' · '.join(f'{label}: {counts[state]}' for state,label in TITLES.items()))
         wanted=STATES[self.filter.get()]
-        rows=[r for r in rows if (not wanted or r['status']==wanted) and (not query or any(query in str(r[k] or '').casefold() for k in ('name','vat','series','number','mark','reason')))]
+        rows=[r for r in rows if (not wanted or display_state(r)==wanted) and (not query or any(query in str(r[k] or '').casefold() for k in ('name','vat','series','number','mark','reason')))]
         for r in rows:r['invoice']=reference(r)
         key,reverse=self.sort;rows.sort(key=lambda r:r.get(key) or (0 if key.endswith('_minor') else ''),reverse=reverse)
         if not render:return
         self.tree.delete(*self.tree.get_children())
-        for r in rows:self.tree.insert('','end',iid=str(r['id']),values=(TITLES[r['status']],reference(r),r['name'],r['vat'],when(r['issue_date']),amount(r['net_minor']),amount(r['tax_minor']),amount(r['gross_minor']),r['reason'],SOURCES[r['source']],r['filename'],r['when']))
+        for r in rows:self.tree.insert('','end',iid=str(r['id']),values=(result_title(r),reference(r),r['name'],r['vat'],when(r['issue_date']),amount(r['net_minor']),amount(r['tax_minor']),amount(r['gross_minor']),r['reason'],SOURCES[r['source']],r['filename'],r['when']))
         self.tree.selection_set([s for s in selected if self.tree.exists(s)])
     def chosen(self):return int(self.tree.selection()[0]) if self.tree.selection() else None
+    def selection_changed(self,event=None):
+        row=self.rows.get(self.chosen(),{})
+        self.confirm_button.configure(text='Επιβεβαίωση αντιστοίχισης' if row.get('match_kind')=='normalized' and row.get('status')=='review' else 'Οπτική επιβεβαίωση στο EBS')
     def open(self):
         document=self.chosen()
         if document is not None:self.owner.open_detail(document)
@@ -67,12 +78,12 @@ class ReconciliationTab:
         from app.ui.desktop import table,amount,reference
         row,entries=self.service.evidence(self.owner.company,document)
         win=tk.Toplevel(self.owner.root);win.title('Σύγκριση ΑΑΔΕ / Mini ERP — Excel EBS');win.geometry('1000x550')
-        ttk.Label(win,text=TITLES[row['status']]+' · '+row['reason'],wraplength=950,style='Subtitle.TLabel').pack(anchor='w',padx=16,pady=12)
+        ttk.Label(win,text=result_title(row)+' · '+row['reason'],wraplength=950,style='Subtitle.TLabel').pack(anchor='w',padx=16,pady=12)
         tree=table(win,('field','local','excel'),('Πεδίο','Mini ERP / ΑΑΔΕ','Excel EBS'),{'field':180,'local':320,'excel':380})
         for entry in entries or [None]:
             item=entry['normalized'] if entry else {}
             tree.insert('','end',values=('Γραμμή Excel','',entry['row_number'] if entry else 'Δεν υπάρχει αντιστοίχιση'))
-            values=[('ΑΦΜ',row['vat'],item.get('vat','—')),('Παραστατικό',reference(row),entry['original_reference'] if entry else '—')]
+            values=[('Ημερομηνία',row['issue_date'],item.get('date','—')),('ΑΦΜ',row['vat'],item.get('vat','—')),('Παραστατικό',reference(row),entry['original_reference'] if entry else '—')]
             values.extend((label,amount(row[key]),amount(item[key]) if key in item else '—') for label,key in (('Καθαρή €','net_minor'),('ΦΠΑ €','tax_minor'),('Σύνολο €','gross_minor')))
             for values_row in values:tree.insert('','end',values=values_row)
         win.comparison_tree=tree;return win
@@ -84,6 +95,9 @@ class ReconciliationTab:
     def confirm(self):
         document=self.chosen()
         if document is None or self.owner.busy or self.owner.rpa_panel.running:return
+        row=self.service.results(self.owner.company).get(document,{})
+        if row.get('match_kind')=='normalized' and row.get('status')=='review':
+            self.service.confirm_partial(self.owner.company,document);self.owner.refresh();return
         if not messagebox.askyesno('Οπτική επιβεβαίωση','Έλεγξες στο EBS ότι αυτό το συγκεκριμένο παραστατικό έχει αποθηκευτεί σωστά;',parent=self.owner.root):return
         note=simpledialog.askstring('Σημείωση ελέγχου','Αριθμός εγγραφής EBS ή σημείωση οπτικού ελέγχου:',parent=self.owner.root)
         if not note:return
@@ -134,14 +148,14 @@ class ReconciliationTab:
         hint=tk.StringVar();ttk.Label(mapping_content,textvariable=hint,style='Subtitle.TLabel',wraplength=820).grid(row=3,column=0,columnspan=4,sticky='w',pady=12)
         problems_only=tk.BooleanVar(value=False)
         ttk.Checkbutton(sample_tab,text='Μόνο γραμμές με πρόβλημα',variable=problems_only).pack(anchor='w',pady=4)
-        sample=table(sample_tab,('row',*COLUMNS,'issue'),('Γραμμή','Εναλ. παρ/κό','Α.Φ.Μ.','Αξία','ΦΠΑ','Σύνολο','Έλεγχος / κελί'),{'row':65,'invoice':170,'vat':120,'net':90,'tax':90,'gross':90,'issue':450})
+        sample=table(sample_tab,('row',*COLUMNS,'issue'),('Γραμμή','Ημερομηνία','Εναλ. παρ/κό','Α.Φ.Μ.','Αξία','ΦΠΑ','Σύνολο','Έλεγχος / κελί'),{'row':65,'invoice':170,'vat':120,'net':90,'tax':90,'gross':90,'issue':450})
         sample.tag_configure('issue',background='#fff1ed')
         result_tree=table(results_tab,('status','invoice','vat','net','tax','gross','reason'),('Κατάσταση','Παραστατικό Mini ERP','Α.Φ.Μ.','Αξία','ΦΠΑ','Σύνολο','Αιτιολόγηση'),{'status':180,'invoice':180,'vat':120,'net':90,'tax':90,'gross':90,'reason':450})
         company_ok=tk.BooleanVar(value=False);complete=tk.BooleanVar(value=False);remember=tk.BooleanVar(value=True)
         ttk.Checkbutton(footer,text=f'Επιβεβαιώνω ότι η εξαγωγή ανήκει στην εταιρεία ΑΦΜ {owner["vat"]} και στον επιλεγμένο μήνα',variable=company_ok).pack(anchor='w',pady=4)
         ttk.Checkbutton(footer,text='Πλήρης κατάλογος όλων των καταχωρισμένων για την εταιρεία και τον μήνα',variable=complete).pack(anchor='w',pady=4)
         ttk.Checkbutton(footer,text='Αποθήκευση αντιστοίχισης για ίδια διάταξη αρχείου',variable=remember).pack(anchor='w',pady=4)
-        status=tk.StringVar(value='Έλεγξε τις πέντε στήλες και επίλεξε «Προεπισκόπηση συμφωνίας».')
+        status=tk.StringVar(value='Έλεγξε ημερομηνία και τις πέντε στήλες και επίλεξε «Προεπισκόπηση συμφωνίας».')
         ttk.Label(footer,textvariable=status,style='Subtitle.TLabel',wraplength=870).pack(anchor='w',pady=8)
         bottom=ttk.Frame(footer);bottom.pack(fill='x')
         def invalid(*_):
@@ -168,10 +182,10 @@ class ReconciliationTab:
             periods=self.service.source_months(selected_sheet,line,book['epoch1904'])
             if len(periods)==1:
                 period=next(iter(periods));year.set(period[:4]);month.set(MONTHS[int(period[5:])-1])
-                status.set(f'Το αρχείο αφορά {month.get()} {year.get()}. Η περίοδος επιλέχθηκε από τις ημερομηνίες· η συμφωνία χρησιμοποιεί μόνο τα πέντε πεδία.')
+                status.set(f'Το αρχείο αφορά {month.get()} {year.get()}. Η περίοδος επιλέχθηκε από τις ημερομηνίες· η ημερομηνία έκδοσης είναι υποχρεωτικό κριτήριο συμφωνίας.')
             # These are explicitly unrelated to reconciliation. Retain their
             # raw cells, but do not offer them as mapping choices.
-            labels={f'{index+1}: {title}':index for index,title in headers.items() if norm(title) not in NAMES['date'] and norm(title) not in ('παρ κο','κατ','συναλλασσομενος','τιτλος')};win.column_labels=labels
+            labels={f'{index+1}: {title}':index for index,title in headers.items() if norm(title) not in ('παρ κο','κατ','συναλλασσομενος','τιτλος')};win.column_labels=labels
             proposed=self.service.saved_mapping(self.owner.company,headers)
             if not proposed:
                 proposed={k:v for k,v in header_mapping(headers).items() if k in COLUMNS}
@@ -183,7 +197,7 @@ class ReconciliationTab:
             for key,box in columns.items():
                 box.configure(values=('—',*labels));vars[key].set(next((label for label,index in labels.items() if index==proposed.get(key)),'—'))
             result_tree.delete(*result_tree.get_children());show_source()
-            hint.set('«Εναλ. παρ/κό» ↔ «Παραστατικό» Mini ERP, μαζί με ΑΦΜ, Αξία, ΦΠΑ και Σύνολο. Ο μήνας ορίζει την περίοδο εργασίας· η ημερομηνία δεν είναι κριτήριο συμφωνίας. «Παρ/κό» και «Κατ.» αγνοούνται.')
+            hint.set('«Εναλ. παρ/κό» ↔ «Παραστατικό» Mini ERP, μαζί με ΑΦΜ, Αξία, ΦΠΑ και Σύνολο. Η ημερομηνία έκδοσης πρέπει να ταυτίζεται. Ο μήνας περιορίζει την περίοδο εργασίας. «Παρ/κό» και «Κατ.» αγνοούνται.')
         sheet_box.bind('<<ComboboxSelected>>',load_headers);header_box.bind('<Return>',load_headers)
         header.trace_add('write',lambda *_:load_headers())
         ttk.Button(top,text='Εμφάνιση στηλών',command=load_headers).pack(side='right')
@@ -192,7 +206,7 @@ class ReconciliationTab:
                 start,end=month_bounds(year.get(),MONTHS.index(month.get())+1);line=int(header.get())
                 mapping={key:win.column_labels[value.get()] for key,value in vars.items() if value.get()!='—'}
             except (ValueError,KeyError):status.set('Έλεγξε μήνα, έτος, γραμμή τίτλων και στήλες.');return
-            if len(mapping)!=len(COLUMNS):status.set('Επίλεξε και τις πέντε στήλες: Εναλ. παρ/κό, Α.Φ.Μ., Αξία, ΦΠΑ, Σύνολο.');return
+            if len(mapping)!=len(COLUMNS):status.set('Επίλεξε ημερομηνία και τις πέντε στήλες: Εναλ. παρ/κό, Α.Φ.Μ., Αξία, ΦΠΑ, Σύνολο.');return
             if len(set(mapping.values()))!=len(mapping):status.set('Η ίδια στήλη χρησιμοποιείται δύο φορές. Διόρθωσε την αντιστοίχιση.');return
             if not company_ok.get():status.set('Επιβεβαίωσε πρώτα ότι η εξαγωγή αφορά την εταιρεία και τον επιλεγμένο μήνα.');return
             selected_sheet=sheet.get();attested=company_ok.get();full=complete.get()
@@ -211,8 +225,8 @@ class ReconciliationTab:
                 result_tree.delete(*result_tree.get_children())
                 for document,result in packet['results'].items():
                     row=documents[document]
-                    result_tree.insert('','end',iid=str(document),values=(TITLES[result['status']],reference(row),row['vat'],amount(row['net_minor']),amount(row['tax_minor']),amount(row['gross_minor']),result['reason']))
-                counts=Counter(r['status'] for r in packet['results'].values());summary=' · '.join(f'{TITLES[k]}: {v}' for k,v in counts.items())
+                    result_tree.insert('','end',iid=str(document),values=(result_title(result),reference(row),row['vat'],amount(row['net_minor']),amount(row['tax_minor']),amount(row['gross_minor']),result['reason']))
+                counts=Counter(display_state(r) for r in packet['results'].values());summary=' · '.join(f'{TITLES[k]}: {v}' for k,v in counts.items())
                 if not packet['can_commit']:
                     status.set(f'Δεν αποθηκεύεται ως πλήρης: {len({i["row"] for i in packet["blocking_issues"]})} γραμμές με πρόβλημα. Δες τα ακριβή κελιά στον «Έλεγχο αρχείου». Έλεγξε τις εξαιρέσεις ή κάνε νέα προεπισκόπηση χωρίς «Πλήρης κατάλογος».')
                 else:status.set(('Μερική συμφωνία· δεν τεκμηριώνει απουσία από EBS και δεν επιτρέπει νέα RPA. ' if not packet['complete'] else '')+f'Αρχείο: {len(packet["rows"])} γραμμές δεδομένων · {sum(bool(r["error"]) for r in packet["rows"])} με ελλείψεις. '+(summary or 'Δεν υπάρχουν παραστατικά Mini ERP στον επιλεγμένο μήνα.'))
@@ -233,7 +247,7 @@ class ReconciliationTab:
                 from app.ui.desktop import STATES
                 self.owner.query.set('');self.owner.state_filter.set(STATES[3]);self.owner.group_filter.set('Όλες οι ομάδες')
                 self.owner.refresh();self.owner.notebook.select(self.owner.documents_tab)
-                self.owner.status.set('Η συμφωνία αποθηκεύτηκε. Εμφανίζονται τα μη καταχωρισμένα· επίλεξε γραμμές για έλεγχο λογαριασμών και προσομοίωση.')
+                self.owner.status.set(f"Ακριβείς: {result.get('exact_matches',0)} · Μερικές (εκτός RPA): {result.get('normalized_matches',0)} · Για έλεγχο: {result.get('review',0)-result.get('normalized_matches',0)} · Μη καταχωρισμένα: {result.get('not_registered',0)}. Η λίστα δείχνει όσα απομένουν.")
             self.owner.run_worker(execute,done)
         ttk.Button(bottom,text='Προεπισκόπηση συμφωνίας',command=check).pack(side='left')
         win.apply_button=ttk.Button(bottom,text='Αποθήκευση συμφωνίας',style='Primary.TButton',command=apply,state='disabled');win.apply_button.pack(side='right')
