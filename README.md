@@ -1,3 +1,11 @@
+# Νεότερη έκδοση — Ταχύτερη λίστα, μήνας και αυτόματα έξοδα / PDF
+
+[Λήψη ZIP](MiniERP-Monthly-Flow-Fix-20261023.zip) · [Οδηγίες](MiniERP-Monthly-Flow-Fix-20261023-guide.md) · [Έλεγχοι](MiniERP-Monthly-Flow-Fix-20261023.verification.json) · [SHA-256](MiniERP-Monthly-Flow-Fix-20261023.zip.sha256)
+
+Επιλογή μήνα → αυτόματη άντληση εξόδων ΑΑΔΕ → σύνδεση PDF στις ίδιες εγγραφές → έγκριση λογαριασμών → RPA. Το Excel παραμένει εναλλακτικό. PDF με κλικ από τη λίστα, απλούστερη έγκριση και «Έλεγχος χωρίς καταχώριση». Αφαιρέθηκαν οι ενδείξεις «στάλθηκε στο EBS» από λίστα/καρτέλα.
+
+103 tests κώδικα + 30 GUI, επανάληψη μέσα στο ZIP. Με 2.500 συνθετικές εγγραφές / 300 προμηθευτές: ανανέωση βασικής λίστας 4,54 → 0,08 s στο cloud. Windows/EBS/παραγωγική ΑΑΔΕ δεν εκτελέστηκαν εδώ.
+
 # Νεότερη έκδοση — Άντληση μήνα, Προμηθευτές και EBS
 
 [Λήψη ZIP](MiniERP-Month-Suppliers-EBS-20261023.zip) · [Οδηγίες](MiniERP-Month-Suppliers-EBS-20261023-guide.md) · [Έλεγχοι](MiniERP-Month-Suppliers-EBS-20261023.zip.verification.json) · [SHA-256](MiniERP-Month-Suppliers-EBS-20261023.zip.sha256)
