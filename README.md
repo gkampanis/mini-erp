@@ -1,3 +1,9 @@
+# Νεότερη έκδοση — Απλούστερες καρτέλες και αντιγραφή/επικόλληση
+
+[Λήψη ZIP](MiniERP-Clipboard-Cleanup-20261023.zip) · [Έλεγχοι](MiniERP-Clipboard-Cleanup-20261023.zip.verification.json) · [SHA-256](MiniERP-Clipboard-Cleanup-20261023.zip.sha256)
+
+Αυτόματη εύρεση PDF αντί χειροκίνητου URL. Κωδικοί Μητρώου μόνο στις Ρυθμίσεις. Δεξί κλικ και Ctrl+C/V/X/A στα πεδία κειμένου. 85 tests κώδικα και 20 GUI, επιτυχία και μετά την αποσυμπίεση. Windows/EBS δεν δοκιμάστηκαν εδώ.
+
 # Νεότερη έκδοση — Ρυθμίσεις, προαιρετικό Camoufox και crashlog
 
 [Λήψη ZIP](MiniERP-Settings-Camoufox-20261023.zip) · [Ανασκόπηση](MiniERP-Settings-Camoufox-20261023-review.md) · [Έλεγχοι](MiniERP-Settings-Camoufox-20261023.zip.verification.json) · [SHA-256](MiniERP-Settings-Camoufox-20261023.zip.sha256)
