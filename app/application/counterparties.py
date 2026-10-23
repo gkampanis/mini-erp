@@ -23,7 +23,7 @@ class Counterparties:
         documents=[r for r in self.erp.search(company) if r['counterparty_id']==counterparty]
         return card,documents
 
-    def save(self,company,counterparty,name,roles,confirmed=False,accounts=None):
+    def save(self,company,counterparty,name,roles,confirmed=False,accounts=None,apply_pending=False):
         if confirmed is not True:raise ValueError('Απαιτείται επιβεβαίωση καρτέλας')
         if not isinstance(name,str) or not name.strip() or len(name.strip())>256:raise ValueError('Χρειάζεται επωνυμία έως 256 χαρακτήρες')
         roles=set(roles)
@@ -35,7 +35,12 @@ class Counterparties:
             self.db.execute('UPDATE counterparties SET name=? WHERE company_id=? AND id=?',(name.strip(),company,counterparty))
             self.db.execute('DELETE FROM counterparty_roles WHERE counterparty_id=?',(counterparty,))
             self.db.executemany('INSERT INTO counterparty_roles(counterparty_id,role) VALUES (?,?)',[(counterparty,r) for r in sorted(roles)])
+            report=None
             if values is not None:
-                self.db.execute("INSERT INTO counterparty_accounts(counterparty_id,company_id,purchases_account,expenses_account,preferred_group,approved_by) VALUES (?,?,?,?,?,'local_operator') ON CONFLICT(counterparty_id) DO UPDATE SET purchases_account=excluded.purchases_account,expenses_account=excluded.expenses_account,preferred_group=excluded.preferred_group,approved_by=excluded.approved_by,approved_at=CURRENT_TIMESTAMP,version=counterparty_accounts.version+1",(counterparty,company,values['purchases_account'],values['expenses_account'],values['preferred_group']))
+                from app.application.supplier_accounts import SupplierAccounts
+                accounts_service=SupplierAccounts(self.erp);accounts_service.write(company,counterparty,values)
+                if apply_pending:report=accounts_service.apply_pending(company,counterparty,values)
             self.erp.repository.audit(company,'counterparty_card_updated',None,dict(counterparty_id=counterparty,before=before,after=self.detail(company,counterparty)[0]))
-        return self.detail(company,counterparty)[0]
+        result=self.detail(company,counterparty)[0]
+        if report is not None:result['pending_update']=report
+        return result

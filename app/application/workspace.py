@@ -25,6 +25,10 @@ class Workspace:
         latest={}
         for row in self.db.execute("SELECT i.document_id,i.status,j.mode FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? ORDER BY i.id",(company,)):
             if row['mode']!='simulation':latest[row['document_id']]=row['status']
+        active=self.db.execute('SELECT environment FROM aade_settings WHERE company_id=?',(company,)).fetchone();environment=active[0] if active else 'production'
+        sources={r['document_id']:dict(r) for r in self.db.execute('SELECT * FROM mydata_records WHERE company_id=? AND environment=? AND document_id IS NOT NULL',(company,environment))}
+        attempts={}
+        for attempt in self.db.execute('SELECT mark,state FROM provider_attempts WHERE company_id=? AND environment=? ORDER BY id',(company,environment)):attempts[attempt['mark']]=attempt['state']
         reconciled={r['document_id']:r['match_status'] for r in self.db.execute("SELECT document_id,match_status FROM mydata_records WHERE company_id=? AND environment='production' AND document_id IS NOT NULL",(company,))}
         pdfs={r[0] for r in self.db.execute('SELECT DISTINCT document_id FROM attachments WHERE company_id=?',(company,))}
         for row in rows:
@@ -32,9 +36,15 @@ class Workspace:
             row['suggested_group']=defaults['preferred_group'] if defaults else None
             row['suggested_account']=(defaults['purchases_account'] if defaults['preferred_group']=='2' else defaults['expenses_account'] if defaults['preferred_group']=='6' else '') if defaults else ''
             row['ebs_state']=latest.get(row['id'],'not_sent')
+            if row['direction']=='outgoing' and row['ebs_state']=='not_sent':row['ebs_state']='outgoing_excluded'
             if (row.get('nature_group') or row['suggested_group'])=='2' and row['ebs_state']=='not_sent':row['ebs_state']='purchase_excluded'
             row['aade_state']=reconciled.get(row['id'],'not_checked')
-            row['pdf_state']='Συνδεδεμένο' if row['id'] in pdfs else 'Χωρίς PDF'
+            source=sources.get(row['id']);item=json.loads(source['record_json']) if source else {}
+            if row['id'] in pdfs:row['pdf_state']='Συνδεδεμένο'
+            elif item.get('pdf_url'):
+                from app.infrastructure.providers.pdf_downloads import state_label,SAVED_STATES
+                state=attempts.get(item['mark']);row['pdf_state']='PDF: έλεγχος αντιστοίχισης' if state in SAVED_STATES else state_label(state) if state else 'Διαθέσιμο για λήψη'
+            else:row['pdf_state']='Δεν δόθηκε σύνδεσμος' if source else 'Χωρίς PDF'
         return sorted(rows,key=lambda r:r['source_record_id'])
 
     def suggestions(self,company,vat):

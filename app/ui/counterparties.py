@@ -53,7 +53,9 @@ def open_detail(owner,counterparty,on_saved=lambda:None):
     ttk.Entry(accounts,textvariable=expenses,width=24).grid(row=0,column=3,padx=8)
     ttk.Label(accounts,text='Συνήθης ομάδα').grid(row=1,column=0,sticky='w',padx=5,pady=5)
     ttk.Combobox(accounts,textvariable=preferred,values=('Επιλογή ανά παραστατικό','2 · Αγορές','6 · Έξοδα'),state='readonly',width=25).grid(row=1,column=1,columnspan=2,sticky='w',padx=8)
-    ttk.Label(accounts,text='Συμπληρώνονται στα επόμενα παραστατικά για έγκριση. Δεν γίνονται αυτόματες καταχωρίσεις.',style='Subtitle.TLabel').grid(row=2,column=0,columnspan=4,sticky='w',padx=5,pady=5)
+    ttk.Label(accounts,text='Προτείνονται για νέα παραστατικά. Εφαρμογή στα εκκρεμή μόνο με ρητή έγκριση.',style='Subtitle.TLabel').grid(row=2,column=0,columnspan=4,sticky='w',padx=5,pady=5)
+    apply_pending=tk.BooleanVar(value=True)
+    ttk.Checkbutton(body,text='Εφαρμογή λογαριασμών στα εκκρεμή παραστατικά με την αποθήκευση',variable=apply_pending).pack(anchor='w')
     notebook=ttk.Notebook(body);notebook.pack(fill='both',expand=True,pady=14)
     docs=ttk.Frame(notebook,padding=8);history=ttk.Frame(notebook,padding=8)
     notebook.add(docs,text='Συνδεδεμένα παραστατικά');notebook.add(history,text='Ιστορικό καρτέλας')
@@ -76,9 +78,11 @@ def open_detail(owner,counterparty,on_saved=lambda:None):
     ttk.Label(bottom,text=f'{len(documents)} παραστατικά · Η ομάδα/λογαριασμός ορίζονται ανά παραστατικό.',style='Subtitle.TLabel').pack(side='left')
     def save():
         if owner.busy:return
-        if not messagebox.askyesno('Αποθήκευση καρτέλας','Να αποθηκευτούν επωνυμία και ρόλοι; Κωδικός και ΑΦΜ παραμένουν σταθερά.',parent=win):return
-        try:service.save(owner.company,counterparty,name.get(),[r for r,v in role_vars.items() if v.get()],confirmed=True,accounts=dict(purchases_account=purchases.get(),expenses_account=expenses.get(),preferred_group=preferred.get()[0] if preferred.get()[0] in ('2','6') else None))
+        if not messagebox.askyesno('Αποθήκευση καρτέλας','Να αποθηκευτεί η καρτέλα; Αν είναι επιλεγμένη η εφαρμογή στα εκκρεμή, εγκρίνεις και τους λογαριασμούς τους. Πραγματικές προσπάθειες EBS εξαιρούνται και δεν επανεγγράφονται.',parent=win):return
+        try:result=service.save(owner.company,counterparty,name.get(),[r for r,v in role_vars.items() if v.get()],confirmed=True,accounts=dict(purchases_account=purchases.get(),expenses_account=expenses.get(),preferred_group=preferred.get()[0] if preferred.get()[0] in ('2','6') else None),apply_pending=apply_pending.get())
         except (ValueError,sqlite3.Error) as exc:messagebox.showerror('Καρτέλα',str(exc),parent=win);return
         owner.refresh();on_saved();win.destroy()
+        if 'pending_update' in result:
+            report=result['pending_update'];messagebox.showinfo('Ενημέρωση εκκρεμών',f"Ενημερώθηκαν {report['updated']} παραστατικά και {report['queues']} εγγραφές ουρών. {len(report['protected'])} προσπάθειες EBS εξαιρέθηκαν· απαιτούν χωριστό έλεγχο στο EBS.",parent=owner.root)
     ttk.Button(bottom,text='Αποθήκευση καρτέλας',style='Primary.TButton',command=save).pack(side='right')
-    win.account_fields=(purchases,expenses,preferred);win.name_field=name;win.role_fields=role_vars;win.document_tree=tree;return win
+    win.apply_pending_var=apply_pending;win.account_fields=(purchases,expenses,preferred);win.name_field=name;win.role_fields=role_vars;win.document_tree=tree;return win

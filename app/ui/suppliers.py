@@ -1,0 +1,57 @@
+"""Supplier overview and explicit bulk account propagation using existing cards."""
+import sqlite3
+import tkinter as tk
+from tkinter import ttk,messagebox
+from app.application.supplier_accounts import SupplierAccounts
+
+class Suppliers:
+    def __init__(self,owner,parent):
+        from app.ui.desktop import table
+        self.owner=owner;self.service=SupplierAccounts(owner.erp)
+        header=ttk.Frame(parent);header.pack(fill='x',pady=(0,12))
+        ttk.Label(header,text='Προμηθευτές και λογαριασμοί EBS',style='Section.TLabel').pack(anchor='w')
+        ttk.Label(header,text='Αντιστοίχιση → έγκριση εκκρεμών → προσομοίωση → EBS. Οι αγορές ομάδας 2 δεν καταχωρούνται.',style='Subtitle.TLabel',wraplength=1000).pack(anchor='w',pady=6)
+        filters=ttk.Frame(header);filters.pack(fill='x')
+        self.query=tk.StringVar();entry=ttk.Entry(filters,textvariable=self.query);entry.pack(side='left',fill='x',expand=True)
+        entry.bind('<Return>',lambda _:self.refresh());self.filter=tk.StringVar(value='Όλοι')
+        box=ttk.Combobox(filters,textvariable=self.filter,values=('Όλοι','Χωρίς λογαριασμό','Με λογαριασμό'),state='readonly',width=24);box.pack(side='left',padx=8);box.bind('<<ComboboxSelected>>',lambda _:self.refresh())
+        ttk.Button(filters,text='Αναζήτηση',command=self.refresh).pack(side='left')
+        actions=ttk.Frame(parent);actions.pack(side='bottom',fill='x',pady=10)
+        ttk.Button(actions,text='Μαζική αντιστοίχιση & ενημέρωση εκκρεμών',style='Primary.TButton',command=self.bulk).pack(side='left')
+        ttk.Button(actions,text='Όλες οι καρτέλες αντισυμβαλλομένων',command=owner.open_counterparties).pack(side='right',padx=8)
+        ttk.Button(actions,text='Άνοιγμα καρτέλας',command=self.open_card).pack(side='right')
+        self.status=tk.StringVar(value='Επίλεξε έναν ή περισσότερους προμηθευτές (Ctrl / Shift).')
+        ttk.Label(parent,textvariable=self.status,style='Subtitle.TLabel',wraplength=1050).pack(side='bottom',anchor='w',pady=6)
+        self.tree=table(parent,('name','vat','group','account','state','count'),('Επωνυμία','ΑΦΜ','Ομάδα','Λογαριασμός EBS','Κατάσταση','Παραστατικά'),{'name':260,'state':260,'account':170})
+        self.tree.configure(selectmode='extended');self.tree.bind('<Double-1>',lambda _:self.open_card())
+    def refresh(self):
+        selected=self.tree.selection();self.tree.delete(*self.tree.get_children());self.rows={}
+        for row in self.service.rows(self.owner.company,self.query.get().strip()):
+            if self.filter.get()=='Χωρίς λογαριασμό' and row['account']:continue
+            if self.filter.get()=='Με λογαριασμό' and not row['account']:continue
+            self.rows[row['id']]=row;self.tree.insert('','end',iid=str(row['id']),values=(row['name'],row['vat'],row['group'] or '—',row['account'] or '—',row['account_state'],row['document_count']))
+        self.tree.selection_set([key for key in selected if self.tree.exists(key)])
+    def open_card(self):
+        from app.ui.counterparties import open_detail
+        selected=self.tree.selection()
+        if selected:return open_detail(self.owner,int(selected[0]),on_saved=self.refresh)
+    def bulk(self):
+        if self.owner.busy or self.owner.rpa_panel.running:return
+        ids=[int(key) for key in self.tree.selection()]
+        if not ids:messagebox.showinfo('Προμηθευτές','Επίλεξε προμηθευτές από τη λίστα.',parent=self.owner.root);return
+        win=tk.Toplevel(self.owner.root);win.title('Μαζική αντιστοίχιση λογαριασμού');win.geometry('700x350')
+        body=ttk.Frame(win,padding=20);body.pack(fill='both',expand=True)
+        ttk.Label(body,text=f'{len(ids)} προμηθευτές · έγκριση λογαριασμού',style='Section.TLabel').pack(anchor='w',pady=10)
+        group=tk.StringVar(value='6 · Έξοδα');account=tk.StringVar()
+        ttk.Combobox(body,textvariable=group,values=('6 · Έξοδα','2 · Αγορές'),state='readonly').pack(fill='x',pady=6)
+        ttk.Label(body,text='Λογιστικός λογαριασμός EBS').pack(anchor='w');ttk.Entry(body,textvariable=account).pack(fill='x',pady=6)
+        ttk.Label(body,text='Ενημερώνονται οι εκκρεμείς εγγραφές της ίδιας ομάδας και οι μη εκτελεσμένες ουρές. Ήδη επιχειρημένες καταχωρίσεις εξαιρούνται. Δεν αλλάζει αυτόματα τίποτα μέσα στο EBS.',wraplength=640,style='Subtitle.TLabel').pack(anchor='w',pady=8)
+        def save():
+            if not messagebox.askyesno('Έγκριση αντιστοίχισης','Έλεγξες τον λογαριασμό και εγκρίνεις την εφαρμογή του στα εκκρεμή παραστατικά των επιλεγμένων προμηθευτών;',parent=win):return
+            try:report=self.service.save(self.owner.company,ids,group.get()[0],account.get(),confirmed=True)
+            except (ValueError,sqlite3.Error) as exc:messagebox.showerror('Αντιστοίχιση',str(exc),parent=win);return
+            win.destroy();self.owner.refresh()
+            self.status.set(f"Ενημερώθηκαν {report['updated']} παραστατικά / {report['queues']} εγγραφές ουρών. {len(report['protected'])} προσπάθειες EBS εξαιρέθηκαν. {len(report['needs_review'])} απαιτούν έλεγχο.")
+            if report['protected']:messagebox.showinfo('Χωριστός έλεγχος EBS','Δεν τροποποιήθηκαν προηγούμενες προσπάθειες ή αποθηκευμένα παραστατικά EBS. Δεν υποστηρίζεται αυτόματη μεταβολή τους· έλεγξέ τα από το Ιστορικό / EBS.',parent=self.owner.root)
+        ttk.Button(body,text='Έγκριση & ενημέρωση εκκρεμών',style='Primary.TButton',command=save).pack(side='bottom',anchor='e')
+        win.account_var=account;win.group_var=group;return win

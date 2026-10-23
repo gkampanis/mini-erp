@@ -15,10 +15,12 @@ class RPA:
         """Partition the same list; purchase cards remain visible but never enter EBS."""
         from app.application.workspace import Workspace
         rows={r['id']:r for r in Workspace(self.erp).rows(company)}
-        result=dict(expenses=[],purchases=[],needs_review=[])
+        result=dict(expenses=[],purchases=[],needs_review=[],outgoing=[])
         for document in documents:
             if document not in rows:raise ValueError('Δεν βρέθηκε παραστατικό στην εταιρεία')
-            row=rows[document];group=row.get('nature_group') or row.get('suggested_group')
+            row=rows[document]
+            if row['direction']!='incoming':result['outgoing'].append(document);continue
+            group=row.get('nature_group') or row.get('suggested_group')
             if group=='2':result['purchases'].append(document)
             elif group=='6' and row.get('prepared_at'):result['expenses'].append(document)
             else:result['needs_review'].append(document)
@@ -26,6 +28,7 @@ class RPA:
 
     def payload(self,company,document):
         row,_=self.erp.detail(company,document)
+        if row['direction']!='incoming':raise ValueError('Τα εκδοθέντα δεν ανήκουν στη ροή εξόδων EBS')
         reconciliation=self.db.execute("SELECT match_status FROM mydata_records WHERE company_id=? AND document_id=? AND environment='production'",(company,document)).fetchone()
         if reconciliation and reconciliation[0] in ('different','cancelled_at_aade'):raise ValueError('Το παραστατικό έχει διαφορά ή αναφορά ακύρωσης στην ΑΑΔΕ. Έλεγξε τη συμφωνία πριν EBS.')
         approval=self.erp.preparation(company,document)
@@ -34,6 +37,12 @@ class RPA:
                     date=datetime.strptime(row['issue_date'],'%Y-%m-%d').strftime('%d/%m/%Y'),
                     net=f"{Decimal(row['net_minor'])/100:.2f}".replace('.',','),account=approval['account_code'],
                     group=approval['nature_group'],approval_at=approval['approved_at'],rounding_minor=row['rounding_minor'])
+
+    def live_source(self,company,document):
+        row,_=self.erp.detail(company,document);source=json.loads(row['raw_json']).get('_sync')
+        if source is not None:
+            snapshot=self.db.execute('SELECT environment FROM mydata_syncs WHERE id=? AND company_id=?',(source,company)).fetchone()
+            if snapshot is None or snapshot[0]!='production':raise ValueError('Παραστατικό δοκιμαστικής ή μη επαληθευμένης πηγής ΑΑΔΕ: επιτρέπεται μόνο προσομοίωση, όχι πραγματική καταχώριση EBS.')
 
     def create(self,company,documents,mode='simulation',confirmed=False,execution='fill_only',pilot=False):
         if confirmed is not True:raise ValueError('Απαιτείται επιβεβαίωση ουράς RPA')
@@ -52,6 +61,7 @@ class RPA:
         if mode=='fill_only':
             if any(p['rounding_minor'] for p in payloads):raise ValueError('Υπάρχει διαφορά στρογγυλοποίησης: χρειάζεται χειροκίνητος έλεγχος EBS πριν συμπλήρωση')
             for document in documents:
+                self.live_source(company,document)
                 pending=self.db.execute("SELECT 1 FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND i.document_id=? AND j.mode='fill_only' AND (i.status IN ('started','save_pending','filled_no_save','uncertain') OR (j.execution='save_new' AND i.status IN ('save_invoked','ui_saved_review','reviewed_by_operator')))",(company,document)).fetchone()
                 if pending:raise ValueError('Υπάρχει προηγούμενη προσπάθεια προς χειροκίνητο έλεγχο. Δεν επιτρέπεται τυφλή επανάληψη.')
         with self.db:
@@ -69,6 +79,18 @@ class RPA:
             value=dict(item);value['payload']=json.loads(value['payload']);result.append(value)
         return dict(row),result
 
+    def progress(self,company,job):
+        meta,items=self.items(company,job)
+        counts={state:sum(i['status']==state for i in items) for state in {i['status'] for i in items}}
+        current=next((i for i in items if i['status'] in ('started','save_pending')),next((i for i in items if i['status']=='queued'),None))
+        receipts=set();save_commands=set();item_ids={i['id'] for i in items};documents={i['document_id'] for i in items}
+        for event in self.db.execute("SELECT action,entity_id,payload FROM audit_events WHERE company_id=? AND action IN ('ebs_storage_operator_confirmed','ebs_pilot_operator_confirmed','rpa_save_invoked')",(company,)):
+            payload=json.loads(event['payload'])
+            if event['action']=='rpa_save_invoked':
+                if payload.get('job')==job and event['entity_id'] in documents:save_commands.add(event['entity_id'])
+            elif payload.get('item') in item_ids:receipts.add(payload['item'])
+        return dict(total=len(items),queued=counts.get('queued',0),simulated=counts.get('simulated',0),save_requested=len(save_commands),operator_reviewed=counts.get('reviewed_by_operator',0),verified_in_ebs=len(receipts),automatically_verified=0,failed=sum(counts.get(s,0) for s in ('failed','uncertain')),current=current['payload']['invoice'] if current else '—',mode=meta['mode'],state=meta['status'])
+
     def recover(self,company):
         with self.db:
             rows=self.db.execute("SELECT i.id,i.document_id,i.job_id FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND i.status IN ('started','save_pending')",(company,)).fetchall()
@@ -76,17 +98,25 @@ class RPA:
                 self.db.execute("UPDATE rpa_items SET status='uncertain',reason='Διακοπή πριν την επιβεβαίωση. Απαγορεύεται αυτόματο replay.' WHERE id=?",(row['id'],))
                 self.db.execute("UPDATE rpa_jobs SET status='paused' WHERE id=?",(row['job_id'],))
                 self.erp.repository.audit(company,'rpa_recovered_uncertain',row['document_id'],dict(item=row['id'],job=row['job_id']))
+            batches=self.db.execute("SELECT id FROM rpa_jobs WHERE company_id=? AND status='running'",(company,)).fetchall()
+            for batch in batches:
+                self.db.execute("UPDATE rpa_jobs SET status='paused' WHERE id=?",(batch['id'],))
+                self.erp.repository.audit(company,'rpa_batch_recovered_paused',None,dict(job=batch['id']))
         return len(rows)
 
     def advance(self,company,job,mapping=None,live_confirmed=False,adapter=None,continue_after_pause=False):
         meta,items=self.items(company,job)
         if meta['status']=='stopped':raise ValueError('Η ουρά έχει σταματήσει')
-        if any(i['status'] in ('started','uncertain','filled_no_save') for i in items):
+        if meta['status']=='paused' and continue_after_pause is not True:raise ValueError('Η ουρά βρίσκεται σε παύση. Πάτησε Συνέχεια.')
+        if any(i['status'] in ('started','save_pending','uncertain','filled_no_save') for i in items):
             raise ValueError('Εκκρεμεί χειροκίνητος έλεγχος προηγούμενης προσπάθειας')
         item=next((i for i in items if i['status']=='queued'),None)
         if item is None:
             with self.db:self.db.execute("UPDATE rpa_jobs SET status='completed' WHERE id=?",(job,))
             return dict(status='completed',mode=meta['mode'])
+        if meta['mode']=='fill_only':
+            for pending in items:
+                if pending['status']=='queued':self.live_source(company,pending['document_id'])
         if meta['mode']=='fill_only' and meta['execution']=='save_new':
             return self._advance_saved(company,job,meta,items,item,live_confirmed,adapter,continue_after_pause)
         current=self.payload(company,item['document_id'])
@@ -100,6 +130,8 @@ class RPA:
         with self.db:
             claimed=self.db.execute("UPDATE rpa_items SET status='started',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued'",(item['id'],))
             if claimed.rowcount!=1:raise ValueError('Η προσπάθεια έχει ήδη ξεκινήσει. Δεν επαναλαμβάνεται.')
+            if self.payload(company,item['document_id'])!=item['payload']:raise ValueError('Άλλαξαν τα στοιχεία πριν την εκτέλεση. Έλεγξε την ουρά.')
+            if meta['mode']=='fill_only' and self.db.execute("SELECT 1 FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.mode='fill_only' AND i.document_id=? AND i.id<>? AND i.status IN ('started','save_pending','filled_no_save','uncertain','save_invoked','ui_saved_review')",(company,item['document_id'],item['id'])).fetchone():raise ValueError('Άλλη πραγματική προσπάθεια χρειάζεται έλεγχο. Δεν στάλθηκαν νέες εντολές.')
             self.db.execute("UPDATE rpa_jobs SET status='running' WHERE id=?",(job,))
             self.erp.repository.audit(company,'rpa_started',item['document_id'],dict(job=job,item=item['id'],mode=meta['mode']))
         try:
@@ -118,21 +150,30 @@ class RPA:
             self.erp.repository.audit(company,'rpa_'+status,item['document_id'],dict(job=job,item=item['id'],mode=meta['mode']))
         return dict(status=job_state,item_status=status,mode=meta['mode'],reason=reason)
 
+    def blocked(self,company,job,reason):
+        _,items=self.items(company,job)
+        item=next((i for i in items if i['status']=='queued'),None)
+        with self.db:
+            self.db.execute("UPDATE rpa_jobs SET status='paused' WHERE id=?",(job,))
+            if item:self.db.execute("UPDATE rpa_items SET reason=? WHERE id=?",('Αποκλείστηκε πριν τη συμπλήρωση: '+reason[:1000],item['id']))
+            self.erp.repository.audit(company,'rpa_blocked',item['document_id'] if item else None,dict(job=job,reason=reason[:1000]))
+
     def stop(self,company,job):
         self.items(company,job)
         with self.db:
             self.db.execute("UPDATE rpa_jobs SET status='stopped' WHERE id=?",(job,))
             self.erp.repository.audit(company,'rpa_stopped',None,dict(job=job))
 
-    def reviewed(self,company,job,item_id,note,confirmed=False):
+    def reviewed(self,company,job,item_id,note,confirmed=False,stored_in_ebs=False):
         _,items=self.items(company,job)
         item=next((i for i in items if i['id']==item_id),None)
         if confirmed is not True or not isinstance(note,str) or not note.strip():raise ValueError('Απαιτείται ρητός χειροκίνητος έλεγχος και σημείωση')
-        if item is None or item['status'] not in ('uncertain','filled_no_save','save_invoked','ui_saved_review'):raise ValueError('Δεν υπάρχει προσπάθεια προς έλεγχο')
+        if item is None or (item['status'] not in ('uncertain','filled_no_save','save_invoked','ui_saved_review') and not (stored_in_ebs and item['status']=='reviewed_by_operator')):raise ValueError('Δεν υπάρχει προσπάθεια προς έλεγχο')
         with self.db:
             self.db.execute("UPDATE rpa_items SET status='reviewed_by_operator',reason=? WHERE id=?",(note.strip()[:2000],item_id))
             self.db.execute("UPDATE rpa_jobs SET need_new=CASE WHEN execution='save_new' THEN 1 ELSE need_new END,expected_ted=NULL WHERE id=?",(job,))
             self.erp.repository.audit(company,'rpa_manual_review',item['document_id'],dict(job=job,item=item_id,note=note.strip()[:2000],not_database_verified=True))
+            if stored_in_ebs is True:self.erp.repository.audit(company,'ebs_storage_operator_confirmed',item['document_id'],dict(job=job,item=item_id,note=note.strip()[:2000],verification='visual_operator',not_database_verified=True))
 
     def pause(self,company,job):
         self.items(company,job)
@@ -169,6 +210,9 @@ class RPA:
         with self.db:
             claim=self.db.execute("UPDATE rpa_items SET status='started',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued'",(item['id'],))
             if claim.rowcount!=1:raise ValueError('Η προσπάθεια έχει ήδη ξεκινήσει')
+            if self.db.execute("SELECT 1 FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.mode='fill_only' AND i.document_id=? AND i.id<>? AND i.status IN ('started','save_pending','filled_no_save','uncertain','save_invoked','ui_saved_review','reviewed_by_operator')",(company,item['document_id'],item['id'])).fetchone():raise ValueError('Υπάρχει άλλη πραγματική προσπάθεια για το ίδιο παραστατικό. Δεν στάλθηκαν εντολές.')
+            for pending in items:
+                if pending['status']=='queued' and self.payload(company,pending['document_id'])!=pending['payload']:raise ValueError('Άλλαξαν λογαριασμοί πριν τη συμπλήρωση. Χρειάζεται έλεγχος ουράς.')
             self.db.execute("UPDATE rpa_jobs SET status='running',expected_ted=? WHERE id=?",(expected,job))
             self.erp.repository.audit(company,'rpa_started',item['document_id'],dict(job=job,item=item['id'],mode='save_new'))
         phase='fill';reason=''

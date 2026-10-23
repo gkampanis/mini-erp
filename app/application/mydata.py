@@ -105,20 +105,25 @@ class MyData:
         return len(rows)
 
     def import_incoming(self,company,environment,date_from,date_to,confirmed=False):
-        if confirmed is not True:raise ValueError('Απαιτείται επιλογή άντλησης εξόδων στη λίστα')
+        return self.import_documents(company,environment,date_from,date_to,confirmed=confirmed)
+
+    def import_documents(self,company,environment,date_from,date_to,confirmed=False,direction='incoming'):
+        if confirmed is not True:raise ValueError('Απαιτείται επιλογή άντλησης στη λίστα')
+        if direction not in ('incoming','outgoing'):raise ValueError('Μη έγκυρη ροή παραστατικών')
+        method='RequestDocs' if direction=='incoming' else 'RequestTransmittedDocs'
         from types import SimpleNamespace
         from app.domain.validation import record,rounding_changes
         payload=[];records=[];rejected=[]
         rows=self.records(company,environment)
         for row in rows:
             item=json.loads(row['record_json'])
-            if item.get('direction')!='incoming' or not date_from<=item['date']<=date_to or row['match_status']=='cancelled_at_aade':continue
-            raw=dict(item,_source='myDATA RequestDocs',_sync=row['last_sync'])
+            if item.get('direction')!=direction or not date_from<=item['date']<=date_to or row['match_status']=='cancelled_at_aade':continue
+            raw=dict(item,_source='myDATA '+method,_sync=row['last_sync'])
             payload.append(raw);index=len(payload)
             try:
                 if item['kind'] not in ('1.1','1.2','1.3','2.1','2.2','2.3'):raise ValueError('Ο τύπος ΑΑΔΕ απαιτεί χωριστό έλεγχο: '+item['kind'])
-                fields=dict(vat=item['vat'],name=item.get('name',''),series=item['series'],number=item['number'],date=item['date'],net=item['net'],tax=item['tax'],gross=item['gross'],mark=item['mark'],kind='invoice')
-                normalized=record(fields)
+                fields=dict(vat=item['vat'] if direction=='incoming' else item['receiver'],name=item.get('name','') if direction=='incoming' else item.get('receiver_name',''),series=item['series'],number=item['number'],date=item['date'],net=item['net'],tax=item['tax'],gross=item['gross'],mark=item['mark'],kind='invoice')
+                normalized=record(fields);normalized['direction']=direction
                 records.append(dict(row=index,raw=raw,document=normalized,rounding_changes=rounding_changes(fields,normalized)))
             except ValueError as exc:rejected.append(dict(row=index,raw=raw,reason=str(exc)))
         if not payload:return dict(inserted=0,duplicates=0,rejected=[],warnings=[])
@@ -133,7 +138,7 @@ class MyData:
                 os.replace(temp,path)
             finally:
                 if os.path.exists(temp):os.unlink(temp)
-        packet=SimpleNamespace(filename='myDATA RequestDocs '+date_from+' — '+date_to,sha256=digest,records=records,rejected=rejected,headers={},mapping={},source_kind='aade')
+        packet=SimpleNamespace(filename='myDATA '+method+' '+date_from+' — '+date_to,sha256=digest,records=records,rejected=rejected,headers={},mapping={},source_kind='aade')
         report=self.erp.repository.persist_import(company,packet,packet)
         self.reconcile_stored(company,environment)
         return report

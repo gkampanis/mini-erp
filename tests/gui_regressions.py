@@ -433,6 +433,72 @@ class DesktopRegressions(unittest.TestCase):
         settings=self.app.open_settings()
         self.assertTrue(self.button(settings,'Μητρώο ΑΑΔΕ · ειδικοί κωδικοί').winfo_exists())
 
+    def test_month_acquisition_uses_complete_calendar_month_without_date_entries(self):
+        from tests.test_workspace import MemoryVault
+        self.app.erp.credential_store=MemoryVault()
+        self.assertTrue(self.app.acquire_button.winfo_exists())
+        win=self.app.open_acquisition();win.year_var.set('2024');win.month_var.set('Φεβρουάριος')
+        self.assertEqual(win.selected_period(),('2024-02-01','2024-02-29'))
+        labels=[w.cget('text') for w in widgets(win) if isinstance(w,ttk.Label)]
+        self.assertNotIn('Από',labels);self.assertNotIn('Έως',labels)
+        result={'import':{'inserted':0,'duplicates':0,'rejected':[]},'pdf':{'saved':0,'pending':0}}
+        with patch('app.application.sync.Sync.run',return_value=result) as sync:
+            win.sync_expenses();wait(self.root,lambda:not self.app.busy)
+        self.assertEqual(sync.call_args.args[2:4],('2024-02-01','2024-02-29'))
+        self.assertEqual(sync.call_args.kwargs['methods'],['RequestDocs','RequestTransmittedDocs'])
+
+    def test_supplier_tab_bulk_update_reaches_same_document_ids(self):
+        self.import_fixture('separate.xlsx')
+        titles=[self.app.notebook.tab(t,'text') for t in self.app.notebook.tabs()]
+        self.assertEqual(titles[titles.index('Έλεγχοι εισαγωγής')+1],'Προμηθευτές')
+        tab=self.app.suppliers;tab.tree.selection_set(tab.tree.get_children());original=set(self.app.tree.get_children())
+        win=tab.bulk();win.account_var.set('64.09')
+        with patch('app.ui.suppliers.messagebox.askyesno',return_value=True):self.button(win,'Έγκριση & ενημέρωση εκκρεμών').invoke()
+        self.assertEqual(set(self.app.tree.get_children()),original)
+        self.assertTrue(all(self.app._documents[int(d)]['account_code']=='64.09' for d in original))
+        self.assertTrue(all(self.app.erp.preparation(self.app.company,int(d)) for d in original))
+
+    def test_pause_cancels_scheduled_item_and_resume_does_not_repeat_simulation(self):
+        self.import_fixture('separate.xlsx');panel=self.app.rpa_panel
+        ids=[int(d) for d in self.app.tree.get_children()]
+        panel.workspace.approve_many(self.app.company,[dict(document=d,group='6',account='64.03') for d in ids],confirmed=True)
+        self.app.tree.selection_set([str(d) for d in ids]);panel.queue_selected()
+        self.assertFalse(panel.buttons['resume'].instate(['disabled']))
+        panel.start();wait(self.root,lambda:not self.app.busy and panel.rpa.progress(self.app.company,panel.job)['simulated']==1)
+        panel.pause();self.assertEqual(panel.rpa.items(self.app.company,panel.job)[0]['status'],'paused')
+        self.assertTrue(panel.buttons['pause'].instate(['disabled']));self.assertFalse(panel.buttons['resume'].instate(['disabled']))
+        elapsed=[];self.root.after(450,lambda:elapsed.append(True));wait(self.root,lambda:bool(elapsed))
+        self.assertEqual(panel.rpa.progress(self.app.company,panel.job)['simulated'],1)
+        panel.start();wait(self.root,lambda:not self.app.busy and not panel.running)
+        self.assertEqual(panel.rpa.progress(self.app.company,panel.job)['simulated'],2)
+        self.assertTrue(panel.buttons['resume'].instate(['disabled']));self.assertIn('Επιβεβαιωμένα EBS (χειριστής) 0',panel.state.get())
+
+    def test_open_document_uses_verified_source_url_or_archived_pdf(self):
+        from app.application.mydata import MyData
+        from app.infrastructure.aade.client import parsed_page
+        from tests.test_workflow import response
+        from tests.test_workspace import synthetic_pdf
+        self.import_fixture('separate.xlsx');document=self.app.erp.search(self.app.company,'000000001')[0]['id']
+        raw=response();MyData(self.app.erp).persist(self.app.company,'production','2026-10-01','2026-10-31',[(raw,parsed_page(raw))])
+        self.app.tree.selection_set(str(document));self.app.open_detail();pane=self.app._details[document].pdf_pane
+        with patch('webbrowser.open',return_value=True) as browser:
+            pane.open_document();browser.assert_called_once_with('https://example.com/synthetic.pdf')
+        self.app.erp.attach_pdf(self.app.company,document,'synthetic.pdf',data=synthetic_pdf(),confirmed=True)
+        with patch('sys.platform','linux'),patch('webbrowser.open',return_value=True) as browser:
+            pane.open_document();self.assertTrue(browser.call_args.args[0].startswith('file:'))
+
+    def test_history_visual_confirmation_updates_only_operator_verified_counter(self):
+        self.import_fixture('combined.xlsx');panel=self.app.rpa_panel;document=int(self.app.tree.get_children()[0])
+        self.app.erp.prepare_document(self.app.company,document,'6','64.03',confirmed=True)
+        panel.job=panel.rpa.create(self.app.company,[document],mode='fill_only',confirmed=True)
+        item=panel.rpa.items(self.app.company,panel.job)[1][0]
+        with self.app.erp.db:self.app.erp.db.execute("UPDATE rpa_items SET status='save_invoked' WHERE id=?",(item['id'],))
+        win=panel.history();tree=next(w for w in widgets(win) if isinstance(w,ttk.Treeview));tree.selection_set(str(item['id']))
+        with patch('app.ui.rpa_panel.messagebox.askyesno',return_value=True),patch('app.ui.rpa_panel.simpledialog.askstring',return_value='Οπτικός έλεγχος συνθετικής εγγραφής'):
+            self.button(win,'Χειροκίνητος έλεγχος προσπάθειας').invoke()
+        self.assertEqual(panel.rpa.progress(self.app.company,panel.job)['verified_in_ebs'],1)
+        self.assertEqual(panel.rpa.progress(self.app.company,panel.job)['automatically_verified'],0)
+
     def test_aade_settings_mask_and_secure_save_with_synthetic_vault(self):
         from tests.test_workspace import MemoryVault
         self.app.erp.credential_store=MemoryVault()
@@ -470,6 +536,7 @@ class DesktopRegressions(unittest.TestCase):
         from app.ui.counterparties import open_detail
         cp=self.app.erp.search(self.app.company,'000000001')[0]['counterparty_id']
         card=open_detail(self.app,cp)
+        card.apply_pending_var.set(False)
         card.account_fields[0].set('20.01');card.account_fields[1].set('64.03');card.account_fields[2].set('6 · Έξοδα')
         with patch('app.ui.counterparties.messagebox.askyesno',return_value=True):self.button(card,'Αποθήκευση καρτέλας').invoke()
         self.app.query.set('000000001');self.app.refresh()
@@ -493,12 +560,12 @@ class DesktopRegressions(unittest.TestCase):
         with self.app.erp.db:self.app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(self.app.company,))
         self.app.erp.credential_store=MemoryVault()
         self.app.erp.save_mydata_credentials(self.app.company,'production','synthetic-user','synthetic-key',confirmed=True)
-        win=self.app.open_aade();win.period_vars[0].set('2026-10-01');win.period_vars[1].set('2026-10-31');win.kind_var.set('Ληφθέντα')
+        win=self.app.open_aade();win.year_var.set('2026');win.month_var.set('Οκτώβριος');win.kind_var.set('Ληφθέντα')
         raw=response(receiver='000000008')
         with patch('app.infrastructure.aade.client.Client.fetch',return_value=[(raw,parsed_page(raw))]) as fetch:
             win.fetch_aade();wait(self.root,lambda:not self.app.busy);fetch.assert_called_once()
         self.assertEqual(len(win.records_tree.get_children()),1)
-        self.assertIn('Συμφωνεί με Excel',win.records_tree.item(win.records_tree.get_children()[0],'values'))
+        self.assertIn('Συμφωνεί με εγγραφή',win.records_tree.item(win.records_tree.get_children()[0],'values'))
         self.assertEqual(self.app._documents[document]['aade_state'],'Συμφωνεί')
         self.assertEqual(self.count('documents'),2)
 

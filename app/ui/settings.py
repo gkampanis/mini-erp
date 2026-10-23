@@ -17,7 +17,7 @@ def open_settings(owner,section=None):
     ttk.Button(connections,text='EBS / RPA · αντιστοίχιση και ελεγχόμενη εκτέλεση',command=owner.rpa_panel.settings).pack(fill='x',pady=6)
     state=tk.StringVar(value='Camoufox: εγκατεστημένο' if camoufox_install.ready() else 'Camoufox: δεν έχει εγκατασταθεί (προαιρετικό)')
     def install_feature(feature):
-        if owner.busy:return
+        if owner.busy or owner.rpa_panel.running:return
         text='Η εγκατάσταση γίνεται σε χωριστό φάκελο MiniERP.'
         if feature=='camoufox':text='Ο Camoufox θα εγκατασταθεί στον φάκελο της εφαρμογής: Optional/Camoufox. Λήψη περίπου 1,31 GB και τουλάχιστον 7 GB ελεύθερα. Απαιτούνται Windows x64 και δικαίωμα εγγραφής στον φάκελο. Θα ελεγχθεί ο browser πριν ενεργοποιηθεί.'
         if not messagebox.askyesno('Εγκατάσταση',text+'\nΝα ξεκινήσει;',parent=win):return

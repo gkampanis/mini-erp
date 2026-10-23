@@ -9,7 +9,7 @@ def reference(series,number):
 def associate(db,company,item):
     document=db.execute('SELECT d.*,c.vat FROM documents d JOIN counterparties c ON c.id=d.counterparty_id WHERE d.company_id=? AND d.mark=?',(company,item['mark'])).fetchone()
     if document is None or document['direction']!=item['direction']:return None,'unmatched',False
-    identity=(document['vat']==item['vat'] and document['issue_date']==item['date'] and reference(document['series'],document['number'])==reference(item['series'],item['number']))
+    identity=(document['vat']==(item['vat'] if item['direction']=='incoming' else item['receiver']) and document['issue_date']==item['date'] and reference(document['series'],document['number'])==reference(item['series'],item['number']))
     try:amounts=all(document[column]==cents(item[field]) for column,field in [('net_minor','net'),('tax_minor','tax'),('gross_minor','gross')])
     except ValueError:amounts=False
     return document,'matched' if identity and amounts else 'different',identity

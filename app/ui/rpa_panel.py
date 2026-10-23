@@ -7,31 +7,39 @@ from app.application.rpa import RPA
 from app.application.workspace import Workspace
 from app.infrastructure.ebs_adapter.adapter import load_mapper
 
-LABELS={'purchase_excluded':'Αγορές · εκτός EBS','not_sent':'Δεν στάλθηκε','queued':'Σε αναμονή','started':'Συμπλήρωση','save_pending':'Save σε εξέλιξη','simulated':'Προσομοίωση','filled_no_save':'Συμπληρώθηκε χωρίς Save','uncertain':'Έλεγχος στο EBS','failed':'Απέτυχε','save_invoked':'Στάλθηκε Save · έλεγχος','ui_saved_review':'Save → νέο ΤΕΔ · έλεγχος','reviewed_by_operator':'Ελέγχθηκε από χειριστή'}
+LABELS={'outgoing_excluded':'Εκδοθέν · εκτός εξόδων','purchase_excluded':'Αγορές · εκτός EBS','not_sent':'Δεν στάλθηκε','queued':'Σε αναμονή','started':'Συμπλήρωση','save_pending':'Save σε εξέλιξη','simulated':'Προσομοίωση','filled_no_save':'Συμπληρώθηκε χωρίς Save','uncertain':'Έλεγχος στο EBS','failed':'Απέτυχε','save_invoked':'Στάλθηκε Save · έλεγχος','ui_saved_review':'Save → νέο ΤΕΔ · έλεγχος','reviewed_by_operator':'Ελέγχθηκε από χειριστή'}
 
 
 class RPAPanel:
     def __init__(self,owner,parent,table=None):
         self.owner,self.parent=owner,parent;self.rpa=RPA(owner.erp);self.workspace=Workspace(owner.erp)
         self.rpa.recover(owner.company)
+        self._next_after=None;self._preview=None;self.buttons={}
         self.job=None;self.pause_requested=False;self.stop_requested=False;self.running=False
         self.mode=tk.StringVar(value='Προσομοίωση');self.live_ack=tk.BooleanVar(value=False)
         self.mapping=None;self.hotkeys=set();self.tree=owner.tree
         row=ttk.Frame(parent);row.pack(fill='x',pady=(4,6))
-        ttk.Button(row,text='Λογαριασμοί & έγκριση',command=self.accounts).pack(side='left')
-        ttk.Button(row,text='Δοκιμή 1 εγγραφής',command=self.pilot).pack(side='left',padx=6)
-        ttk.Button(row,text='Έξοδα → EBS',style='Primary.TButton',command=self.post).pack(side='left')
+        self.buttons['accounts']=ttk.Button(row,text='Λογαριασμοί & έγκριση',command=self.accounts);self.buttons['accounts'].pack(side='left')
+        self.buttons['pilot']=ttk.Button(row,text='Δοκιμή 1 εγγραφής',command=self.pilot);self.buttons['pilot'].pack(side='left',padx=6)
+        self.buttons['post']=ttk.Button(row,text='Έξοδα → EBS',style='Primary.TButton',command=self.post);self.buttons['post'].pack(side='left')
         ttk.Button(row,text='Ρυθμίσεις EBS',command=self.settings).pack(side='right')
         row=ttk.Frame(parent);row.pack(fill='x')
-        self.scope=tk.StringVar(value='Όλες της λίστας')
-        ttk.Combobox(row,textvariable=self.scope,values=('Όλες της λίστας','Μόνο επιλεγμένες','Από επιλεγμένη και μετά'),state='readonly',width=26).pack(side='left')
-        ttk.Button(row,text='Προσομοίωση',command=self.simulate).pack(side='left',padx=6)
-        ttk.Button(row,text='Παύση',command=self.pause).pack(side='left')
-        ttk.Button(row,text='Συνέχεια',command=self.start).pack(side='left',padx=6)
-        ttk.Button(row,text='Διακοπή',command=self.stop).pack(side='left')
+        self.scope=tk.StringVar(value='Εκκρεμή προς EBS')
+        ttk.Combobox(row,textvariable=self.scope,values=('Εκκρεμή προς EBS','Όλες της λίστας','Μόνο επιλεγμένες','Από επιλεγμένη και μετά'),state='readonly',width=26).pack(side='left')
+        self.buttons['simulation']=ttk.Button(row,text='Προσομοίωση',command=self.simulate);self.buttons['simulation'].pack(side='left',padx=6)
+        self.buttons['pause']=ttk.Button(row,text='Παύση',command=self.pause);self.buttons['pause'].pack(side='left')
+        self.buttons['resume']=ttk.Button(row,text='Συνέχεια',command=self.start);self.buttons['resume'].pack(side='left',padx=6)
+        self.buttons['stop']=ttk.Button(row,text='Διακοπή',command=self.stop);self.buttons['stop'].pack(side='left')
         ttk.Button(row,text='Ιστορικό / έλεγχος EBS',command=self.history).pack(side='right')
-        self.state=tk.StringVar(value='Φόρτωσε Excel μία φορά. Οι εγγραφές της λίστας είναι και οι εγγραφές καταχώρισης.')
-        ttk.Label(parent,textvariable=self.state,style='Subtitle.TLabel',wraplength=1100).pack(anchor='w',pady=(7,0))
+        ttk.Button(row,text='Προεπισκόπηση',command=self.preview).pack(side='left',padx=6)
+        self.state=tk.StringVar(value='Άντληση μήνα ή Excel → Προμηθευτές / λογαριασμοί → Προσομοίωση → EBS.')
+        state_label=ttk.Label(parent,textvariable=self.state,style='Subtitle.TLabel',wraplength=1100);state_label.pack(anchor='w',pady=(7,0))
+        parent.bind('<Configure>',lambda event:state_label.configure(wraplength=max(200,event.width-8)),add='+')
+        from app.ui.help import tooltip
+        tooltip(self.buttons['simulation'],'Προβάλλει και ελέγχει τα δεδομένα της ουράς χωρίς πληκτρολόγηση ή Save στο EBS.')
+        tooltip(self.buttons['pause'],'Ολοκληρώνει την τρέχουσα εγγραφή και παγώνει πριν από την επόμενη. Η θέση διατηρείται.')
+        tooltip(self.buttons['resume'],'Συνεχίζει μόνο τις εκκρεμείς εγγραφές. Αβέβαιη προηγούμενη προσπάθεια απαιτεί πρώτα χειροκίνητο έλεγχο.')
+        tooltip(self.buttons['stop'],'Τερματίζει την ουρά μετά την τρέχουσα εγγραφή. Δεν είναι προσωρινή παύση.')
         owner.root.after(170,self.poll_hotkeys)
 
     def ids(self):
@@ -40,6 +48,9 @@ class RPAPanel:
         if self.scope.get()=='Μόνο επιλεγμένες':return [x for x in visible if x in selected]
         # Keep the original Excel order, independent of table sorting.
         ordered=sorted(visible,key=lambda x:self.owner._documents[x]['source_record_id'])
+        if self.scope.get()=='Εκκρεμή προς EBS':
+            attempted={r[0] for r in self.owner.erp.db.execute("SELECT i.document_id FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.mode='fill_only' AND i.status<>'queued'",(self.owner.company,))}
+            return [d for d in ordered if d not in attempted]
         if self.scope.get()=='Από επιλεγμένη και μετά':
             if not selected:raise ValueError('Επίλεξε τη γραμμή εκκίνησης στη λίστα')
             start=min(selected,key=lambda x:self.owner._documents[x]['source_record_id'])
@@ -47,17 +58,41 @@ class RPAPanel:
         return ordered
 
     def refresh(self):
+        meta=None;items=[]
         if self.job is not None:
-            meta,items=self.rpa.items(self.owner.company,self.job)
-            done=sum(i['status']!='queued' for i in items)
-            self.state.set(f'Πρόοδος {done}/{len(items)} · '+{'running':'Σε εξέλιξη','paused':'Σε παύση','stopped':'Διακόπηκε','completed':'Τέλος ουράς — έλεγχος στο EBS','queued':'Έτοιμη ουρά'}.get(meta['status'],meta['status']))
+            meta,items=self.rpa.items(self.owner.company,self.job);p=self.rpa.progress(self.owner.company,self.job)
+            mode='Προσομοίωση' if meta['mode']=='simulation' else 'Εκτέλεση EBS'
+            state={'running':'Σε εξέλιξη','paused':'Σε παύση','stopped':'Διακόπηκε','completed':'Τέλος ουράς','queued':'Έτοιμη ουρά'}.get(meta['status'],meta['status'])
+            self.state.set(f"{mode} · {state} · Σύνολο {p['total']} · Τρέχον {p['current']} · Προσομοιώθηκαν {p['simulated']} · Εντολές Save {p['save_requested']} · Έλεγχος χειριστή {p['operator_reviewed']} · Επιβεβαιωμένα EBS (χειριστής) {p['verified_in_ebs']} · Αποτυχίες/αβέβαια {p['failed']}")
+        blocked=any(i['status'] in ('started','save_pending','uncertain','filled_no_save') for i in items)
+        for key in ('accounts','pilot','post','simulation'):self.buttons[key].state(['disabled'] if self.owner.busy or self.running else ['!disabled'])
+        self.buttons['pause'].state(['!disabled'] if self.running and not self.pause_requested else ['disabled'])
+        self.buttons['resume'].state(['!disabled'] if meta and meta['status'] in ('queued','paused') and not blocked and not self.running and not self.owner.busy else ['disabled'])
+        self.buttons['stop'].state(['!disabled'] if meta and meta['status'] not in ('stopped','completed') and not self.stop_requested else ['disabled'])
+        if self._preview and self._preview.winfo_exists():self.fill_preview()
+
+    def preview(self):
+        if self.job is None:return
+        if self._preview and self._preview.winfo_exists():self._preview.lift();return self._preview
+        from app.ui.desktop import table
+        win=tk.Toplevel(self.owner.root);win.title('Προεπισκόπηση ουράς · χωρίς ενέργεια στο EBS');win.geometry('1100x540')
+        ttk.Label(win,text='Ακριβή δεδομένα ουράς. Η προσομοίωση δεν πατά Save και δεν αποθηκεύει στο EBS.',style='Subtitle.TLabel').pack(anchor='w',padx=16,pady=12)
+        self.preview_tree=table(win,('invoice','name','vat','date','account','net','state','reason'),('Παραστατικό','Επωνυμία','ΑΦΜ','Ημερομηνία','Λογαριασμός','Καθαρή','Κατάσταση','Αιτία'),{'name':220,'reason':250})
+        self._preview=win;self.fill_preview();return win
+
+    def fill_preview(self):
+        self.preview_tree.delete(*self.preview_tree.get_children())
+        for item in self.rpa.items(self.owner.company,self.job)[1]:
+            p=item['payload'];self.preview_tree.insert('','end',iid=str(item['id']),values=tuple(p[k] for k in ('invoice','name','vat','date','account','net'))+(LABELS.get(item['status'],item['status']),item['reason']))
 
     def accounts(self):
-        if self.owner.busy:return
+        if self.owner.busy or self.running:return
         chosen=self.owner.tree.selection()
         ids=[int(x) for x in chosen] if chosen else list(self.owner._documents)
         if not ids:messagebox.showinfo('Excel','Φόρτωσε πρώτα το Excel.',parent=self.owner.root);return
-        rows=[self.owner._documents[x] for x in ids]
+        rows=[self.owner._documents[x] for x in ids if self.owner._documents[x]['direction']=='incoming']
+        if not rows:messagebox.showinfo('Έξοδα','Τα εκδοθέντα δεν καταχωρούνται στη ροή εξόδων EBS.',parent=self.owner.root);return
+        ids=[r['id'] for r in rows]
         win=tk.Toplevel(self.owner.root);win.title('Λογαριασμοί · '+str(len(ids))+' παραστατικά');win.geometry('900x630');win.minsize(780,520)
         body=ttk.Frame(win,padding=18);body.pack(fill='both',expand=True)
         ttk.Label(body,text=f'{len(ids)} παραστατικά · Έλεγχος λογαριασμών',style='Section.TLabel').pack(anchor='w')
@@ -106,7 +141,7 @@ class RPAPanel:
         return win
 
     def settings(self):
-        if self.owner.busy:return
+        if self.owner.busy or self.running:return
         win=tk.Toplevel(self.owner.root);win.title('Ρυθμίσεις EBS · αποθηκεύονται μία φορά');win.geometry('760x530')
         body=ttk.Frame(win,padding=20);body.pack(fill='both',expand=True)
         saved=self.workspace.profile(self.owner.company);profile=saved['profile'] if saved else {'mapping':{},'save':None,'new':None}
@@ -155,15 +190,16 @@ class RPAPanel:
                 ids=[int(selected[0])]
             if not ids:raise ValueError('Δεν υπάρχουν εγγραφές. Φόρτωσε πρώτα Excel.')
             scope=self.rpa.expense_scope(self.owner.company,ids)
-            excluded=len(scope['purchases'])
+            excluded=len(scope['purchases']);issued=len(scope['outgoing'])
             if scope['needs_review']:raise ValueError(f"{len(scope['needs_review'])} εγγραφές χρειάζονται διαχωρισμό ή έγκριση λογαριασμού. {excluded} αγορές ομάδας 2 είναι εκτός EBS. Πάτησε «Λογαριασμοί & έγκριση».")
             ids=scope['expenses']
             if not ids:raise ValueError('Δεν υπάρχουν εγκεκριμένα έξοδα ομάδας 6 σε αυτή την επιλογή. Οι αγορές ομάδας 2 παραμένουν στη βάση, εκτός EBS.')
             real=mode=='fill_only'
             if real and sys.platform!='win32':raise ValueError('Η πραγματική καταχώριση απαιτεί Windows με Entersoft. Η προσομοίωση λειτουργεί εδώ.')
-            if not messagebox.askyesno('Έναρξη '+('EBS' if real else 'προσομοίωσης'),f'{len(ids)} έξοδα ομάδας 6, με τους εγκεκριμένους λογαριασμούς τους.\n{excluded} αγορές ομάδας 2 εξαιρέθηκαν και παραμένουν στη βάση.\n'+('Θα εκτελεστεί η ροή συμπλήρωση → Save → νέο ΤΕΔ. Επιβεβαιώνεις κενό ΤΕΔ και πραγματικές καταχωρίσεις;' if real else 'Δεν θα γίνει καμία ενέργεια στο EBS. Συνέχεια;'),parent=self.owner.root):return
+            if not messagebox.askyesno('Έναρξη '+('EBS' if real else 'προσομοίωσης'),f'{len(ids)} έξοδα ομάδας 6, με τους εγκεκριμένους λογαριασμούς τους.\n{excluded} αγορές ομάδας 2 εξαιρέθηκαν και παραμένουν στη βάση. {issued} εκδοθέντα είναι εκτός ροής εξόδων.\n'+('Θα εκτελεστεί η ροή συμπλήρωση → Save → νέο ΤΕΔ. Επιβεβαιώνεις κενό ΤΕΔ και πραγματικές καταχωρίσεις;' if real else 'Δεν θα γίνει καμία ενέργεια στο EBS. Συνέχεια;'),parent=self.owner.root):return
             self.job=self.rpa.create(self.owner.company,ids,mode,confirmed=True,execution='save_new' if real else 'fill_only',pilot=pilot)
         except ValueError as exc:messagebox.showwarning('Πριν την έναρξη',str(exc),parent=self.owner.root);return
+        if mode=='simulation':self.preview()
         self.start()
 
     def pilot(self):self.make('fill_only',pilot=True)
@@ -179,66 +215,87 @@ class RPAPanel:
         self.refresh()
 
     def start(self):
-        if self.owner.busy or self.job is None:return
+        if self.owner.busy or self.running or self.job is None:return
+        meta,items=self.rpa.items(self.owner.company,self.job)
+        if meta['status'] in ('stopped','completed'):return
+        if any(i['status'] in ('started','save_pending','uncertain','filled_no_save') for i in items):
+            messagebox.showwarning('Έλεγχος EBS','Χρειάζεται χειροκίνητος έλεγχος προηγούμενης προσπάθειας από το Ιστορικό.',parent=self.owner.root);return
         self.pause_requested=False;self.stop_requested=False;self.running=True
-        self.next_item(continuing=True)
+        self.refresh();self.next_item(continuing=True)
 
     def next_item(self,continuing=False):
-        if self.owner._closing:return
+        self._next_after=None
+        if self.owner._closing or not self.running:return
         if self.stop_requested:self.rpa.stop(self.owner.company,self.job);self.running=False;self.owner.root.deiconify();self.refresh();return
         if self.pause_requested:self.rpa.pause(self.owner.company,self.job);self.running=False;self.owner.root.deiconify();self.refresh();return
-        if self.job is None or self.owner.busy:return
+        if self.job is None:return
+        if self.owner.busy:self._next_after=self.owner.root.after(150,self.next_item);return
         job=self.job;meta,_=self.rpa.items(self.owner.company,job)
         if meta['mode']=='fill_only':self.owner.root.withdraw()
         def execute():
             service=ERP(self.owner.directory)
             try:
                 try:return RPA(service).advance(self.owner.company,job,live_confirmed=True,continue_after_pause=continuing)
-                except (ValueError,RuntimeError) as exc:return dict(status='blocked',reason=str(exc))
+                except (ValueError,RuntimeError) as exc:
+                    RPA(service).blocked(self.owner.company,job,str(exc))
+                    return dict(status='blocked',reason=str(exc))
             finally:service.close()
         def done(result):
             if self.owner._closing:return
             self.owner.refresh();self.refresh()
             if result.get('reason'):self.state.set(result['reason'])
-            if result['status']=='running' and not self.stop_requested and not self.pause_requested:self.parent.after(350,self.next_item)
+            if result['status']=='running' and not self.stop_requested and not self.pause_requested:self._next_after=self.owner.root.after(350,self.next_item)
             else:
                 if self.stop_requested:self.rpa.stop(self.owner.company,job)
                 elif self.pause_requested:self.rpa.pause(self.owner.company,job)
-                self.running=False;self.owner.root.deiconify()
+                self.running=False;self.owner.root.deiconify();self.refresh()
         self.owner.run_worker(execute,done)
 
+    def cancel_next(self):
+        if self._next_after is not None:self.owner.root.after_cancel(self._next_after);self._next_after=None
+
     def pause(self):
-        self.pause_requested=True
-        if not self.owner.busy and self.job is not None:self.rpa.pause(self.owner.company,self.job);self.running=False;self.owner.root.deiconify();self.refresh()
+        self.cancel_next();self.pause_requested=True
+        if not self.owner.busy and self.job is not None:self.rpa.pause(self.owner.company,self.job);self.running=False;self.owner.root.deiconify()
+        self.refresh()
+        if self.running:self.state.set(self.state.get()+' · Παύση μετά την τρέχουσα εγγραφή')
     def stop(self):
-        self.stop_requested=True
-        if not self.owner.busy and self.job is not None:self.rpa.stop(self.owner.company,self.job);self.running=False;self.owner.root.deiconify();self.refresh()
+        self.cancel_next();self.stop_requested=True
+        if not self.owner.busy and self.job is not None:self.rpa.stop(self.owner.company,self.job);self.running=False;self.owner.root.deiconify()
+        self.refresh()
+        if self.running:self.state.set(self.state.get()+' · Διακοπή μετά την τρέχουσα εγγραφή')
 
     def history(self):
         win=tk.Toplevel(self.owner.root);win.title('Ιστορικό EBS · έλεγχος και συνέχεια');win.geometry('1000x600')
         frame=ttk.Frame(win,padding=16);frame.pack(fill='both',expand=True)
         ttk.Label(frame,text='Save / νέο ΤΕΔ δεν αποτελούν αυτόματη επιβεβαίωση αποθήκευσης στη βάση EBS.',style='Subtitle.TLabel').pack(anchor='w',pady=8)
         from app.ui.desktop import table
-        tree=table(frame,('job','invoice','vat','state'),('Ουρά','Παραστατικό','ΑΦΜ','Ενέργεια / αποτέλεσμα'),{'state':350})
+        tree=table(frame,('job','invoice','vat','account','state','reason'),('Ουρά','Παραστατικό','ΑΦΜ','Λογαριασμός','Ενέργεια / αποτέλεσμα','Αιτία'),{'state':260,'reason':300})
         rows=self.owner.erp.db.execute('SELECT i.*,j.mode FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? ORDER BY i.id DESC',(self.owner.company,)).fetchall()
         import json
         for row in rows:
-            p=json.loads(row['payload']);tree.insert('','end',iid=str(row['id']),values=(row['job_id'],p['invoice'],p['vat'],LABELS.get(row['status'],row['status'])))
+            p=json.loads(row['payload']);tree.insert('','end',iid=str(row['id']),values=(row['job_id'],p['invoice'],p['vat'],p.get('account',''),LABELS.get(row['status'],row['status']),row['reason']))
         bottom=ttk.Frame(frame);bottom.pack(fill='x',pady=10)
         def review(pilot=False):
+            if self.owner.busy or self.running:
+                messagebox.showwarning('Παύση πρώτα','Παύσε την εκτέλεση πριν επιβεβαιώσεις προηγούμενη προσπάθεια.',parent=win);return
             selected=tree.selection()
             if not selected:return
             item=int(selected[0]);row=next(r for r in rows if r['id']==item)
-            note=simpledialog.askstring('Έλεγχος στο EBS','Επιβεβαίωσες ότι το παραστατικό είναι αποθηκευμένο με σωστά στοιχεία; Σημείωσε τον έλεγχο:',parent=win)
+            stored=messagebox.askyesno('Οπτική επιβεβαίωση στο EBS','Επιβεβαιώνεις ότι το συγκεκριμένο παραστατικό υπάρχει αποθηκευμένο στο EBS με σωστό λογαριασμό και ποσά; Ναι = επιβεβαίωση αποθήκευσης, Όχι = μόνο σημείωση ελέγχου.',parent=win)
+            if pilot and not stored:return
+            note=simpledialog.askstring('Έλεγχος στο EBS','Σημείωση οπτικού ελέγχου (π.χ. αριθμός εγγραφής EBS):',parent=win)
             if not note:return
             try:
                 if pilot:self.workspace.confirm_pilot(self.owner.company,item,note,confirmed=True)
-                else:self.rpa.reviewed(self.owner.company,row['job_id'],item,note,confirmed=True)
+                else:self.rpa.reviewed(self.owner.company,row['job_id'],item,note,confirmed=True,stored_in_ebs=stored)
             except ValueError as exc:messagebox.showerror('Έλεγχος',str(exc),parent=win);return
             win.destroy();self.owner.refresh();self.state.set('Ο χειροκίνητος έλεγχος καταγράφηκε. Η πιλοτική επιβεβαίωση επιτρέπει μαζική εκτέλεση.' if pilot else 'Καταγράφηκε ο έλεγχος στο EBS.')
         ttk.Button(bottom,text='Επιβεβαίωση πιλοτικού — ενεργοποίηση batch',command=lambda:review(True)).pack(side='left')
         ttk.Button(bottom,text='Χειροκίνητος έλεγχος προσπάθειας',command=review).pack(side='left',padx=8)
         def select():
+            if self.owner.busy or self.running:
+                messagebox.showwarning('Παύση πρώτα','Παύσε την εκτέλεση πριν επιλέξεις άλλη ουρά.',parent=win);return
             selected=tree.selection()
             if selected:self.job=next(r['job_id'] for r in rows if r['id']==int(selected[0]));win.destroy();self.refresh()
         ttk.Button(bottom,text='Επιλογή ουράς για συνέχεια',command=select).pack(side='right')

@@ -14,6 +14,7 @@ class PDFPane:
         self.kind=tk.StringVar(value='Τιμολόγιο')
         ttk.Combobox(top,textvariable=self.kind,values=tuple(KINDS.values()),state='readonly',width=23).pack(anchor='w',pady=8)
         buttons=ttk.Frame(top);buttons.pack(fill='x')
+        ttk.Button(top,text='Άνοιγμα Παραστατικού',command=self.open_document).pack(anchor='w',pady=(0,6))
         ttk.Button(top,text='ΑΑΔΕ → Λήψη PDF',command=self.fetch_aade).pack(anchor='w',pady=(0,6))
         ttk.Button(buttons,text='Προσθήκη PDF',command=self.attach).pack(side='left',padx=(0,6))
         self.files=ttk.Treeview(parent,columns=('kind','file'),show='headings',height=2,selectmode='browse')
@@ -50,6 +51,29 @@ class PDFPane:
             selected=next((r for r in records if r['id']==self.selected),next((r for r in records if r['kind']=='invoice'),records[0]))
             self.files.selection_set(str(selected['id']))
         else:self.state.set('Δεν έχει συνδεθεί PDF. Πάτησε «ΑΑΔΕ → Λήψη PDF» για αυτόματη εύρεση ή πρόσθεσε τοπικό PDF.')
+
+    def open_document(self):
+        if not self.alive():return
+        import os
+        import sys
+        import webbrowser
+        from urllib.parse import urlsplit
+        try:
+            attachments=self.owner.erp.attachments(self.owner.company,self.document)
+            if attachments:
+                selected=next((a for a in attachments if a['id']==self.selected),next((a for a in attachments if a['kind']=='invoice'),attachments[0]))
+                path=self.owner.erp.attachment_path(self.owner.company,self.document,selected['id'])
+                if sys.platform=='win32':os.startfile(str(path))
+                elif not webbrowser.open(path.resolve().as_uri()):raise ValueError('Δεν άνοιξε το τοπικό PDF. Όρισε εφαρμογή προβολής PDF στο λειτουργικό.')
+                return
+            from app.application.mydata import MyData
+            active=self.owner.erp.db.execute('SELECT environment FROM aade_settings WHERE company_id=?',(self.owner.company,)).fetchone()
+            url=MyData(self.owner.erp).pdf_url(self.owner.company,self.document,active[0] if active else 'production')
+            parsed=urlsplit(url)
+            if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password or any(ord(c)<33 for c in url):raise ValueError('Δεν υπάρχει έγκυρος HTTPS σύνδεσμος παρόχου.')
+            if not webbrowser.open(url):raise ValueError('Δεν άνοιξε ο browser. Έλεγξε την προεπιλεγμένη εφαρμογή του λειτουργικού.')
+        except (ValueError,OSError,RuntimeError) as exc:
+            messagebox.showinfo('Άνοιγμα παραστατικού',str(exc)+'\nΜπορείς να δοκιμάσεις «ΑΑΔΕ → Λήψη PDF».',parent=self.window)
 
     def auto_fetch(self):
         if not self.alive() or self.records or self.owner.busy:return

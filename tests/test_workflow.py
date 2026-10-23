@@ -186,7 +186,7 @@ class ConnectedWorkflowTests(unittest.TestCase):
         self.workspace.approve_many(self.company,[dict(document=self.ids[0],group='2',account='20.01'),dict(document=self.ids[1],group='6',account='64.03')],confirmed=True)
         before=self.erp.detail(self.company,self.ids[0])[0]
         scope=self.rpa.expense_scope(self.company,self.ids)
-        self.assertEqual(scope,dict(expenses=[self.ids[1]],purchases=[self.ids[0]],needs_review=[]))
+        self.assertEqual(scope,dict(expenses=[self.ids[1]],purchases=[self.ids[0]],needs_review=[],outgoing=[]))
         job=self.rpa.create(self.company,scope['expenses'],confirmed=True)
         self.rpa.advance(self.company,job)
         self.assertEqual([i['document_id'] for i in self.rpa.items(self.company,job)[1]],[self.ids[1]])

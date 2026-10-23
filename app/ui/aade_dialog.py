@@ -10,11 +10,11 @@ from tkinter import ttk,messagebox,filedialog,simpledialog
 import webbrowser
 from app.application.service import ERP
 from app.application.mydata import MyData
-from app.domain.validation import iso_date
+from app.application.periods import MONTHS,month_bounds
 from app.infrastructure.aade.credentials import OFFICIAL_DOCS,VaultUnavailable
 
 
-def open_settings(owner,document=None):
+def open_settings(owner,document=None,acquire=False):
     win=tk.Toplevel(owner.root);win.title('ΑΑΔΕ / myDATA · Σύνδεση και παραστατικά');win.geometry('1060x740');win.minsize(900,630)
     notebook=ttk.Notebook(win);notebook.pack(fill='both',expand=True,padx=16,pady=16)
     panel=ttk.Frame(notebook,padding=18);data_panel=ttk.Frame(notebook,padding=14)
@@ -66,10 +66,10 @@ def open_settings(owner,document=None):
         except VaultUnavailable as exc:status.set(str(exc))
     def load_options(event=None):
         load();options=Sync(owner.erp).preferences(owner.company,choices[environment.get()]);represented.set(bool(options['represented']));auto_pdf.set(bool(options['auto_pdf']) if owner.erp.db.execute('SELECT 1 FROM sync_preferences WHERE company_id=? AND environment=?',(owner.company,choices[environment.get()])).fetchone() else True)
-    box.bind('<<ComboboxSelected>>',load_options)
+    box.bind('<<ComboboxSelected>>',lambda event:(load_options(event),refresh()))
     ttk.Checkbutton(panel,text='Αυτόματη λήψη/εμφάνιση PDF από ΑΑΔΕ όταν ανοίγω παραστατικό',variable=auto_pdf).pack(anchor='w',pady=6)
     def save():
-        if owner.busy:return False
+        if owner.busy or owner.rpa_panel.running:return False
         try:owner.erp.save_mydata_credentials(owner.company,choices[environment.get()],username.get(),key.get(),confirmed=True)
         except (ValueError,VaultUnavailable,sqlite3.Error) as exc:messagebox.showerror('Δεν αποθηκεύτηκαν κωδικοί',str(exc),parent=win);return False
         Sync(owner.erp).save_preferences(owner.company,choices[environment.get()],represented.get(),auto_pdf.get())
@@ -79,35 +79,41 @@ def open_settings(owner,document=None):
     ttk.Button(actions,text='Επίσημες οδηγίες ΑΑΔΕ',command=lambda:webbrowser.open(OFFICIAL_DOCS)).pack(side='left')
     ttk.Button(actions,text='Αποθήκευση κωδικών',style='Primary.TButton',command=save).pack(side='right')
     first=date.today().replace(day=1);last=first-timedelta(days=1)
-    from_date=tk.StringVar(value=last.replace(day=1).isoformat());to_date=tk.StringVar(value=last.isoformat())
+    year=tk.StringVar(value=str(last.year));month=tk.StringVar(value=MONTHS[last.month-1])
+    def selected_period():return month_bounds(year.get(),MONTHS.index(month.get())+1)
     header=ttk.Frame(data_panel);header.pack(fill='x')
-    ttk.Label(header,text='Από').pack(side='left');ttk.Entry(header,textvariable=from_date,width=13).pack(side='left',padx=6)
-    ttk.Label(header,text='Έως').pack(side='left');ttk.Entry(header,textvariable=to_date,width=13).pack(side='left',padx=6)
+    ttk.Label(header,text='Έτος').pack(side='left');year_box=ttk.Combobox(header,textvariable=year,values=tuple(str(y) for y in range(2000,date.today().year+2)),state='readonly',width=7);year_box.pack(side='left',padx=6)
+    ttk.Label(header,text='Μήνας').pack(side='left');month_box=ttk.Combobox(header,textvariable=month,values=MONTHS,state='readonly',width=16);month_box.pack(side='left',padx=6)
     kind=tk.StringVar(value='Ληφθέντα και εκδοθέντα')
-    ttk.Combobox(header,textvariable=kind,values=('Ληφθέντα και εκδοθέντα','Ληφθέντα','Εκδοθέντα'),state='readonly',width=25).pack(side='left',padx=6)
+    kind_box=ttk.Combobox(header,textvariable=kind,values=('Ληφθέντα και εκδοθέντα','Ληφθέντα','Εκδοθέντα'),state='readonly',width=25);kind_box.pack(side='left',padx=6)
     cancel=threading.Event();notifications=queue.Queue()
-    output=tk.StringVar(value='1. Σύνδεση → 2. Εύρεση παραστατικών → 3. Λήψη PDF. Οι εγγραφές Excel συμφωνούνται με MARK, χωρίς δεύτερη φόρτωση.')
+    output=tk.StringVar(value='1. Σύνδεση → 2. Εύρεση παραστατικών → 3. Λήψη PDF. Οι εγγραφές συμφωνούνται με MARK, χωρίς δεύτερη φόρτωση.')
     ttk.Label(data_panel,textvariable=output,style='Subtitle.TLabel',wraplength=950).pack(anchor='w',pady=10)
     controls=ttk.Frame(data_panel);controls.pack(fill='x',pady=(0,10))
     from app.ui.desktop import table
-    results=table(data_panel,('direction','mark','invoice','vat','status','pdf'),('Ροή','MARK','Παραστατικό','ΑΦΜ αντισυμβαλλομένου','Συμφωνία Excel','PDF'),{'status':200,'pdf':200})
+    results=table(data_panel,('direction','mark','invoice','vat','status','pdf'),('Ροή','MARK','Παραστατικό','ΑΦΜ αντισυμβαλλομένου','Συμφωνία εγγραφής','PDF'),{'status':200,'pdf':200})
     results.configure(selectmode='extended');records={}
-    labels={'matched':'Συμφωνεί με Excel','different':'Διαφορά — έλεγχος','unmatched':'Δεν υπάρχει στο Excel','cancelled_at_aade':'Ακύρωση στην ΑΑΔΕ — έλεγχος'}
+    labels={'matched':'Συμφωνεί με εγγραφή','different':'Διαφορά — έλεγχος','unmatched':'Δεν υπάρχει στη βασική λίστα','cancelled_at_aade':'Ακύρωση στην ΑΑΔΕ — έλεγχος'}
     def refresh():
         if not win.winfo_exists():return
         results.delete(*results.get_children());records.clear()
         from app.infrastructure.optional_packages import activate
         activate()
         from app.infrastructure.providers.pdf_downloads import state_label
+        start,end=selected_period()
         for row in MyData(owner.erp).records(owner.company,choices[environment.get()]):
-            item=json.loads(row['record_json']);row['item']=item;records[str(row['id'])]=row
+            item=json.loads(row['record_json'])
+            if not start<=item['date']<=end:continue
+            if kind.get()=='Ληφθέντα' and item.get('direction')!='incoming':continue
+            if kind.get()=='Εκδοθέντα' and item.get('direction')!='outgoing':continue
+            row['item']=item;records[str(row['id'])]=row
             attempt=owner.erp.db.execute('SELECT state FROM provider_attempts WHERE company_id=? AND environment=? AND mark=? ORDER BY id DESC LIMIT 1',(owner.company,choices[environment.get()],row['mark'])).fetchone()
             results.insert('','end',iid=str(row['id']),values=('Ληφθέν' if item.get('direction')=='incoming' else 'Εκδοθέν',row['mark'],'/'.join(x for x in [item['series'],item['number']] if x),item['vat'] if item.get('direction')=='incoming' else item['receiver'],labels.get(row['match_status'],row['match_status']),state_label(attempt['state']) if attempt else 'Διαθέσιμος σύνδεσμος' if item.get('pdf_url') else 'Χωρίς σύνδεσμο'))
     def fetch(test=False):
-        if owner.busy:return
+        if owner.busy or owner.rpa_panel.running:return
         vat=owner.erp.db.execute('SELECT vat FROM companies WHERE id=?',(owner.company,)).fetchone()[0]
         if vat=='000000000':messagebox.showwarning('Εταιρεία','Όρισε πρώτα το πραγματικό ΑΦΜ από την καρτέλα Σύνδεση. Οι κωδικοί δεν στέλνονται για τη συνθετική εταιρεία.',parent=win);notebook.select(panel);return
-        try:start=iso_date(from_date.get());end=iso_date(to_date.get())
+        try:start,end=selected_period()
         except ValueError as exc:messagebox.showerror('Ημερομηνίες',str(exc),parent=win);return
         env=choices[environment.get()];rep=represented.get();vault=owner.erp.credential_store
         methods=['RequestDocs','RequestTransmittedDocs'] if kind.get()=='Ληφθέντα και εκδοθέντα' else ['RequestDocs' if kind.get()=='Ληφθέντα' else 'RequestTransmittedDocs']
@@ -133,30 +139,33 @@ def open_settings(owner,document=None):
         owner.run_worker(execute,done)
     ttk.Button(actions,text='Έλεγχος σύνδεσης',command=lambda:fetch(True)).pack(side='right',padx=8)
     def full_sync():
-        if owner.busy:return
+        if owner.busy or owner.rpa_panel.running:return
         if key.get().strip() and not save():return
         try:
-            start=iso_date(from_date.get());end=iso_date(to_date.get())
+            start,end=selected_period()
             env=choices[environment.get()]
             Sync(owner.erp).save_preferences(owner.company,env,represented.get(),auto_pdf.get())
         except ValueError as exc:messagebox.showerror('Περίοδος',str(exc),parent=win);return
+        methods=['RequestDocs','RequestTransmittedDocs'] if kind.get()=='Ληφθέντα και εκδοθέντα' else ['RequestDocs' if kind.get()=='Ληφθέντα' else 'RequestTransmittedDocs']
         cancel.clear();vault=owner.erp.credential_store;rep=represented.get()
         output.set('Άντληση βιβλίου, αναλυτικών παραστατικών και PDF…');notebook.select(data_panel)
         def execute():
             service=ERP(owner.directory,credential_store=vault)
-            try:return Sync(service).run(owner.company,env,start,end,represented=rep,cancel=cancel,notice=lambda msg:notifications.put(msg))
+            try:return Sync(service).run(owner.company,env,start,end,represented=rep,cancel=cancel,notice=lambda msg:notifications.put(msg),methods=methods)
             finally:service.close()
         def done(result):
             if not win.winfo_exists():return
             imported=result.get('import',{});pdf=result.get('pdf',{})
             output.set(f"Νέα στη λίστα: {imported.get('inserted',0)} · Υπήρχαν: {imported.get('duplicates',0)} · Για έλεγχο: {len(imported.get('rejected',[]))} · PDF: {pdf.get('saved',0)} · Εκκρεμή PDF: {pdf.get('pending',0)}"+(' · Βιβλίο: '+result['book_error'] if result.get('book_error') else '')+(' · PDF: '+result['pdf_error'] if result.get('pdf_error') else ''))
+            if result.get('errors'):output.set(output.get()+' · Δεν ολοκληρώθηκαν: '+' · '.join(v['method']+': '+v['error'] for v in result['errors']))
+            if result.get('cancelled'):output.set('Η άντληση διακόπηκε. Οι ολοκληρωμένες λήψεις διατηρούνται. '+output.get())
             owner.refresh();refresh()
         owner.run_worker(execute,done)
-    ttk.Button(panel,text='Αποθήκευση & άντληση εξόδων + PDF',style='Primary.TButton',command=full_sync).pack(fill='x',before=actions,pady=8)
-    ttk.Button(data_panel,text='Άντληση εξόδων στη λίστα + PDF (χωρίς Excel)',style='Primary.TButton',command=full_sync).pack(fill='x',before=controls,pady=(0,8))
-    ttk.Button(controls,text='1. Εύρεση παραστατικών',style='Primary.TButton',command=fetch).pack(side='left')
+    ttk.Button(panel,text='Αποθήκευση & άντληση παραστατικών + PDF',style='Primary.TButton',command=full_sync).pack(fill='x',before=actions,pady=8)
+    ttk.Button(data_panel,text='Άντληση Παραστατικών μήνα + PDF',style='Primary.TButton',command=full_sync).pack(fill='x',before=controls,pady=(0,8))
+    ttk.Button(controls,text='1. Εύρεση παραστατικών',command=fetch).pack(side='left')
     def pdf(recovery=False,camoufox=False):
-        if owner.busy:return
+        if owner.busy or owner.rpa_panel.running:return
         selected=results.selection()
         if camoufox and not selected:
             messagebox.showinfo('Ανάκτηση PDF','Επίλεξε τα εκκρεμή παραστατικά που θέλεις να ανακτήσεις.',parent=win);return
@@ -196,8 +205,10 @@ def open_settings(owner,document=None):
     bottom=ttk.Frame(data_panel);bottom.pack(side='bottom',fill='x',pady=8)
     def open_link():
         chosen=results.selection()
+        if not chosen:messagebox.showinfo('Παραστατικό','Επίλεξε εγγραφή από τη λίστα.',parent=win);return
         if chosen:
             url=records[chosen[0]]['item'].get('pdf_url')
+            if not url:return view_pdf()
             if url:
                 from urllib.parse import urlsplit
                 try:
@@ -215,8 +226,9 @@ def open_settings(owner,document=None):
         open_saved_pdf(owner,artifact['path'],artifact['sha256'])
     results.bind('<Double-1>',lambda _:view_pdf());results.bind('<Return>',lambda _:view_pdf())
     ttk.Button(bottom,text='Προβολή αποθηκευμένου PDF',command=view_pdf).pack(side='left',padx=(0,8))
-    ttk.Button(bottom,text='Άνοιγμα συνδέσμου',command=open_link).pack(side='left')
+    ttk.Button(bottom,text='Άνοιγμα Παραστατικού',command=open_link).pack(side='left')
     ttk.Button(bottom,text='Ρυθμίσεις λήψης PDF',command=lambda:owner.open_settings('pdf')).pack(side='right')
+    results.master.pack_forget();results.master.pack(fill='both',expand=True)
     def notifications_poll():
         if not win.winfo_exists() or owner._closing:return
         try:
@@ -228,7 +240,10 @@ def open_settings(owner,document=None):
     stored=owner.erp.db.execute('SELECT environment FROM aade_settings WHERE company_id=?',(owner.company,)).fetchone()
     if stored:environment.set('Παραγωγικό' if stored[0]=='production' else 'Δοκιμαστικό')
     if document is not None:
-        row,_=owner.erp.detail(owner.company,document);from_date.set(row['issue_date']);to_date.set(row['issue_date'])
+        row,_=owner.erp.detail(owner.company,document);chosen=date.fromisoformat(row['issue_date']);year.set(str(chosen.year));month.set(MONTHS[chosen.month-1])
     load_options();refresh();notifications_poll()
-    win.period_vars=(from_date,to_date);win.environment_var=environment;win.kind_var=kind;win.refresh_records=refresh;win.records_tree=results;win.fetch_aade=fetch;win.sync_expenses=full_sync
+    if acquire:notebook.select(data_panel)
+    kind_box.bind('<<ComboboxSelected>>',lambda _:refresh())
+    year_box.bind('<<ComboboxSelected>>',lambda _:refresh());month_box.bind('<<ComboboxSelected>>',lambda _:refresh())
+    win.year_var=year;win.month_var=month;win.selected_period=selected_period;win.environment_var=environment;win.kind_var=kind;win.refresh_records=refresh;win.records_tree=results;win.fetch_aade=fetch;win.sync_expenses=full_sync
     return win

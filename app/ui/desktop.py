@@ -110,9 +110,10 @@ class Desktop:
         header.pack(fill='x')
         self.import_button = ttk.Button(header,text='+  Εισαγωγή Excel',style='Primary.TButton',command=self.choose_excel)
         self.import_button.pack(side='right',padx=(8,0))
+        self.acquire_button=ttk.Button(header,text='Άντληση Παραστατικών',style='Primary.TButton',command=self.open_acquisition)
+        self.acquire_button.pack(side='right',padx=(8,0))
         ttk.Button(header,text='Ρυθμίσεις',command=self.open_settings).pack(side='right',padx=6)
         ttk.Button(header,text='ΑΑΔΕ / myDATA',command=self.open_aade).pack(side='right')
-        ttk.Button(header,text='Αντισυμβαλλόμενοι',command=self.open_counterparties).pack(side='right',padx=8)
         ttk.Label(header,text='Mini ERP',style='Title.TLabel').pack(anchor='w')
         self.company_caption=tk.StringVar(value=f"{company['name']}  ·  Προετοιμασία παραστατικών για EBS")
         ttk.Label(header,textvariable=self.company_caption,style='Subtitle.TLabel').pack(anchor='w',pady=(3,0))
@@ -128,6 +129,8 @@ class Desktop:
         self.reviews_tab = ttk.Frame(self.notebook,padding=14)
         self.notebook.add(self.documents_tab,text='Παραστατικά → EBS')
         self.notebook.add(self.reviews_tab,text='Έλεγχοι εισαγωγής')
+        self.suppliers_tab=ttk.Frame(self.notebook,padding=14)
+        self.notebook.add(self.suppliers_tab,text='Προμηθευτές')
         filters = ttk.Frame(self.documents_tab)
         filters.pack(fill='x',pady=(0,12))
         ttk.Label(filters,text='Αναζήτηση ΑΦΜ, επωνυμίας, παραστατικού ή MARK',style='Subtitle.TLabel').pack(anchor='w',pady=(0,5))
@@ -177,13 +180,15 @@ class Desktop:
         self.tree.master.pack(fill='both',expand=True)
         from app.ui.rpa_panel import RPAPanel
         self.rpa_panel=RPAPanel(self,self.rpa_tab,table)
+        from app.ui.suppliers import Suppliers
+        self.suppliers=Suppliers(self,self.suppliers_tab)
         footer = ttk.Frame(root,padding=(24,12,24,12))
         footer.pack(side='bottom',fill='x')
         self.notebook.pack_forget()
         self.notebook.pack(fill='both',expand=True,padx=24)
         self.progress = ttk.Progressbar(footer,mode='indeterminate',length=110)
         ttk.Label(footer,textvariable=self.status,style='Subtitle.TLabel').pack(anchor='w')
-        ttk.Label(footer,text='Μία εισαγωγή Excel · Έλεγχος λογαριασμών · Καταχώριση EBS · Ctrl+Shift+F9 παύση / F10 συνέχεια / F12 διακοπή',style='Subtitle.TLabel').pack(anchor='w',pady=(3,0))
+        ttk.Label(footer,text='Άντληση μήνα ή Excel · Προμηθευτές / λογαριασμοί · Καταχώριση EBS · Ctrl+Shift+F9 παύση / F10 συνέχεια / F12 διακοπή',style='Subtitle.TLabel').pack(anchor='w',pady=(3,0))
         root.protocol('WM_DELETE_WINDOW',self.close)
         root.bind('<Control-f>',lambda _:(entry.focus_set(),entry.select_range(0,'end')))
         self.refresh()
@@ -197,12 +202,14 @@ class Desktop:
     def _sync_import_button(self):
         if self._closing:
             return
-        self.import_button.state(['disabled'] if self.busy or self._has_preview() else ['!disabled'])
+        self.import_button.state(['disabled'] if self.busy or self.rpa_panel.running or self._has_preview() else ['!disabled'])
+        self.acquire_button.state(['disabled'] if self.busy or self.rpa_panel.running else ['!disabled'])
+        self.rpa_panel.refresh()
 
     def close(self):
         if self._closing:
             return
-        if self.busy:
+        if self.busy or self.rpa_panel.running:
             messagebox.showinfo('Εργασία σε εξέλιξη','Περίμενε να ολοκληρωθεί η τρέχουσα εργασία.',parent=self.root)
             return
         self._dismiss_preview()
@@ -283,7 +290,7 @@ class Desktop:
             row['reference'] = reference(row)
             row['ebs_state'] = EBS_LABELS.get(row['ebs_state'],row['ebs_state'])
             row['aade_state'] = {'not_checked':'Δεν ελέγχθηκε','matched':'Συμφωνεί','different':'Διαφορά','cancelled_at_aade':'Αναφορά ακύρωσης'}.get(row['aade_state'],row['aade_state'])
-            row['preparation_state'] = 'Εγκεκριμένο' if row.get('prepared_at') else 'Πρόταση καρτέλας' if row.get('suggested_account') else 'Χρειάζεται λογαριασμό'
+            row['preparation_state'] = 'Εκδοθέν · εκτός εξόδων' if row['direction']=='outgoing' else 'Εγκεκριμένο' if row.get('prepared_at') else 'Πρόταση καρτέλας' if row.get('suggested_account') else 'Χρειάζεται λογαριασμό'
             if not row.get('prepared_at') and row.get('suggested_account'):
                 row['nature_group']=row['suggested_group'];row['account_code']=row['suggested_account']
         key,reverse = self._sort
@@ -304,6 +311,7 @@ class Desktop:
         for job in jobs:
             report = job['report']
             self.review_tree.insert('','end',iid=str(job['id']),values=(job['created_at'],job['filename'],report.get('inserted',0),report.get('duplicates',0),len(report.get('rejected',[])),len(report.get('warnings',[]))))
+        self.suppliers.refresh();self.rpa_panel.refresh()
         if not self.busy:
             self.status.set('Τα παραστατικά και οι αναφορές έχουν φορτωθεί από τη βάση.')
 
@@ -558,6 +566,11 @@ class Desktop:
     def open_settings(self,section=None):
         from app.ui.settings import open_settings
         return open_settings(self,section)
+
+    def open_acquisition(self):
+        if self.rpa_panel.running:return
+        from app.ui.aade_dialog import open_settings
+        return open_settings(self,acquire=True)
 
     def open_aade(self,document=None):
         from app.ui.aade_dialog import open_settings

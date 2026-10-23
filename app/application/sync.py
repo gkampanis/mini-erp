@@ -46,7 +46,7 @@ class Sync:
             self.erp.repository.audit(company,'expense_book_received',None,dict(environment=environment,date_from=start,date_to=end,rows=len(rows),xml_sha256=hashes))
         return dict(rows=len(rows),count=sum(int(r['count']) for r in rows))
 
-    def run(self,company,environment,start,end,represented=False,import_incoming=True,download=True,book=True,cancel=None,client=None,destination=None,marks=None,notice=lambda _:None):
+    def run(self,company,environment,start,end,represented=False,import_incoming=True,download=True,book=True,cancel=None,client=None,destination=None,marks=None,notice=lambda _:None,methods=None):
         cancel=cancel or threading.Event();service=MyData(self.erp);result={}
         owner=self.db.execute('SELECT vat FROM companies WHERE id=?',(company,)).fetchone()
         if owner is None or owner['vat']=='000000000':raise ValueError('Όρισε το πραγματικό ΑΦΜ εταιρείας πριν την άντληση ΑΑΔΕ')
@@ -57,15 +57,29 @@ class Sync:
             notice('Άντληση συνοπτικού βιβλίου εξόδων…')
             try:result['book']=self.expense_book(company,environment,start,end,represented,client,cancel)
             except (ValueError,RuntimeError) as exc:result['book_error']=str(exc)
-        notice('Άντληση αναλυτικών ληφθέντων και αντιστοίχιση MARK…')
-        result['received']=service.fetch(company,start,end,environment,represented=represented,client=client,cancel=cancel)
-        if cancel.is_set():return dict(result,cancelled=True)
-        if import_incoming:result['import']=service.import_incoming(company,environment,start,end,confirmed=True)
+        methods=methods or ('RequestDocs',)
+        if not methods or any(m not in ('RequestDocs','RequestTransmittedDocs') for m in methods):raise ValueError('Μη επιτρεπόμενη μέθοδος άντλησης')
+        imports=dict(inserted=0,duplicates=0,rejected=[],warnings=[]);sync_ids=[]
+        for method in dict.fromkeys(methods):
+            if cancel.is_set():return dict(result,cancelled=True,**{'import':imports})
+            direction='incoming' if method=='RequestDocs' else 'outgoing'
+            notice('Άντληση '+('ληφθέντων' if direction=='incoming' else 'εκδοθέντων')+' και αντιστοίχιση MARK…')
+            try:
+                fetched=service.fetch(company,start,end,environment,represented=represented,client=client,cancel=cancel,method=method)
+                result['received' if direction=='incoming' else 'issued']=fetched;sync_ids.append(fetched['sync'])
+                if import_incoming:
+                    imported=service.import_documents(company,environment,start,end,confirmed=True,direction=direction)
+                    for key in imports:
+                        if isinstance(imports[key],list):imports[key].extend(imported.get(key,[]))
+                        else:imports[key]+=imported.get(key,0)
+            except (ValueError,RuntimeError) as exc:result.setdefault('errors',[]).append(dict(method=method,error=str(exc)))
+        result['import']=imports
         service.reconcile_stored(company,environment)
-        if download:
+        if download and sync_ids and not cancel.is_set():
             from app.application.provider_pdf import run
+            eligible=[r['mark'] for r in service.records(company,environment) if r['last_sync'] in sync_ids and (marks is None or r['mark'] in {str(m) for m in marks})]
             notice('Λήψη και σύνδεση PDF παρόχων…')
-            try:result['pdf']=run(self.erp,company,environment,destination or self.erp.directory/'pdf-archive',cancel,marks=marks,dates=(start,end),notice=notice)
+            try:result['pdf']=run(self.erp,company,environment,destination or self.erp.directory/'pdf-archive',cancel,marks=eligible,dates=(start,end),notice=notice)
             except (ValueError,RuntimeError,OSError) as exc:result['pdf_error']=str(exc)
         return result
 
