@@ -1,0 +1,16 @@
+{
+  "documents": 2500,
+  "suppliers": 300,
+  "workspace": {
+    "seconds": 0.0169,
+    "queries": 8,
+    "rows": 2500
+  },
+  "suppliers_list": {
+    "seconds": 0.0169,
+    "queries": 7,
+    "rows": 300
+  },
+  "desktop_initial_seconds": 0.1011,
+  "desktop_all_2500_refresh_seconds": 0.0795
+}

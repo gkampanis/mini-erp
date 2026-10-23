@@ -1,3 +1,11 @@
+# Νεότερη δοκιμαστική έκδοση — Συμφωνία Excel/ODS EBS
+
+[Λήψη ZIP](MiniERP-EBS-Reconciliation-20261023.zip) · [Οδηγίες](MiniERP-EBS-Reconciliation-20261023-guide.md) · [Κανόνες / έρευνα](MiniERP-EBS-Reconciliation-20261023-rules.md) · [Έλεγχοι](MiniERP-EBS-Reconciliation-20261023.verification.json) · [SHA-256](MiniERP-EBS-Reconciliation-20261023.zip.sha256)
+
+ΑΑΔΕ → Συμφωνία EBS → λογαριασμοί → έλεγχος χωρίς καταχώριση → καταχώριση μη καταχωρισμένων. Σύγκριση ΑΦΜ, αναγνωριστικού, ημερομηνίας, καθαρής, ΦΠΑ και συνόλου με ελεγχόμενη ισοδυναμία μορφής. Ιστορικό και έλεγχος πριν RPA. Αυτόματη αναγνώριση 53 τύπων ΑΑΔΕ, απλούστερο PDF UI, διατήρηση μαζικής λήψης.
+
+129 backend + 33 GUI checks και επανάληψη μέσα στο ZIP: επιτυχία. Εκκρεμεί πραγματικό matching με τη νέα εξαγωγή που θα περιλαμβάνει ΑΦΜ. Windows/EBS/παραγωγική ΑΑΔΕ δεν εκτελέστηκαν εδώ. Η εξαγωγή πρέπει να είναι πρόσφατη: δεν υπάρχει live EBS API.
+
 # Νεότερη έκδοση — Ταχύτερη λίστα, μήνας και αυτόματα έξοδα / PDF
 
 [Λήψη ZIP](MiniERP-Monthly-Flow-Fix-20261023.zip) · [Οδηγίες](MiniERP-Monthly-Flow-Fix-20261023-guide.md) · [Έλεγχοι](MiniERP-Monthly-Flow-Fix-20261023.verification.json) · [SHA-256](MiniERP-Monthly-Flow-Fix-20261023.zip.sha256)
