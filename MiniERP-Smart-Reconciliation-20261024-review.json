@@ -1,0 +1,127 @@
+{
+  "source_commit": "103fb520a9831926d65424c313bf8c2a0cfd2cd8",
+  "actual_ebs_reader_comparison": {
+    "rows": 148,
+    "valid_rows": 140,
+    "rows_with_issues": 8,
+    "compared_fields": 888,
+    "mismatches": [],
+    "existing_reader_seconds": 0.010511,
+    "calamine_reader_seconds": 0.001598,
+    "formula_cells": 0,
+    "output": "Readability cross-check only; no document values or identifiers logged",
+    "production_database": "NOT_ACCESSED"
+  },
+  "actual_ebs_full_preview": {
+    "scope": "Real EBS source validation only; no AADE documents supplied or fabricated",
+    "rows": 148,
+    "rows_with_issues": 8,
+    "can_save_full_reconciliation": true,
+    "source_unchanged": true,
+    "production_database": "NOT_ACCESSED",
+    "customer_rows_saved": false
+  },
+  "synthetic_before_after": {
+    "scope": "Synthetic decision matrix; not production AADE reconciliation",
+    "new": {
+      "documents": 13,
+      "registered": 2,
+      "exact": 2,
+      "normalized": 3,
+      "needs_review": 7,
+      "pending": 1,
+      "seconds": 0.000682
+    },
+    "old": {
+      "documents": 13,
+      "registered": 7,
+      "exact": 0,
+      "normalized": 0,
+      "needs_review": 5,
+      "pending": 1,
+      "seconds": 0.000547
+    },
+    "previous_auto_matches_now_protected": 5,
+    "strict_failures_previously_auto_matched": 3,
+    "volume_new": {
+      "documents": 10000,
+      "registered": 2500,
+      "exact": 2500,
+      "normalized": 5000,
+      "needs_review": 0,
+      "pending": 2500,
+      "seconds": 0.248722
+    },
+    "volume_old": {
+      "documents": 10000,
+      "registered": 5000,
+      "exact": 0,
+      "normalized": 0,
+      "needs_review": 2500,
+      "pending": 2500,
+      "seconds": 0.160504
+    }
+  },
+  "delivery": {
+    "status": "PASSED",
+    "sha256": "107133dc31002913fb7aea4e4f5f7403d9ce82394c14c6e5bfcaca1d5d3cc155",
+    "checks": {
+      "static_checks": "PASSED",
+      "desktop_display": "PASSED",
+      "source_launcher_python": "PASSED",
+      "source_tests": {
+        "tests": 174,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "source_gui": {
+        "tests": 42,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "source_gui_smoke": "PASSED",
+      "package_build": "PASSED",
+      "archive_integrity": "PASSED",
+      "package_launcher_python": "PASSED",
+      "package_tests": {
+        "tests": 174,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "package_gui": {
+        "tests": 42,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "package_gui_smoke": "PASSED",
+      "demo_initialization": "PASSED",
+      "demo_readback": "PASSED"
+    }
+  },
+  "windows_dependencies": {
+    "wheels_available": [
+      "CPython 3.12 x64",
+      "CPython 3.13 x64"
+    ],
+    "native_execution": "NOT_RUN",
+    "final_windows_exe": "NOT_BUILT_OR_EXECUTED"
+  },
+  "production_ebs": "NOT_RUN",
+  "production_aade": "NOT_RUN"
+}
