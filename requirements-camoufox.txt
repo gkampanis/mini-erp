@@ -1,0 +1,4 @@
+# Installed only in Optional/Camoufox, separate from ERP dependencies.
+camoufox==0.5.8
+playwright==1.62.0
+pypdf==6.10.0

@@ -108,6 +108,7 @@ class Desktop:
         header.pack(fill='x')
         self.import_button = ttk.Button(header,text='+  Εισαγωγή Excel',style='Primary.TButton',command=self.choose_excel)
         self.import_button.pack(side='right',padx=(8,0))
+        ttk.Button(header,text='Ρυθμίσεις',command=self.open_settings).pack(side='right',padx=6)
         ttk.Button(header,text='ΑΑΔΕ / myDATA',command=self.open_aade).pack(side='right')
         ttk.Button(header,text='Αντισυμβαλλόμενοι',command=self.open_counterparties).pack(side='right',padx=8)
         ttk.Label(header,text='Mini ERP',style='Title.TLabel').pack(anchor='w')
@@ -220,6 +221,8 @@ class Desktop:
             try:
                 self.work.put((callback,function(),None))
             except Exception as exc:
+                from app.infrastructure.crashlog import record
+                record(self.directory,exc,'worker')
                 self.work.put((callback,None,str(exc)))
         threading.Thread(target=work,daemon=True).start()
         return True
@@ -240,7 +243,11 @@ class Desktop:
                 self.root.deiconify()
                 messagebox.showerror('Η εργασία δεν ολοκληρώθηκε',error,parent=self.root)
             else:
-                callback(result)
+                try:callback(result)
+                except Exception as exc:
+                    from app.infrastructure.crashlog import record
+                    record(self.directory,exc,'callback')
+                    messagebox.showerror('Η εργασία δεν ολοκληρώθηκε','Αποθηκεύτηκε διαγνωστικό στις Ρυθμίσεις → Υποστήριξη.',parent=self.root)
             self._sync_import_button()
         self._poll_after = self.root.after(80,self.poll)
 
@@ -545,6 +552,10 @@ class Desktop:
         read_text(history,timeline or 'Δεν υπάρχουν ενέργειες.')
         from app.ui.pdf_pane import PDFPane
         win.pdf_pane=PDFPane(self,right,document_id,win)
+
+    def open_settings(self,section=None):
+        from app.ui.settings import open_settings
+        return open_settings(self,section)
 
     def open_aade(self,document=None):
         from app.ui.aade_dialog import open_settings

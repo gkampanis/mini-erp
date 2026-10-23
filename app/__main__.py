@@ -19,6 +19,12 @@ def main():
         from app.ui.dpi import enable
         enable()
         root = tk.Tk()
+        def callback_error(kind,error,tb):
+            from app.infrastructure.crashlog import record
+            from tkinter import messagebox
+            record(args.data_dir,error.with_traceback(tb),'callback')
+            messagebox.showerror('Σφάλμα εφαρμογής','Αποθηκεύτηκε διαγνωστικό. Ρυθμίσεις → Υποστήριξη → Αποθήκευση crashlog.',parent=root)
+        root.report_callback_exception=callback_error
         Desktop(root,args.data_dir)
         try:
             root.mainloop()

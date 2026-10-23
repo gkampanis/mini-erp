@@ -22,7 +22,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIRS = {'app':{'.py'},'tests':{'.py'},'scripts':{'.py'},'migrations':{'.sql'},'docs':{'.md','.png'}}
-SOURCE_FILES = ('START_DEMO.cmd','ANOIGMA_MINI_ERP.bat','START_DEMO.py','TRY_DEMO.md','README.md','NOTICE.md','AGENTS.md','requirements-pdf.txt','requirements-rpa.txt','requirements-browser.txt')
+SOURCE_FILES = ('START_DEMO.cmd','ANOIGMA_MINI_ERP.bat','START_DEMO.py','TRY_DEMO.md','README.md','NOTICE.md','AGENTS.md','requirements-pdf.txt','requirements-rpa.txt','requirements-browser.txt','requirements-camoufox.txt','Optional/Camoufox/README.md')
 
 
 class CheckFailed(RuntimeError):
@@ -105,7 +105,7 @@ def inspect_archive(path):
             if len(parts)==2:
                 allowed = parts[1] in allowed_root
             else:
-                allowed = (parts[1] in SOURCE_DIRS and suffix in SOURCE_DIRS[parts[1]]) or (parts[1]=='SampleExcel' and parts[-1] in ('separate.xlsx','combined.xlsx') and len(parts)==3)
+                allowed = item.filename=='MiniERP-Demo/Optional/Camoufox/README.md' or (parts[1] in SOURCE_DIRS and suffix in SOURCE_DIRS[parts[1]]) or (parts[1]=='SampleExcel' and parts[-1] in ('separate.xlsx','combined.xlsx') and len(parts)==3)
             if not allowed:raise CheckFailed('Archive entry outside the delivery allowlist')
         if archive.testzip() is not None:raise CheckFailed('Archive CRC validation failed')
         for sample in ('separate.xlsx','combined.xlsx'):
@@ -190,7 +190,7 @@ def main(argv=None):
     report = dict(run_id=run_id,status='FAILED',platform=platform.platform(),python=sys.version.split()[0],
                   artifact=None,checks=gate.checks,windows_desktop='NOT_RUN' if os.name!='nt' else 'REQUIRED',
                   windows_launcher='NOT_RUN',ebs_live='NOT_RUN',pdf_download='SYNTHETIC_TESTS_ONLY',
-                  scope='Synthetic source demo only; not a certified Windows EXE or EBS integration')
+                  camoufox_live='NOT_RUN',scope='Synthetic source demo only; not a certified Windows EXE or EBS integration')
     report_path = run_dir/'report.json'
     try:
         if args.require_windows and os.name!='nt':raise CheckFailed('Windows required by target, current host is not Windows')

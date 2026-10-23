@@ -12,7 +12,6 @@ from app.application.service import ERP
 from app.application.mydata import MyData
 from app.domain.validation import iso_date
 from app.infrastructure.aade.credentials import OFFICIAL_DOCS,VaultUnavailable
-from app.infrastructure.optional_packages import install
 
 
 def open_settings(owner,document=None):
@@ -158,12 +157,19 @@ def open_settings(owner,document=None):
     ttk.Button(panel,text='Αποθήκευση & άντληση εξόδων + PDF',style='Primary.TButton',command=full_sync).pack(fill='x',before=actions,pady=8)
     ttk.Button(data_panel,text='Άντληση εξόδων στη λίστα + PDF (χωρίς Excel)',style='Primary.TButton',command=full_sync).pack(fill='x',before=controls,pady=(0,8))
     ttk.Button(controls,text='1. Εύρεση παραστατικών',style='Primary.TButton',command=fetch).pack(side='left')
-    def pdf(recovery=False):
+    def pdf(recovery=False,camoufox=False):
         if owner.busy:return
-        selected=results.selection();marks=[records[x]['mark'] for x in selected] if selected else [r['mark'] for r in records.values()]
+        selected=results.selection()
+        if camoufox and not selected:
+            messagebox.showinfo('Ανάκτηση PDF','Επίλεξε τα εκκρεμή παραστατικά που θέλεις να ανακτήσεις.',parent=win);return
+        marks=[records[x]['mark'] for x in selected] if selected else [r['mark'] for r in records.values()]
+        if camoufox:
+            from app.application.provider_pdf import ProviderDatabase
+            pending={str(r['mark']) for r in ProviderDatabase(owner.erp,owner.company,choices[environment.get()]).failed_download_candidates(str(owner.company))}
+            marks=[mark for mark in marks if str(mark) in pending]
         if not marks:messagebox.showinfo('Παραστατικά','Κάνε πρώτα εύρεση παραστατικών ΑΑΔΕ.',parent=win);return
         from app.infrastructure.providers.local_files import desktop_directory
-        try:destination=desktop_directory()
+        try:destination=owner.directory/'pdf-archive' if camoufox else desktop_directory()
         except Exception:
             path=filedialog.askdirectory(parent=win,title='Φάκελος αρχειοθέτησης PDF')
             if not path:return
@@ -173,14 +179,21 @@ def open_settings(owner,document=None):
         def execute():
             from app.application.provider_pdf import run
             service=ERP(owner.directory)
-            try:return run(service,owner.company,env,destination,cancel,marks,recovery,notice=lambda msg:notifications.put(msg),observer=lambda p:notifications.put(p.text()))
+            try:
+                if camoufox:
+                    from app.application.camoufox_pdf import run as recover_camoufox
+                    return recover_camoufox(service,owner.company,env,marks,cancel)
+                return run(service,owner.company,env,destination,cancel,marks,recovery,notice=lambda msg:notifications.put(msg),observer=lambda p:notifications.put(p.text()))
             finally:service.close()
         def done(result):
             if not win.winfo_exists():return
+            if result.get('incomplete_summary'):
+                output.set('Η ανάκτηση διακόπηκε. Τα PDF που είχαν ήδη αποθηκευτεί διατηρούνται.');refresh();owner.refresh();return
             output.set(f"PDF: {result['saved']} αποθηκευμένα ({result['printed']} από εκτύπωση), {result['pending']} εκκρεμή, {result['skipped']} υπήρχαν ήδη.");refresh();owner.refresh()
         owner.run_worker(execute,done)
     ttk.Button(controls,text='2. Λήψη PDF',command=pdf).pack(side='left',padx=6)
     ttk.Button(controls,text='Ανάκτηση εκκρεμών',command=lambda:pdf(True)).pack(side='left')
+    ttk.Button(data_panel,text='Ανάκτηση εκκρεμών με Camoufox (προαιρετικό)',command=lambda:pdf(True,True)).pack(fill='x',before=results.master,pady=(0,6))
     ttk.Button(controls,text='Διακοπή',command=cancel.set).pack(side='right')
     bottom=ttk.Frame(data_panel);bottom.pack(side='bottom',fill='x',pady=8)
     def open_link():
@@ -205,7 +218,7 @@ def open_settings(owner,document=None):
     results.bind('<Double-1>',lambda _:view_pdf());results.bind('<Return>',lambda _:view_pdf())
     ttk.Button(bottom,text='Προβολή αποθηκευμένου PDF',command=view_pdf).pack(side='left',padx=(0,8))
     ttk.Button(bottom,text='Άνοιγμα συνδέσμου',command=open_link).pack(side='left')
-    ttk.Button(bottom,text='Εγκατάσταση browser PDF',command=lambda:owner.run_worker(lambda:install('browser'),lambda _:output.set('Ο browser εγκαταστάθηκε.')) if not owner.busy and messagebox.askyesno('Browser','Να εγκατασταθούν Playwright/Chromium σε χωριστό φάκελο MiniERP;',parent=win) else None).pack(side='right')
+    ttk.Button(bottom,text='Ρυθμίσεις λήψης PDF',command=lambda:owner.open_settings('pdf')).pack(side='right')
     def notifications_poll():
         if not win.winfo_exists() or owner._closing:return
         try:

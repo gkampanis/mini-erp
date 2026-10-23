@@ -44,3 +44,11 @@ File Organizer δεν αποδίδεται αυτομάτως σε όλο το m
 ξεχωριστό LICENSE στο συγκεκριμένο root. Η επαναχρησιμοποίηση γίνεται στο
 έργο του ίδιου χρήστη με την εξουσιοδότησή του. Δεν περιλαμβάνονται δεδομένα,
 credentials, PDFs πελατών ή profiles. Βλέπε docs/CONNECTED_WORKFLOW.md.
+
+## Προαιρετικό Camoufox
+
+Η προαιρετική δυνατότητα καλεί το επίσημο Python package Camoufox 0.5.8 (MIT)
+σε χωριστή εγκατάσταση και τον επίσημο browser v156.0.1-beta.36 (root MPL-2.0
+και άδειες επιμέρους συστατικών). Τα τρίτα binaries/source δεν περιλαμβάνονται
+στο ZIP Mini ERP. Η εγκατάσταση διατηρεί τα περιλαμβανόμενα license notices.
+https://github.com/daijro/camoufox — https://pypi.org/project/camoufox/0.5.8/

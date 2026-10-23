@@ -3,7 +3,6 @@ import tkinter as tk
 from tkinter import ttk,filedialog,messagebox,simpledialog
 from app.application.service import ERP
 from app.infrastructure.pdf_archive import KINDS,render,renderer_available
-from app.infrastructure.optional_packages import install
 
 
 class PDFPane:
@@ -146,11 +145,7 @@ class PDFPane:
         self.selected=result['id'];self.owner.refresh();self.refresh()
 
     def setup_renderer(self):
-        if self.owner.busy:return
-        if not messagebox.askyesno('Προβολή PDF','Θα ληφθούν τα pypdfium2 και Pillow από το PyPI σε ξεχωριστό φάκελο MiniERP. Δεν θα αντικατασταθεί η Python ή το EBS. Συνέχεια;',parent=self.window):return
-        def done(_):
-            if self.alive():self.setup.pack_forget();self.show()
-        self.owner.run_worker(lambda:install('pdf'),done)
+        return self.owner.open_settings('pdf')
 
 
 def open_saved_pdf(owner,path,digest):

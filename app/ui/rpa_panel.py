@@ -6,7 +6,6 @@ from app.application.service import ERP
 from app.application.rpa import RPA
 from app.application.workspace import Workspace
 from app.infrastructure.ebs_adapter.adapter import load_mapper
-from app.infrastructure.optional_packages import install
 
 LABELS={'purchase_excluded':'Αγορές · εκτός EBS','not_sent':'Δεν στάλθηκε','queued':'Σε αναμονή','started':'Συμπλήρωση','save_pending':'Save σε εξέλιξη','simulated':'Προσομοίωση','filled_no_save':'Συμπληρώθηκε χωρίς Save','uncertain':'Έλεγχος στο EBS','failed':'Απέτυχε','save_invoked':'Στάλθηκε Save · έλεγχος','ui_saved_review':'Save → νέο ΤΕΔ · έλεγχος','reviewed_by_operator':'Ελέγχθηκε από χειριστή'}
 
@@ -142,7 +141,7 @@ class RPAPanel:
             try:self.workspace.save_profile(self.owner.company,profile)
             except ValueError as exc:messagebox.showerror('Ρυθμίσεις',str(exc),parent=win);return
             win.destroy();self.state.set('Οι θέσεις αποθηκεύτηκαν. Επόμενο: δοκιμή μίας εγγραφής και έλεγχος στο EBS.')
-        ttk.Button(body,text='Εγκατάσταση RPA adapter',command=lambda:self.owner.run_worker(lambda:install('rpa'),lambda _:status.set('Ο adapter εγκαταστάθηκε.')) if messagebox.askyesno('Adapter','Να εγκατασταθεί PyAutoGUI μόνο για MiniERP;',parent=win) else None).pack(anchor='w',pady=8)
+        ttk.Button(body,text='Εγκατάσταση RPA adapter · Ρυθμίσεις',command=self.owner.open_settings).pack(anchor='w',pady=8)
         ttk.Button(body,text='Αποθήκευση ρυθμίσεων',style='Primary.TButton',command=save).pack(side='bottom',anchor='e')
         return win
 

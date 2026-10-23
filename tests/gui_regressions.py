@@ -365,6 +365,27 @@ class DesktopRegressions(unittest.TestCase):
         self.assertEqual(len(pane.files.get_children()),1)
         self.assertTrue(pane.canvas.find_all())
 
+    def test_settings_group_components_and_export_private_crashlog(self):
+        from app.infrastructure.crashlog import record
+        try:raise RuntimeError('private supplier api-key=DO-NOT-EXPORT')
+        except RuntimeError as error:record(self.app.directory,error,'worker')
+        win=self.app.open_settings();self.root.update()
+        tabs=win.settings_tabs
+        self.assertEqual([tabs.tab(t,'text') for t in tabs.tabs()],['Συνδέσεις','PDF και λήψεις','Υποστήριξη'])
+        tabs.select(1);self.root.update()
+        self.assertTrue(self.button(win,'Εγκατάσταση Camoufox (προαιρετικό)').winfo_viewable())
+        target=self.folder/'support.txt';tabs.select(2);self.root.update()
+        with patch('app.ui.settings.filedialog.asksaveasfilename',return_value=str(target)),patch('app.ui.settings.messagebox.showinfo'):
+            self.button(win,'Αποθήκευση crashlog για αποστολή').invoke()
+        content=target.read_text();self.assertIn('RuntimeError',content);self.assertNotIn('DO-NOT-EXPORT',content)
+        self.assertEqual(self.app.erp.db.execute('SELECT count(*) FROM documents').fetchone()[0],0)
+
+    def test_camoufox_requires_explicit_selection_before_any_recovery(self):
+        win=self.app.open_aade()
+        with patch('app.ui.aade_dialog.messagebox.showinfo') as info,patch('app.application.camoufox_pdf.run') as recover:
+            self.button(win,'Ανάκτηση εκκρεμών με Camoufox (προαιρετικό)').invoke()
+            info.assert_called_once();recover.assert_not_called()
+
     def test_aade_settings_mask_and_secure_save_with_synthetic_vault(self):
         from tests.test_workspace import MemoryVault
         self.app.erp.credential_store=MemoryVault()
