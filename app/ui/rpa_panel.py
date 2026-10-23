@@ -20,18 +20,21 @@ class RPAPanel:
         self.mapping=None;self.hotkeys=set();self.tree=owner.tree
         row=ttk.Frame(parent);row.pack(fill='x',pady=(4,6))
         self.buttons['accounts']=ttk.Button(row,text='Έλεγχος λογαριασμών',command=self.accounts);self.buttons['accounts'].pack(side='left')
-        self.buttons['pilot']=ttk.Button(row,text='Δοκιμή 1 εγγραφής',command=self.pilot);self.buttons['pilot'].pack(side='left',padx=6)
-        self.buttons['post']=ttk.Button(row,text='Καταχώριση μη καταχωρισμένων',style='Primary.TButton',command=self.post);self.buttons['post'].pack(side='left')
+        self.buttons['simulation']=ttk.Button(row,text='Έλεγχος χωρίς καταχώριση',command=self.simulate);self.buttons['simulation'].pack(side='left',padx=6)
+        self.buttons['post']=ttk.Button(row,text='Καταχώριση στο EBS',style='Primary.TButton',command=self.post);self.buttons['post'].pack(side='left')
         options=ttk.Menubutton(row,text='Ρυθμίσεις & ιστορικό')
         self.options_menu=tk.Menu(options,tearoff=False)
         self.options_menu.add_command(label='Ρυθμίσεις EBS',command=self.settings)
         self.options_menu.add_command(label='Προβολή ουράς',command=self.preview)
         self.options_menu.add_command(label='Ιστορικό / οπτικός έλεγχος EBS',command=self.history)
-        options.configure(menu=self.options_menu);options.pack(side='right')
-        row=ttk.Frame(parent);row.pack(fill='x')
+        self.options_menu.add_command(label='Δοκιμή 1 εγγραφής',command=self.pilot)
         self.scope=tk.StringVar(value='Εκκρεμή προς EBS')
-        ttk.Combobox(row,textvariable=self.scope,values=('Εκκρεμή προς EBS','Όλες της λίστας','Μόνο επιλεγμένες','Από επιλεγμένη και μετά'),state='readonly',width=22).pack(side='left')
-        self.buttons['simulation']=ttk.Button(row,text='Έλεγχος χωρίς καταχώριση',command=self.simulate);self.buttons['simulation'].pack(side='left',padx=6)
+        scope_menu=tk.Menu(self.options_menu,tearoff=False)
+        for scope in ('Εκκρεμή προς EBS','Όλες της λίστας','Μόνο επιλεγμένες','Από επιλεγμένη και μετά'):
+            scope_menu.add_radiobutton(label=scope,variable=self.scope,value=scope)
+        self.options_menu.add_cascade(label='Επιλογή γραμμών',menu=scope_menu)
+        options.configure(menu=self.options_menu);options.pack(side='right')
+        row=ttk.Frame(parent);self.execution_controls=row
         self.buttons['pause']=ttk.Button(row,text='Παύση',width=8,command=self.pause);self.buttons['pause'].pack(side='left')
         self.buttons['resume']=ttk.Button(row,text='Συνέχεια',width=8,command=self.start);self.buttons['resume'].pack(side='left',padx=6)
         self.buttons['stop']=ttk.Button(row,text='Διακοπή',width=8,command=self.stop);self.buttons['stop'].pack(side='left')
@@ -53,7 +56,7 @@ class RPAPanel:
         ordered=sorted(visible,key=lambda x:self.owner._documents[x]['source_record_id'])
         if self.scope.get()=='Εκκρεμή προς EBS':
             attempted={r[0] for r in self.owner.erp.db.execute("SELECT i.document_id FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.mode='fill_only' AND i.status<>'queued'",(self.owner.company,))}
-            return [d for d in ordered if d not in attempted]
+            return [d for d in ordered if d not in attempted and (not selected or d in selected)]
         if self.scope.get()=='Από επιλεγμένη και μετά':
             if not selected:raise ValueError('Επίλεξε τη γραμμή εκκίνησης στη λίστα')
             start=min(selected,key=lambda x:self.owner._documents[x]['source_record_id'])
@@ -68,12 +71,16 @@ class RPAPanel:
             state={'running':'Σε εξέλιξη','paused':'Σε παύση','stopped':'Διακόπηκε','completed':'Τέλος ουράς','queued':'Έτοιμη ουρά'}.get(meta['status'],meta['status'])
             self.state.set(f"{mode} · {state} · {p['total']} εγγραφές · Τρέχον {p['current']} · Αποτυχίες/αβέβαια {p['failed']}. "+('Καμία ενέργεια στο EBS.' if meta['mode']=='simulation' else 'Η αποθήκευση ελέγχεται οπτικά στο EBS.'))
         blocked=any(i['status'] in ('started','save_pending','uncertain','filled_no_save') for i in items)
-        for key in ('accounts','pilot','post','simulation'):self.buttons[key].state(['disabled'] if self.owner.busy or self.running else ['!disabled'])
+        has_rows=bool(self.owner._documents)
+        for key in ('accounts','post','simulation'):self.buttons[key].state(['disabled'] if self.owner.busy or self.running or not has_rows else ['!disabled'])
+        if meta:self.execution_controls.pack(fill='x',before=self.parent.winfo_children()[-1])
+        else:self.execution_controls.pack_forget()
         self.buttons['pause'].state(['!disabled'] if self.running and not self.pause_requested else ['disabled'])
         self.buttons['resume'].state(['!disabled'] if meta and meta['status'] in ('queued','paused') and not blocked and not self.running and not self.owner.busy else ['disabled'])
         self.buttons['stop'].state(['!disabled'] if meta and meta['status'] not in ('stopped','completed') and not self.stop_requested else ['disabled'])
         self.options_menu.entryconfigure(0,state='disabled' if self.owner.busy or self.running else 'normal')
         self.options_menu.entryconfigure(1,state='normal' if self.job is not None else 'disabled')
+        self.options_menu.entryconfigure(3,state='disabled' if self.owner.busy or self.running or not has_rows else 'normal')
         if self._preview and self._preview.winfo_exists():self.fill_preview()
 
     def preview(self):

@@ -38,7 +38,7 @@ def main():
             from app.ui.desktop import Desktop
             root=tk.Tk();start=time.perf_counter();app=Desktop(root,folder/'data');root.update()
             results['desktop_initial_seconds']=round(time.perf_counter()-start,4)
-            app.month_filter.set('Όλοι οι μήνες');app.refresh();root.update()
+            app.month_filter.set('Όλοι οι μήνες');app.state_filter.set('Όλα τα παραστατικά');app.refresh();root.update()
             start=time.perf_counter();app.refresh();root.update()
             results['desktop_all_2500_refresh_seconds']=round(time.perf_counter()-start,4)
             app.close()

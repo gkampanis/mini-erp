@@ -67,7 +67,7 @@ def open_settings(owner,document=None,acquire=False,period=None):
     def load_options(event=None):
         load();options=Sync(owner.erp).preferences(owner.company,choices[environment.get()]);represented.set(bool(options['represented']));auto_pdf.set(bool(options['auto_pdf']) if owner.erp.db.execute('SELECT 1 FROM sync_preferences WHERE company_id=? AND environment=?',(owner.company,choices[environment.get()])).fetchone() else True)
     box.bind('<<ComboboxSelected>>',lambda event:(load_options(event),refresh()))
-    ttk.Checkbutton(panel,text='Αυτόματη λήψη/εμφάνιση PDF από ΑΑΔΕ όταν ανοίγω παραστατικό',variable=auto_pdf).pack(anchor='w',pady=6)
+    ttk.Checkbutton(panel,text='Λήψη PDF μαζί με τη μαζική άντληση',variable=auto_pdf).pack(anchor='w',pady=6)
     def save():
         if owner.busy or owner.rpa_panel.running:return False
         try:owner.erp.save_mydata_credentials(owner.company,choices[environment.get()],username.get(),key.get(),confirmed=True)
@@ -86,7 +86,7 @@ def open_settings(owner,document=None,acquire=False,period=None):
     header=ttk.Frame(data_panel);header.pack(fill='x')
     ttk.Label(header,text='Έτος').pack(side='left');year_box=ttk.Combobox(header,textvariable=year,values=tuple(str(y) for y in range(2000,date.today().year+2)),state='readonly',width=7);year_box.pack(side='left',padx=6)
     ttk.Label(header,text='Μήνας').pack(side='left');month_box=ttk.Combobox(header,textvariable=month,values=MONTHS,state='readonly',width=16);month_box.pack(side='left',padx=6)
-    kind=tk.StringVar(value='Ληφθέντα' if acquire else 'Ληφθέντα και εκδοθέντα')
+    kind=tk.StringVar(value='Ληφθέντα και εκδοθέντα')
     kind_box=ttk.Combobox(header,textvariable=kind,values=('Ληφθέντα και εκδοθέντα','Ληφθέντα','Εκδοθέντα'),state='readonly',width=25);kind_box.pack(side='left',padx=6)
     cancel=threading.Event();notifications=queue.Queue()
     output=tk.StringVar(value='Άντληση εξόδων μήνα → εγγραφές στη βασική λίστα → λήψη και σύνδεση PDF. Υπάρχουσες εγγραφές Excel αντιστοιχίζονται με MARK και έλεγχο στοιχείων.')
@@ -156,7 +156,7 @@ def open_settings(owner,document=None,acquire=False,period=None):
         output.set('Άντληση βιβλίου, αναλυτικών παραστατικών και PDF…');notebook.select(data_panel)
         def execute():
             service=ERP(owner.directory,credential_store=vault)
-            try:return Sync(service).run(owner.company,env,start,end,represented=rep,cancel=cancel,notice=lambda msg:notifications.put(msg),methods=methods)
+            try:return Sync(service).run(owner.company,env,start,end,represented=rep,cancel=cancel,notice=lambda msg:notifications.put(msg),methods=methods,download=auto_pdf_value)
             finally:service.close()
         def done(result):
             if not win.winfo_exists():return
@@ -169,6 +169,7 @@ def open_settings(owner,document=None,acquire=False,period=None):
                 label=MONTHS[int(start[5:7])-1]+' '+start[:4]
                 owner.month_filter.set(label);owner._month_values[label]=start[:7];owner._period_initialized=True
             owner.refresh();refresh()
+        auto_pdf_value=auto_pdf.get()
         owner.run_worker(execute,done)
     ttk.Button(panel,text='Αποθήκευση & άντληση παραστατικών + PDF',style='Primary.TButton',command=full_sync).pack(fill='x',before=actions,pady=8)
     ttk.Button(data_panel,text='Άντληση Παραστατικών μήνα + PDF',style='Primary.TButton',command=full_sync).pack(fill='x',before=controls,pady=(0,8))

@@ -55,6 +55,7 @@ def main():
         service.close()
         root = tk.Tk()
         app = Desktop(root,folder/'data')
+        app.state_filter.set('Όλα τα παραστατικά');app.refresh()
         errors = []
         root.report_callback_exception = lambda *args:errors.append(str(args))
         try:

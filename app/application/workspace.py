@@ -27,12 +27,15 @@ class Workspace:
             if row['mode']!='simulation':latest[row['document_id']]=row['status']
         active=self.db.execute('SELECT environment FROM aade_settings WHERE company_id=?',(company,)).fetchone();environment=active[0] if active else 'production'
         sources={r['document_id']:dict(r) for r in self.db.execute('SELECT * FROM mydata_records WHERE company_id=? AND environment=? AND document_id IS NOT NULL',(company,environment))}
+        origins={r['id']:r['environment'] for r in self.db.execute("SELECT d.id,m.environment FROM documents d JOIN source_records s ON s.id=d.source_record_id JOIN mydata_syncs m ON m.id=json_extract(s.raw_json,'$._sync') AND m.company_id=d.company_id WHERE d.company_id=?",(company,))}
+        rows=[r for r in rows if r['id'] in sources or r['id'] not in origins or origins[r['id']]==environment]
         attempts={}
         for attempt in self.db.execute('SELECT mark,state FROM provider_attempts WHERE company_id=? AND environment=? ORDER BY id',(company,environment)):attempts[attempt['mark']]=attempt['state']
         reconciled={r['document_id']:r['match_status'] for r in self.db.execute("SELECT document_id,match_status FROM mydata_records WHERE company_id=? AND environment='production' AND document_id IS NOT NULL",(company,))}
         pdfs={r[0] for r in self.db.execute('SELECT DISTINCT document_id FROM attachments WHERE company_id=?',(company,))}
         accounts={r['counterparty_id']:r for r in self.db.execute('SELECT * FROM counterparty_accounts WHERE company_id=?',(company,))}
         for row in rows:
+            row['environment']=environment
             defaults=accounts.get(row['counterparty_id'])
             row['suggested_group']=defaults['preferred_group'] if defaults else None
             row['suggested_account']=(defaults['purchases_account'] if defaults['preferred_group']=='2' else defaults['expenses_account'] if defaults['preferred_group']=='6' else '') if defaults else ''
@@ -43,6 +46,9 @@ class Workspace:
             source=sources.get(row['id']);item=json.loads(source['record_json']) if source else {}
             from app.domain.invoice_types import classify
             row.update(classify(item.get('kind',''),item.get('is_delivery_note',False)))
+            row.update(issuer_vat=item.get('vat',''),receiver_vat=item.get('receiver',''),
+                       issuer_name=item.get('name',''),receiver_name=item.get('receiver_name',''),
+                       correlated_marks=item.get('correlated_marks',[]),delivery_status=item.get('delivery_status',''))
             if row['id'] in pdfs:row['pdf_state']='Συνδεδεμένο'
             elif item.get('pdf_url'):
                 from app.infrastructure.providers.pdf_downloads import state_label,SAVED_STATES

@@ -34,7 +34,7 @@ class PDFPane:
         self.owner,self.parent,self.document,self.window=owner,parent,document,window
         self.page=0;self.selected=None;self.image=None;self.records={}
         top=ttk.Frame(parent,padding=(12,8));top.pack(fill='x')
-        ttk.Label(top,text='PDF παραστατικού',style='Section.TLabel').pack(anchor='w')
+        ttk.Label(top,text='Έγγραφο παραστατικού',style='Section.TLabel').pack(anchor='w')
         from app.application.mydata import MyData
         document_type=MyData(owner.erp).document_type(owner.company,document)
         self.document_type=tk.StringVar(value=document_type['description'])
@@ -46,12 +46,13 @@ class PDFPane:
         self.files.pack(fill='x',padx=12,pady=(0,6));self.files.bind('<<TreeviewSelect>>',self.pick)
         self.state=tk.StringVar(value='Δεν υπάρχει συνδεδεμένο PDF.')
         ttk.Label(parent,textvariable=self.state,style='Subtitle.TLabel',wraplength=420).pack(anchor='w',padx=12,pady=4)
-        controls=ttk.Frame(parent,padding=(12,4));controls.pack(fill='x')
-        ttk.Button(controls,text='‹ Σελίδα',command=lambda:self.move(-1)).pack(side='left')
-        ttk.Button(controls,text='Σελίδα ›',command=lambda:self.move(1)).pack(side='left',padx=6)
+        controls=ttk.Frame(parent,padding=(12,4));controls.pack(fill='x');self.controls=controls
+        self.previous=ttk.Button(controls,text='‹ Σελίδα',command=lambda:self.move(-1));self.previous.pack(side='left')
+        self.next=ttk.Button(controls,text='Σελίδα ›',command=lambda:self.move(1));self.next.pack(side='left',padx=6)
+        self.previous.state(['disabled']);self.next.state(['disabled'])
         self.setup=ttk.Button(controls,text='Ρύθμιση προβολής PDF',command=self.setup_renderer)
         if not renderer_available():self.setup.pack(side='left')
-        canvas_frame=ttk.Frame(parent);canvas_frame.pack(fill='both',expand=True,padx=12,pady=(4,12))
+        canvas_frame=ttk.Frame(parent);canvas_frame.pack(fill='both',expand=True,padx=12,pady=(4,12));self.canvas_frame=canvas_frame
         self.canvas=tk.Canvas(canvas_frame,background='#e6ecf4',highlightthickness=0)
         vertical=ttk.Scrollbar(canvas_frame,orient='vertical',command=self.canvas.yview)
         horizontal=ttk.Scrollbar(canvas_frame,orient='horizontal',command=self.canvas.xview)
@@ -69,9 +70,25 @@ class PDFPane:
         self.files.delete(*self.files.get_children())
         for r in records:self.files.insert('','end',iid=str(r['id']),values=(KINDS[r['kind']],r['original_filename']))
         if records:
+            self.files.pack(fill='x',padx=12,pady=(0,6),after=self.parent.winfo_children()[0])
+            self.controls.pack(fill='x');self.canvas_frame.pack(fill='both',expand=True,padx=12,pady=(4,12))
             selected=next((r for r in records if r['id']==self.selected),next((r for r in records if r['kind']=='invoice'),records[0]))
             self.files.selection_set(str(selected['id']))
-        else:self.state.set('Δεν έχει συνδεθεί PDF. Η λήψη γίνεται από τη μαζική «Άντληση εξόδων & PDF».')
+        else:
+            self.selected=None;self.image=None;self.canvas.delete('all')
+            self.files.pack_forget();self.controls.pack_forget();self.canvas_frame.pack_forget()
+            self.state.set(self.unavailable_reason())
+
+    def unavailable_reason(self):
+        from app.application.mydata import MyData
+        from app.infrastructure.providers.pdf_downloads import state_label
+        active=self.owner.erp.db.execute('SELECT environment FROM aade_settings WHERE company_id=?',(self.owner.company,)).fetchone()
+        environment=active[0] if active else 'production'
+        try:MyData(self.owner.erp).pdf_url(self.owner.company,self.document,environment)
+        except ValueError as exc:return str(exc)+'\nΗ λήψη γίνεται από τη μαζική «Άντληση ΑΑΔΕ & PDF».'
+        source=self.owner.erp.db.execute('SELECT mark FROM mydata_records WHERE company_id=? AND document_id=? AND environment=?',(self.owner.company,self.document,environment)).fetchone()
+        attempt=self.owner.erp.db.execute('SELECT state FROM provider_attempts WHERE company_id=? AND environment=? AND mark=? ORDER BY id DESC LIMIT 1',(self.owner.company,environment,source['mark'])).fetchone()
+        return ('Λήψη PDF: '+state_label(attempt['state'])+'. ' if attempt else 'Υπάρχει σύνδεσμος παρόχου, αλλά δεν έχει αποθηκευτεί PDF. ')+ 'Το «Άνοιγμα Παραστατικού» ανοίγει τον σύνδεσμο. Η μαζική άντληση αναλαμβάνει τη λήψη.'
 
     def open_document(self):
         if self.alive():return open_document(self.owner,self.document,self.window,self.selected)
@@ -82,6 +99,7 @@ class PDFPane:
         self.document_type.set(MyData(self.owner.erp).document_type(self.owner.company,self.document)['description'])
         current=self.owner.erp.attachments(self.owner.company,self.document)
         if set(self.records)!={r['id'] for r in current}:self.refresh()
+        elif not current:self.state.set(self.unavailable_reason())
 
     def pick(self,event=None):
         chosen=self.files.selection()
@@ -91,7 +109,8 @@ class PDFPane:
     def show(self):
         if not self.alive() or self.selected is None:return
         if not renderer_available():
-            self.state.set('Το PDF συνδέθηκε. Πάτησε «Ρύθμιση προβολής PDF» για να εμφανίζεται εδώ.');return
+            self.canvas_frame.pack_forget()
+            self.state.set('Το PDF συνδέθηκε. Πάτησε «Άνοιγμα Παραστατικού» ή ρύθμισε την ενσωματωμένη προβολή από τις Ρυθμίσεις.');return
         if self.owner.busy:
             self.owner.root.after(150,self.show);return
         attachment=self.selected;page=self.page
@@ -107,6 +126,8 @@ class PDFPane:
             self.canvas.delete('all');self.canvas.create_image(8,8,image=self.image,anchor='nw')
             self.canvas.configure(scrollregion=self.canvas.bbox('all'))
             self.total_pages=result['pages'];self.state.set(f"Σελίδα {page+1} από {result['pages']} · Αρχειοθετημένο PDF · απαιτείται έλεγχος περιεχομένου")
+            self.previous.state(['disabled'] if page==0 else ['!disabled'])
+            self.next.state(['disabled'] if page+1>=result['pages'] else ['!disabled'])
         self.owner.run_worker(execute,done)
 
     def move(self,offset):

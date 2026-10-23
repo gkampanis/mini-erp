@@ -54,6 +54,8 @@ class MyData:
                     cp_vat=item['vat'] if item['direction']=='incoming' else item['receiver']
                     cp_name=item.get('name','') if item['direction']=='incoming' else item.get('receiver_name','')
                     role='supplier' if item['direction']=='incoming' else 'customer'
+                    from app.domain.invoice_types import classify
+                    if item['direction']=='outgoing' and classify(item.get('kind',''))['self_recorded_expense']:role='supplier'
                     if len(cp_vat)==9 and cp_vat.isascii() and cp_vat.isdigit():
                         self.db.execute('INSERT INTO counterparties(company_id,vat,name,role) VALUES (?,?,?,?) ON CONFLICT(company_id,vat) DO NOTHING',(company,cp_vat,cp_name or 'Χωρίς επωνυμία',role))
                         cp=self.db.execute('SELECT id,name FROM counterparties WHERE company_id=? AND vat=?',(company,cp_vat)).fetchone()

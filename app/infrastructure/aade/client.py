@@ -28,17 +28,22 @@ def parsed_page(data):
     try:
         page=parse_response(data);root=read_envelope(data)
     except ParseError as exc:raise APIError(str(exc)) from None
-    names={};cancelled=[]
+    names={};metadata={};cancelled=[]
     for container in root:
         if container.tag.rsplit('}',1)[-1]=='invoicesDoc':
             for node in container:
                 names[text(node,'mark')]=(text(child(node,'issuer'),'name') or '',text(child(node,'counterpart'),'name') or '')
+                header=child(node,'invoiceHeader')
+                metadata[text(node,'mark')]=dict(
+                    correlated_marks=[e.text.strip() for e in header if e.tag.rsplit('}',1)[-1]=='correlatedInvoices' and e.text and e.text.strip()] if header is not None else [],
+                    delivery_status=text(node,'invoiceDeliveryStatus') or '',
+                    delivery_lifecycle=ET.tostring(child(node,'deliveryLifecycle'),encoding='unicode') if child(node,'deliveryLifecycle') is not None else '')
                 if text(node,'cancelledByMark'):cancelled.append(str(text(node,'mark')))
     records=[]
     for invoice in page.invoices:
         records.append(dict(mark=str(invoice.mark),vat=invoice.issuer_vat or '',name=names.get(str(invoice.mark),('',''))[0],receiver_name=names.get(str(invoice.mark),('',''))[1],receiver=invoice.recipient_vat or '',
                             series=invoice.series or '',number=invoice.number or '',date=invoice.issue_date,kind=invoice.invoice_type or '',
-                            net=str(invoice.net) if invoice.net is not None else '',tax=str(invoice.vat) if invoice.vat is not None else '',gross=str(invoice.total) if invoice.total is not None else '',pdf_url=invoice.download_url or '',is_delivery_note=invoice.is_delivery_note))
+                            net=str(invoice.net) if invoice.net is not None else '',tax=str(invoice.vat) if invoice.vat is not None else '',gross=str(invoice.total) if invoice.total is not None else '',pdf_url=invoice.download_url or '',is_delivery_note=invoice.is_delivery_note,**metadata.get(str(invoice.mark),{})))
     return dict(records=records,cancellations=cancelled+[str(c.invoice_mark) for c in page.changes if c.kind=='cancellation'],next=page.continuation)
 
 

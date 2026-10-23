@@ -37,7 +37,7 @@ def apply(root):
     style.configure('Treeview.Heading',background='#eaf0f8',foreground=INK,padding=(8,10),font=(family,9,'bold'),relief='flat')
     style.map('Treeview',background=[('selected','#dce8ff')],foreground=[('selected','#123476')])
     style.configure('TNotebook',background=BG,borderwidth=0)
-    style.configure('TNotebook.Tab',padding=(20,12),background='#e7edf6',foreground=MUTED)
+    style.configure('TNotebook.Tab',padding=(12,9),font=(family,9),background='#e7edf6',foreground=MUTED)
     style.map('TNotebook.Tab',background=[('selected',WHITE)],foreground=[('selected',BLUE)])
     style.configure('TLabelframe',background=BG,bordercolor=BORDER)
     style.configure('TLabelframe.Label',font=(family,10,'bold'),foreground=MUTED)

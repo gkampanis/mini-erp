@@ -15,6 +15,9 @@ class SupplierAccounts:
         for source in self.db.execute('SELECT mark,record_json FROM mydata_records WHERE company_id=?',(company,)):
             item=json.loads(source['record_json'])
             if item.get('direction')=='incoming':api.setdefault(item['vat'],set()).add(source['mark'])
+            elif item.get('direction')=='outgoing':
+                from app.domain.invoice_types import classify
+                if classify(item.get('kind',''))['self_recorded_expense']:api.setdefault(item.get('receiver',''),set()).add(source['mark'])
         for card in cards.list(company,query):
             incoming=documents.get(card['id'],[])
             if not incoming and card['vat'] not in api:continue
@@ -34,11 +37,13 @@ class SupplierAccounts:
             card,_=Counterparties(self.erp).detail(company,cp);values=card['accounts']
             checked.append((cp,defaults_values(account if group=='2' else values['purchases_account'],account if group=='6' else values['expenses_account'],group)))
         report=dict(updated=0,protected=[],needs_review=[],queues=0)
+        from app.application.ebs_reconciliation import EBSReconciliation
+        evidence=EBSReconciliation(self.erp).results(company) if apply_pending else {}
         with self.db:
             for cp,values in checked:
                 self.write(company,cp,values)
                 if apply_pending:
-                    result=self.apply_pending(company,cp,values,{group})
+                    result=self.apply_pending(company,cp,values,{group},evidence=evidence)
                     for key in report:
                         if isinstance(report[key],list):report[key].extend(result[key])
                         else:report[key]+=result[key]
@@ -56,11 +61,17 @@ class SupplierAccounts:
         else:self.db.execute('DELETE FROM account_mappings WHERE company_id=? AND counterparty_id=?',(company,cp))
         self.erp.repository.audit(company,'account_rule_approved',None,dict(counterparty_id=cp,before=dict(before) if before else None,after=values))
 
-    def apply_pending(self,company,cp,values,groups=('2','6')):
+    def apply_pending(self,company,cp,values,groups=('2','6'),*,evidence=None):
         from app.application.rpa import RPA,encoded
+        from app.application.ebs_reconciliation import EBSReconciliation
+        from app.domain.invoice_types import classify
+        if evidence is None:evidence=EBSReconciliation(self.erp).results(company)
         report=dict(updated=0,protected=[],needs_review=[],queues=0)
-        for doc in self.db.execute("SELECT id FROM documents WHERE company_id=? AND counterparty_id=? AND direction='incoming'",(company,cp)).fetchall():
+        types={r['document_id']:classify(r['invoice_type']) for r in self.db.execute("SELECT document_id,invoice_type FROM mydata_records WHERE company_id=? AND document_id IS NOT NULL ORDER BY environment='production',id",(company,))}
+        for doc in self.db.execute("SELECT id,kind FROM documents WHERE company_id=? AND counterparty_id=? AND direction='incoming'",(company,cp)).fetchall():
             document=doc['id']
+            if evidence.get(document,{}).get('status')=='registered':report['protected'].append(document);continue
+            if doc['kind']!='invoice' or (document in types and not types[document]['rpa_allowed']):report['needs_review'].append(document);continue
             attempts=self.db.execute('SELECT i.*,j.mode,j.status AS job_state FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND i.document_id=?',(company,document)).fetchall()
             if any(a['job_state']=='running' and a['status']=='queued' for a in attempts):raise ValueError('Παύσε πρώτα την ενεργή ουρά RPA πριν αλλάξεις λογαριασμούς')
             if any(a['mode']=='fill_only' and a['status']!='queued' for a in attempts):report['protected'].append(document);continue

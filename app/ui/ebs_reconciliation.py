@@ -39,9 +39,9 @@ class ReconciliationTab:
         self.tree.bind('<Return>',lambda _:self.open())
         for key in self.tree['columns']:self.tree.heading(key,command=lambda k=key:self.sort_by(k))
     def sort_by(self,key):self.sort=(key,not self.sort[1] if self.sort[0]==key else False);self.refresh()
-    def refresh(self):
+    def refresh(self,results=None,*,render=True):
         from app.ui.desktop import amount,when,reference
-        selected=self.tree.selection();self.rows=self.service.results(self.owner.company)
+        selected=self.tree.selection();self.rows=self.service.results(self.owner.company) if results is None else results
         month=self.owner._month_values.get(self.owner.month_filter.get());query=self.query.get().strip().casefold()
         rows=[r for r in self.rows.values() if r['direction']=='incoming' and (not month or r['issue_date'].startswith(month))]
         counts=Counter(r['status'] for r in rows)
@@ -50,6 +50,7 @@ class ReconciliationTab:
         rows=[r for r in rows if (not wanted or r['status']==wanted) and (not query or any(query in str(r[k] or '').casefold() for k in ('name','vat','series','number','mark','reason')))]
         for r in rows:r['invoice']=reference(r)
         key,reverse=self.sort;rows.sort(key=lambda r:r.get(key) or (0 if key.endswith('_minor') else ''),reverse=reverse)
+        if not render:return
         self.tree.delete(*self.tree.get_children())
         for r in rows:self.tree.insert('','end',iid=str(r['id']),values=(TITLES[r['status']],reference(r),r['name'],r['vat'],when(r['issue_date']),amount(r['net_minor']),amount(r['tax_minor']),amount(r['gross_minor']),r['reason'],SOURCES[r['source']],r['filename'],r['when']))
         self.tree.selection_set([s for s in selected if self.tree.exists(s)])
@@ -220,7 +221,6 @@ class ReconciliationTab:
         def apply():
             if not win.packet or not win.packet['can_commit'] or self.owner.busy:return
             packet=win.packet
-            if not messagebox.askyesno('Επιβεβαίωση συμφωνίας','Έλεγξες εταιρεία, περίοδο, mapping και αποτέλεσμα; Θα αποθηκευτεί μόνο η συμφωνία, χωρίς καταχώριση στο EBS.',parent=win):return
             save_mapping=remember.get()
             def execute():
                 erp=ERP(self.owner.directory)
@@ -230,7 +230,10 @@ class ReconciliationTab:
                 if win.winfo_exists():win.destroy()
                 label=next((label for label,value in self.owner._month_values.items() if value==packet['start'][:7]),None)
                 if label:self.owner.month_filter.set(label)
-                self.owner.refresh();self.refresh()
+                from app.ui.desktop import STATES
+                self.owner.query.set('');self.owner.state_filter.set(STATES[3]);self.owner.group_filter.set('Όλες οι ομάδες')
+                self.owner.refresh();self.owner.notebook.select(self.owner.documents_tab)
+                self.owner.status.set('Η συμφωνία αποθηκεύτηκε. Εμφανίζονται τα μη καταχωρισμένα· επίλεξε γραμμές για έλεγχο λογαριασμών και προσομοίωση.')
             self.owner.run_worker(execute,done)
         ttk.Button(bottom,text='Προεπισκόπηση συμφωνίας',command=check).pack(side='left')
         win.apply_button=ttk.Button(bottom,text='Αποθήκευση συμφωνίας',style='Primary.TButton',command=apply,state='disabled');win.apply_button.pack(side='right')

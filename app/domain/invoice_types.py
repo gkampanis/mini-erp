@@ -33,18 +33,22 @@ TYPES={
  '17.5':'Λοιπές Εγγραφές Τακτοποίησης Εξόδων - Λογιστική Βάση','17.6':'Λοιπές Εγγραφές Τακτοποίησης Εξόδων - Φορολογική Βάση',
 }
 CREDITS={'5.1','5.2','11.4','13.31','14.31'}
-DELIVERIES={'9.1','9.2','9.3','10.1','10.2'}
+DELIVERIES={'9.1','9.2','9.3'}
+QUANTITY_RECEIPTS={'10.1','10.2'}
 INVOICES={'1.1','1.2','1.3','1.4','1.5','1.6','2.1','2.2','2.3','2.4','11.3','14.1','14.2','14.3','14.4'}
 # Preserve the validated value-entry workflow; recognizing other types is not approval.
 RPA_TYPES={'1.1','1.2','1.3','2.1','2.2','2.3'}
+# ERP v2.0.2 appendix 8.1: these are expense-side documents transmitted by
+# the entity itself. Being returned by RequestTransmittedDocs is not revenue.
+SELF_EXPENSES={code for code in TYPES if code.startswith(('13.','14.'))}|{'15.1','16.1','17.1','17.2','17.5','17.6'}
 
 
 def classify(code,is_delivery_note=False):
     code=str(code or '').strip()
-    family='unknown' if code not in TYPES else 'credit_note' if code in CREDITS else 'delivery_note' if code in DELIVERIES else 'invoice' if code in INVOICES else 'other'
+    family='unknown' if code not in TYPES else 'credit_note' if code in CREDITS else 'delivery_note' if code in DELIVERIES else 'quantity_receipt' if code in QUANTITY_RECEIPTS else 'invoice' if code in INVOICES else 'other'
     description=TYPES.get(code,'Μη αναγνωρισμένο είδος')
     if is_delivery_note and family=='invoice':description+=' · με διακίνηση'
-    return dict(invoice_type=code,description=description,family=family,is_delivery_note=bool(is_delivery_note),rpa_allowed=code in RPA_TYPES)
+    return dict(invoice_type=code,description=description,family=family,is_delivery_note=bool(is_delivery_note),rpa_allowed=code in RPA_TYPES,self_recorded_expense=code in SELF_EXPENSES)
 
 
 def aade_document(item,direction):
@@ -58,10 +62,13 @@ def aade_document(item,direction):
     if not number or not re.fullmatch('[0-9]+',mark):raise ValueError('Λείπει αριθμός παραστατικού ή MARK')
     kind=classify(item.get('kind',''),item.get('is_delivery_note',False))
     values={key:item.get(key,'') for key in ('net','tax','gross')}
-    if kind['family']=='delivery_note' and not any(values.values()):values=dict(net='0',tax='0',gross='0')
+    if kind['family'] in ('delivery_note','quantity_receipt') and not any(values.values()):values=dict(net='0',tax='0',gross='0')
     amounts={key:cents(value) for key,value in values.items()}
     difference=amounts['gross']-amounts['net']-amounts['tax']
     fractional=any(money(v)!=money(v).quantize(Decimal('.01'),rounding=ROUND_HALF_UP) for v in values.values())
     if difference and not (fractional and abs(difference)<=1 and abs(money(values['gross'])-money(values['net'])-money(values['tax']))<=Decimal('.01')):raise ValueError('Ποσά ΑΑΔΕ που απαιτούν χωριστό λογιστικό έλεγχο')
     if kind['family']=='invoice' and (money(values['net'])<=0 or money(values['tax'])<0 or money(values['gross'])<0):raise ValueError('Το τιμολόγιο απαιτεί έλεγχο προσήμων/αξιών')
-    return dict(vat=supplier,name=(item.get('name','') if direction=='incoming' else item.get('receiver_name','')) or 'Χωρίς επωνυμία',series=str(item.get('series','')).strip(),number=number,issue_date=iso_date(item['date']),mark=mark,net_minor=amounts['net'],tax_minor=amounts['tax'],gross_minor=amounts['gross'],rounding_minor=difference,currency='EUR',direction=direction,kind=kind['family'])
+    # Keep existing stored identity for 10.x records. Their precise category is
+    # provided by invoiceType, without rewriting old documents on another sync.
+    stored_kind='delivery_note' if kind['family']=='quantity_receipt' else kind['family']
+    return dict(vat=supplier,name=(item.get('name','') if direction=='incoming' else item.get('receiver_name','')) or 'Χωρίς επωνυμία',series=str(item.get('series','')).strip(),number=number,issue_date=iso_date(item['date']),mark=mark,net_minor=amounts['net'],tax_minor=amounts['tax'],gross_minor=amounts['gross'],rounding_minor=difference,currency='EUR',direction=direction,kind=stored_kind)
