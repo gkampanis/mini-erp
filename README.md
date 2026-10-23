@@ -1,3 +1,9 @@
+# Νεότερη έκδοση — Ρυθμίσεις, προαιρετικό Camoufox και crashlog
+
+[Λήψη ZIP](MiniERP-Settings-Camoufox-20261023.zip) · [Ανασκόπηση](MiniERP-Settings-Camoufox-20261023-review.md) · [Έλεγχοι](MiniERP-Settings-Camoufox-20261023.zip.verification.json) · [SHA-256](MiniERP-Settings-Camoufox-20261023.zip.sha256)
+
+85 tests κώδικα και 18 GUI, επιτυχία και μετά την αποσυμπίεση. Προαιρετική εγκατάσταση Camoufox από Ρυθμίσεις → PDF και λήψεις. Το browser download (1,31 GB) γίνεται μόνο αν το ζητήσεις. Πραγματική εκτέλεση Camoufox σε Windows/παρόχους, EBS και παραγωγική ΑΑΔΕ δεν επιβεβαιώθηκαν εδώ.
+
 # Νεότερη δοκιμαστική έκδοση: ΑΑΔΕ, επωνυμίες και PDF
 
 [Λήψη ZIP](MiniERP-AADE-PDF-20261022-112300.zip) · [Έλεγχοι](MiniERP-AADE-PDF-20261022-112300.zip.verification.json) · [SHA-256](MiniERP-AADE-PDF-20261022-112300.zip.sha256)
