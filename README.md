@@ -1,3 +1,11 @@
+# Νεότερη έκδοση — Συμφωνία μόνο με πέντε πεδία
+
+[Λήψη ZIP](MiniERP-EBS-Five-Fields-20261023.zip) · [Οδηγίες](MiniERP-EBS-Five-Fields-20261023-guide.md) · [Κανόνες](MiniERP-EBS-Five-Fields-20261023-rules.md) · [Έλεγχοι](MiniERP-EBS-Five-Fields-20261023.verification.json) · [SHA-256](MiniERP-EBS-Five-Fields-20261023.zip.sha256)
+
+**Εναλ. παρ/κό, ΑΦΜ, Αξία, ΦΠΑ, Σύνολο.** Η ημερομηνία δεν αποτελεί κριτήριο συμφωνίας. Ο επιλεγμένος μήνας ορίζει την περίοδο εργασίας. Παρ/κό και Κατ. δεν αντιστοιχίζονται. Όλες οι αξίες συμμετέχουν, με έλεγχο μοναδικής αντιστοίχισης.
+
+133 backend + 33 GUI checks πέρασαν και επαναλήφθηκαν μέσα στο ZIP. Windows/EBS/παραγωγική ΑΑΔΕ δεν εκτελέστηκαν εδώ. Για την εφαρμογή του νέου κανόνα κάνε νέα προεπισκόπηση και αποθήκευση συμφωνίας του αρχείου EBS.
+
 # Νεότερη διόρθωση — Μόνο οι έξι στήλες της εξαγωγής EBS
 
 [Λήψη ZIP](MiniERP-EBS-Simple-Mapping-20261023.zip) · [Οδηγίες](MiniERP-EBS-Simple-Mapping-20261023-guide.md) · [Κανόνες](MiniERP-EBS-Simple-Mapping-20261023-rules.md) · [Έλεγχοι](MiniERP-EBS-Simple-Mapping-20261023.verification.json) · [SHA-256](MiniERP-EBS-Simple-Mapping-20261023.zip.sha256)
