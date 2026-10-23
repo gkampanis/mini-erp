@@ -13,6 +13,28 @@ def ods(path,rows):
 
 
 class ODSTests(unittest.TestCase):
+    def test_header_and_group_containers_keep_physical_rows_and_formulas(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/'synthetic.ods'
+            ods(path,'<table:table-header-rows><table:table-row><table:table-cell><text:p>Α.Φ.Μ.</text:p></table:table-cell></table:table-row></table:table-header-rows><table:table-row-group><table:table-row><table:table-cell office:value-type="string"><text:p>000000001</text:p></table:table-cell><table:table-cell table:formula="of:=1+1" office:value-type="float" office:value="2"/></table:table-row></table:table-row-group>')
+            sheet=read_workbook(path)['sheets'][0]
+            self.assertEqual(sheet['rows'],[(1,{0:'Α.Φ.Μ.'}),(2,{0:'000000001',1:'2'})])
+            self.assertEqual(sheet['formula_cells'],{2:{1}})
+    def test_numeric_cell_types_preserve_raw_values_and_allow_exact_identifier_normalization(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/'synthetic.ods'
+            ods(path,'<table:table-row><table:table-cell office:value-type="float" office:value="1.0"><text:p>1</text:p></table:table-cell><table:table-cell office:value-type="float" office:value="1E+0"><text:p>000000001</text:p></table:table-cell><table:table-cell office:value-type="float" office:value="1.23456789E+8"><text:p>123456789</text:p></table:table-cell><table:table-cell office:value-type="string"><text:p>1.0</text:p></table:table-cell></table:table-row>')
+            sheet=read_workbook(path)['sheets'][0];raw=sheet['rows'][0][1]
+            self.assertEqual(raw,{0:'1.0',1:'000000001',2:'1.23456789E+8',3:'1.0'})
+            self.assertEqual(sheet['numeric_cells'],{1:{0,1,2}})
+            from app.domain.ebs_matching import normalize
+            raw.update({4:'1',5:'0.24',6:'1.24'})
+            mapping={'invoice':0,'vat':2,'net':4,'tax':5,'gross':6}
+            item,error=normalize(raw,mapping,numeric_columns=sheet['numeric_cells'][1])
+            self.assertFalse(error);self.assertEqual((item['invoice'],item['vat']),('1','123456789'))
+            mapping.update(invoice=3,vat=1)
+            item,error=normalize(raw,mapping,numeric_columns=sheet['numeric_cells'][1])
+            self.assertFalse(error);self.assertEqual((item['invoice'],item['vat']),('1.0','000000001'))
     def test_typed_values_comments_and_empty_repeats_are_read_without_execution(self):
         with tempfile.TemporaryDirectory() as temp:
             path=Path(temp)/'synthetic.ods'

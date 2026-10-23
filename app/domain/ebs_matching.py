@@ -3,6 +3,7 @@ import hashlib
 import json
 import re
 import unicodedata
+from decimal import Decimal,InvalidOperation
 from app.domain.validation import cents,iso_date
 from app.domain.invoice_types import TYPES
 
@@ -20,10 +21,20 @@ def vat(value):
     return value
 
 
-def normalize(raw,mapping,epoch1904=False):
+def normalize(raw,mapping,epoch1904=False,*,numeric_columns=(),issues=None):
     fields={key:str(raw.get(index,'')).strip() for key,index in mapping.items()};item={};errors=[]
+    def fail(key,message):
+        errors.append(LABELS[key]+': '+message)
+        if issues is not None:issues.append(dict(field=key,column=mapping.get(key),value=str(raw.get(mapping.get(key),'')),message=message))
     for key,value in fields.items():
         try:
+            if key in ('vat','receiver','invoice','number','mark') and mapping[key] in numeric_columns and not (value.isascii() and value.isdigit() and value.startswith('0')):
+                try:
+                    if len(value)>256:raise ValueError('Αριθμητικό αναγνωριστικό εκτός ορίων')
+                    number=Decimal(value)
+                    if not number.is_finite() or abs(number.adjusted())>=256:raise ValueError('Αριθμητικό αναγνωριστικό εκτός ορίων')
+                    value=str(int(number)) if number==number.to_integral_value() else format(number,'f').rstrip('0').rstrip('.')
+                except InvalidOperation as exc:raise ValueError('Μη έγκυρο αριθμητικό αναγνωριστικό') from exc
             if key in ('vat','receiver'):item[key]=vat(value)
             elif key=='date':item[key]=iso_date(value,epoch1904)
             elif key in ('net','tax','gross'):item[key+'_minor']=cents(value)
@@ -36,10 +47,11 @@ def normalize(raw,mapping,epoch1904=False):
                 if value and not re.fullmatch('[0-9]+',value):raise ValueError('Μη έγκυρο MARK')
                 item[key]=value
             else:item[key]=reference(value)
-        except (ValueError,OverflowError) as exc:errors.append(LABELS[key]+': '+str(exc))
+        except (ValueError,OverflowError) as exc:fail(key,str(exc))
     for key in ('vat','net_minor','tax_minor','gross_minor'):
-        if key not in item:errors.append('Λείπει '+{'vat':'ΑΦΜ προμηθευτή','net_minor':'καθαρή αξία','tax_minor':'ΦΠΑ','gross_minor':'συνολική αξία'}[key])
-    if not item.get('invoice') and not (item.get('number') and 'series' in item):errors.append('Χρειάζεται πλήρες παραστατικό ή χωριστά σειρά και αριθμός')
+        field=key.removesuffix('_minor')
+        if key not in item and field not in fields:fail(field,'Δεν επιλέχθηκε στήλη')
+    if not item.get('invoice') and not (item.get('number') and 'series' in item):fail('invoice','Κενό παραστατικό· χρειάζεται Εναλ. παρ/κό ή χωριστά σειρά και αριθμός')
     return item,' · '.join(dict.fromkeys(errors))
 
 

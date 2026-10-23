@@ -6,7 +6,7 @@ import io
 import json
 import zipfile
 import xml.etree.ElementTree as ET
-from app.infrastructure.importers.legacy_primitives import NS, NAMES, norm, sheets, read_sheet
+from app.infrastructure.importers.legacy_primitives import NS, NAMES, norm, sheets, read_sheet,column_index
 from app.domain.validation import record, rounding_changes
 
 MAX_FILE = 20 * 1024 * 1024
@@ -86,8 +86,15 @@ def read_workbook(path, *, data=None):
             if len(elements) > MAX_ROWS or any(len(r) > MAX_COLUMNS for r in elements):
                 raise ValueError('Όριο 20.000 γραμμών / 200 στηλών')
             rows = read_sheet(z, location, strings)
-            formula_rows = {int(r.get('r', '0')) for r in elements if r.find('.//m:f', NS) is not None}
-            worksheets.append(dict(name=name,rows=rows,formula_rows=formula_rows))
+            formulas={};numerics={}
+            for row in elements:
+                line=int(row.get('r','0'))
+                for cell in row.findall('m:c',NS):
+                    column=column_index(cell.get('r'))
+                    if column is None:continue
+                    if cell.find('m:f',NS) is not None:formulas.setdefault(line,set()).add(column)
+                    if cell.get('t','n')=='n':numerics.setdefault(line,set()).add(column)
+            worksheets.append(dict(name=name,rows=rows,formula_rows=set(formulas),formula_cells=formulas,numeric_cells=numerics))
     if not worksheets:raise ValueError('Δεν υπάρχουν αναγνώσιμα φύλλα')
     return dict(filename=path.name,data=data,sha256=hashlib.sha256(data).hexdigest(),epoch1904=epoch1904,sheets=worksheets)
 

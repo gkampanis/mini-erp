@@ -20,10 +20,14 @@ def read_ods(data):
         xml=archive.read('content.xml')
         if b'\x00' in xml or b'<!DOCTYPE' in xml.upper() or b'<!ENTITY' in xml.upper():raise ValueError('Μη ασφαλές XML ODS')
         root=ET.fromstring(xml);result=[]
+        def table_rows(container):
+            for child in container:
+                if child.tag==attr('table','table-row'):yield child
+                elif child.tag in (attr('table','table-header-rows'),attr('table','table-row-group'),attr('table','table-rows')):yield from table_rows(child)
         for sheet in root.findall('./office:body/office:spreadsheet/table:table',NS):
-            rows=[];formulas=set();line=1
-            for row in sheet.findall('table:table-row',NS):
-                raw={};column=0;formula=False
+            rows=[];formulas={};numerics={};line=1
+            for row in table_rows(sheet):
+                raw={};column=0;formula=set();numeric=set()
                 for cell in row:
                     if cell.tag not in (attr('table','table-cell'),attr('table','covered-table-cell')):continue
                     count=int(cell.get(attr('table','number-columns-repeated'),'1'))
@@ -39,16 +43,20 @@ def read_ods(data):
                     has_formula=cell.get(attr('table','formula')) is not None
                     if value or has_formula:
                         if column+count>MAX_COLUMNS:raise ValueError('Όριο 200 στηλών ODS')
-                        for index in range(column,column+count):raw[index]=value
-                    column+=count;formula=formula or has_formula
+                        for index in range(column,column+count):
+                            raw[index]=value
+                            if has_formula:formula.add(index)
+                            if kind in ('float','currency','percentage'):numeric.add(index)
+                    column+=count
                 count=int(row.get(attr('table','number-rows-repeated'),'1'))
                 if count<1:raise ValueError('Μη έγκυρη επανάληψη γραμμών ODS')
                 if raw or formula:
                     if line+count-1>MAX_ROWS:raise ValueError('Όριο 20.000 γραμμών ODS')
                     for number in range(line,line+count):
                         rows.append((number,dict(raw)))
-                        if formula:formulas.add(number)
+                        if formula:formulas[number]=set(formula)
+                        if numeric:numerics[number]=set(numeric)
                 line+=count
-            result.append(dict(name=sheet.get(attr('table','name'),''),rows=rows,formula_rows=formulas))
+            result.append(dict(name=sheet.get(attr('table','name'),''),rows=rows,formula_rows=set(formulas),formula_cells=formulas,numeric_cells=numerics))
     if not result:raise ValueError('Δεν υπάρχουν αναγνώσιμα φύλλα ODS')
     return result

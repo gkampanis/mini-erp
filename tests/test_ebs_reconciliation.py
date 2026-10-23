@@ -67,7 +67,9 @@ class ReconciliationTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.service.preview(self.company,path,'Συνθετικά',1,MAPPING,'2026-09-01','2026-09-30','000000000',company_confirmed=True)
         with self.assertRaises(ValueError):self.service.preview(self.company,path,'Συνθετικά',1,MAPPING,'2026-10-01','2026-10-31','000000009',company_confirmed=True)
         row=list(ROW);row[0]='123'
-        with self.assertRaises(ValueError):self.packet([row],complete=True)
+        blocked=self.packet([row],complete=True)
+        self.assertFalse(blocked['can_commit'])
+        with self.assertRaises(ValueError):self.service.commit(blocked,confirmed=True)
         self.assertTrue(self.packet([row])['rows'][0]['error'])
         self.assertEqual(self.service.results(self.other),{})
         self.assertTrue(all(r['status']=='unreconciled' for r in self.service.results(self.company).values()))
@@ -80,6 +82,14 @@ class ReconciliationTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):self.save([],complete=True)
         self.assertEqual(self.erp.db.execute('SELECT count(*) FROM ebs_reconciliation_runs').fetchone()[0],before)
         with self.assertRaises(sqlite3.IntegrityError),self.erp.db:self.erp.db.execute('DELETE FROM ebs_matches')
+    def test_saved_counts_follow_commit_snapshot_without_stale_preview_totals(self):
+        packet=self.packet([ROW],complete=True)
+        self.assertEqual(packet['results'][self.document]['status'],'registered')
+        with self.erp.db:self.erp.db.execute('UPDATE documents SET net_minor=net_minor+1,gross_minor=gross_minor+1 WHERE id=?',(self.document,))
+        report=self.service.commit(packet,confirmed=True)
+        self.assertEqual(report.get('registered',0),0);self.assertEqual(report['review'],1)
+        stored=json.loads(self.erp.db.execute('SELECT report_json FROM ebs_reconciliation_runs WHERE id=?',(report['run'],)).fetchone()[0])
+        self.assertEqual(stored.get('registered',0),0);self.assertEqual(stored['review'],1)
     def test_new_export_preserves_positive_evidence_and_prior_attempts(self):
         self.save([ROW],complete=True);self.save([],complete=True)
         self.assertEqual(self.service.results(self.company)[self.document]['status'],'review')

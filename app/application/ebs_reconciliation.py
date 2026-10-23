@@ -7,11 +7,18 @@ import os
 from pathlib import Path
 import tempfile
 from app.infrastructure.importers.excel import read_workbook
+from app.infrastructure.importers.legacy_primitives import norm
 from app.domain.ebs_matching import FIELDS,normalize,compare,fingerprint,vat
 from app.domain.invoice_types import classify
 
 
 def encode(value):return json.dumps(value,ensure_ascii=False,sort_keys=True)
+
+def cell_address(column,row):
+    if column is None:return '—'
+    letters='';number=column+1
+    while number:number,remainder=divmod(number-1,26);letters=chr(65+remainder)+letters
+    return letters+str(row)
 
 class EBSReconciliation:
     def __init__(self,erp):self.erp=erp;self.db=erp.db
@@ -38,25 +45,42 @@ class EBSReconciliation:
         if headers is None:raise ValueError('Δεν βρέθηκε η γραμμή επικεφαλίδων')
         if not mapping or any(k not in FIELDS or type(v) is not int or v not in headers for k,v in mapping.items()) or len(set(mapping.values()))!=len(mapping):raise ValueError('Έλεγξε την αντιστοίχιση στηλών· κάθε στήλη χρησιμοποιείται μία φορά')
         if 'vat' not in mapping or not any(k in mapping for k in ('mark','number','invoice')):raise ValueError('Χρειάζεται ΑΦΜ προμηθευτή και MARK ή αριθμός παραστατικού')
-        rows=[];fatal=[]
+        rows=[];ignored=[];fatal=[];blocking=[]
+        note_columns={c for c,label in headers.items() if norm(label) in ('σημειωση','σημειωσεις','παρατηρησεις','σχολιο','σχολια','note','notes','comments')}
         for line,raw in selected['rows']:
-            if line<=header_row or not any(raw.values()):continue
-            item,error=normalize(raw,mapping,book['epoch1904'])
-            if line in selected['formula_rows']:error='Τύπος Excel: απαιτείται εξαγωγή σταθερών τιμών'
+            formulas=selected['formula_cells'].get(line,set()) & set(mapping.values())
+            if line<=header_row or (not any(raw.values()) and not formulas):continue
+            empty=not any(str(raw.get(c,'')).strip() for c in mapping.values())
+            note=empty and {c for c,value in raw.items() if str(value).strip()}<=note_columns
+            repeated=all(norm(raw.get(c,''))==norm(headers[c]) for c in mapping.values())
+            if not formulas and (note or repeated):
+                ignored.append(dict(row=line,raw=raw,reason='Κενά όλα τα πεδία συμφωνίας' if note else 'Επανάληψη επικεφαλίδων'))
+                continue
+            issues=[]
+            item,error=normalize(raw,mapping,book['epoch1904'],numeric_columns=selected['numeric_cells'].get(line,set()),issues=issues)
+            for field,column in mapping.items():
+                if column in formulas:issues.append(dict(field=field,column=column,value=raw.get(column,''),message='Τύπος υπολογισμού σε πεδίο συμφωνίας· απαιτείται εξαγωγή σταθερής τιμής',formula=True))
+            for issue in issues:
+                issue.update(row=line,cell=cell_address(issue['column'],line),header=headers.get(issue['column'],issue['field']))
+                if issue.get('formula') or (issue['field']=='vat' and not item.get('vat')):blocking.append(issue)
+            error=' · '.join(dict.fromkeys(i['cell']+' · '+i['header']+': '+i['message'] for i in issues))
             if 'receiver' in mapping and (item.get('receiver')!=owner['vat']):fatal.append(f'Γραμμή {line}: διαφορετικό ή κενό ΑΦΜ εταιρείας')
             if item.get('date') and not start<=item['date']<=end:fatal.append(f'Γραμμή {line}: ημερομηνία εκτός περιόδου')
-            rows.append(dict(row=line,raw=raw,normalized=item,error=error))
+            rows.append(dict(row=line,raw=raw,normalized=item,error=error,issues=issues))
         if fatal:raise ValueError('\n'.join(fatal[:10]))
-        if complete and any(not r['normalized'].get('vat') or r['row'] in selected['formula_rows'] for r in rows):raise ValueError('Δεν μπορεί να τεκμηριωθεί πλήρης κατάλογος με άγνωστο ΑΦΜ ή τύπους υπολογισμού. Χρειάζονται ΑΦΜ και σταθερές τιμές.')
+        can_commit=not complete or not blocking
         documents=[r for r in self.documents(company) if r['direction']=='incoming' and start<=r['issue_date']<=end]
-        results=compare(documents,rows,complete)
-        return dict(company=company,company_vat=owner['vat'],start=start,end=end,complete=bool(complete),sheet=sheet,header_row=header_row,mapping=dict(mapping),headers=headers,rows=rows,results=results,filename=book['filename'],data=book['data'],sha256=book['sha256'])
+        results=compare(documents,rows,bool(complete and can_commit))
+        return dict(company=company,company_vat=owner['vat'],start=start,end=end,complete=bool(complete),can_commit=can_commit,blocking_issues=blocking,ignored_rows=ignored,sheet=sheet,header_row=header_row,mapping=dict(mapping),headers=headers,rows=rows,results=results,filename=book['filename'],data=book['data'],sha256=book['sha256'])
 
     def commit(self,preview,*,confirmed=False,remember=False):
         if confirmed is not True:raise ValueError('Απαιτείται ρητή επιβεβαίωση συμφωνίας')
         if hashlib.sha256(preview['data']).hexdigest()!=preview['sha256']:raise ValueError('Άλλαξε η πηγή της προεπισκόπησης')
         # Parse the frozen source again; never trust mutable normalized preview/results.
         p=self.preview(preview['company'],preview['filename'],preview['sheet'],preview['header_row'],preview['mapping'],preview['start'],preview['end'],preview['company_vat'],complete=preview['complete'],company_confirmed=True,data=preview['data'])
+        if not p['can_commit']:
+            details='\n'.join(i['cell']+' · '+i['header']+': '+i['message'] for i in p['blocking_issues'][:10])
+            raise ValueError('Δεν αποθηκεύτηκε πλήρης συμφωνία. Διόρθωσε τα παρακάτω κελιά ή κάνε νέα προεπισκόπηση ως μερικού καταλόγου:\n'+details)
         folder=self.erp.directory/'ebs-excel';folder.mkdir(exist_ok=True)
         path=folder/(p['sha256']+Path(p['filename']).suffix.lower())
         if path.exists():
@@ -68,14 +92,13 @@ class EBSReconciliation:
                 os.replace(temp,path)
             finally:
                 if os.path.exists(temp):os.unlink(temp)
-        report=dict(Counter(r['status'] for r in p['results'].values()));report['excel_rows']=len(p['rows']);report['invalid_rows']=sum(bool(r['error']) for r in p['rows'])
         with self.db:
             # Freeze decisions and append history in the same write transaction.
             self.db.execute('BEGIN IMMEDIATE')
             if self.db.execute("SELECT 1 FROM rpa_jobs WHERE company_id=? AND status='running'",(p['company'],)).fetchone():raise ValueError('Παύσε πρώτα το RPA πριν νέα συμφωνία EBS')
             docs=[r for r in self.documents(p['company']) if r['direction']=='incoming' and p['start']<=r['issue_date']<=p['end']]
             results=compare(docs,p['rows'],p['complete'])
-            report.update(Counter(r['status'] for r in results.values()))
+            report=dict(Counter(r['status'] for r in results.values()),excel_rows=len(p['rows'])+len(p['ignored_rows']),ignored_rows=len(p['ignored_rows']),invalid_rows=sum(bool(r['error']) for r in p['rows']))
             run=self.db.execute('INSERT INTO ebs_reconciliation_runs(company_id,company_vat,date_from,date_to,filename,sha256,storage_path,sheet,header_row,mapping_json,complete,report_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',(p['company'],p['company_vat'],p['start'],p['end'],p['filename'],p['sha256'],path.relative_to(self.erp.directory).as_posix(),p['sheet'],p['header_row'],encode(p['mapping']),int(p['complete']),encode(report))).lastrowid
             self.db.executemany('INSERT INTO ebs_excel_rows(run_id,row_number,raw_json,normalized_json,error) VALUES (?,?,?,?,?)',[(run,r['row'],encode(r['raw']),encode(r['normalized']),r['error']) for r in p['rows']])
             self.db.executemany('INSERT INTO ebs_matches(run_id,document_id,status,reason,excel_rows_json,snapshot_hash) VALUES (?,?,?,?,?,?)',[(run,document,r['status'],r['reason'],encode(r['excel_rows']),r['snapshot_hash']) for document,r in results.items()])

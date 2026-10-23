@@ -678,12 +678,12 @@ class DesktopRegressions(unittest.TestCase):
             self.assertGreater(refresh.call_count,0)
         self.assertEqual(len(self.app.suppliers.tree.get_children()),2)
 
-    def ebs_fixture_dialog(self):
+    def ebs_fixture_dialog(self,*,vat='000000001'):
         from app.application.ebs_reconciliation import EBSReconciliation
         from tests.test_ods import ods
         from xml.sax.saxutils import escape
         headers=['Ημ/νία','Παρ/κό','Εναλ. παρ/κό','Συναλλασσόμενος','Α.Φ.Μ.','Τίτλος','Κατ.','Αξία','ΦΠΑ','Σύνολο']
-        values=['2026-10-22','ΤΕΔ-00001','1','SYN - ΣΥΝΘΕΤΙΚΟΣ','000000001','Συνθετική εγγραφή','2','0,10','0,02','0,12']
+        values=['2026-10-22','ΤΕΔ-00001','1','SYN - ΣΥΝΘΕΤΙΚΟΣ',vat,'Συνθετική εγγραφή','2','0,10','0,02','0,12']
         rows=''.join('<table:table-row>'+''.join('<table:table-cell office:value-type="string"><text:p>'+escape(v)+'</text:p></table:table-cell>' for v in row)+'</table:table-row>' for row in (headers,values))
         path=self.folder/'synthetic-ebs.ods';ods(path,rows)
         book=EBSReconciliation(self.app.erp).layout(path)
@@ -744,6 +744,28 @@ class DesktopRegressions(unittest.TestCase):
             win.mapping_vars['invoice'].set('—');release.set();wait(self.root,lambda:not self.app.busy)
         self.assertIsNone(win.packet);self.assertTrue(win.apply_button.instate(['disabled']))
         self.assertEqual(self.count('rpa_jobs'),0)
+
+    def test_reconciliation_invalid_vat_shows_cell_and_values_without_a_generic_popup(self):
+        from app.application.ebs_reconciliation import EBSReconciliation
+        self.import_fixture('separate.xlsx');win=self.ebs_fixture_dialog(vat='123')
+        runs_before=self.count('ebs_reconciliation_runs')
+        win.company_ok_var.set(True);win.complete_var.set(True)
+        with patch('app.ui.desktop.messagebox.showerror') as popup:
+            win.check();wait(self.root,lambda:not self.app.busy);popup.assert_not_called()
+        self.assertFalse(win.packet['can_commit']);self.assertTrue(win.apply_button.instate(['disabled']))
+        values=win.validation_tree.item(win.validation_tree.get_children()[0],'values')
+        self.assertEqual(values[:6],('2','1','123','0,10','0,02','0,12'))
+        self.assertIn('E2',values[-1]);self.assertIn('Α.Φ.Μ.',values[-1]);self.assertIn('Δεν αποθηκεύεται ως πλήρης',win.status_var.get())
+        self.assertEqual(len(win.results_tree.get_children()),2)
+        self.assertEqual(self.count('ebs_reconciliation_runs'),runs_before);self.assertEqual(self.count('rpa_jobs'),0)
+        win.complete_var.set(False);win.check();wait(self.root,lambda:not self.app.busy)
+        self.assertTrue(win.apply_button.instate(['!disabled']))
+        with patch('app.ui.ebs_reconciliation.messagebox.askyesno',return_value=True):win.apply_button.invoke()
+        wait(self.root,lambda:not self.app.busy)
+        service=EBSReconciliation(self.app.erp)
+        self.assertNotIn('not_registered',[r['status'] for r in service.results(self.app.company).values()])
+        with self.assertRaises(ValueError):service.assert_rpa(self.app.company,list(service.results(self.app.company)),required=True)
+        self.assertEqual(self.count('documents'),2);self.assertEqual(self.count('rpa_jobs'),0)
 
     def test_reconciliation_filters_sort_and_open_document_keep_same_identity(self):
         self.import_fixture('separate.xlsx')
