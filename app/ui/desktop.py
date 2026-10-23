@@ -16,7 +16,7 @@ LABELS = {'vat':'ΑΦΜ', 'name':'Επωνυμία', 'date':'Ημερομηνί�
           'series':'Σειρά', 'number':'Αριθμός', 'net':'Καθαρή', 'tax':'ΦΠΑ', 'gross':'Σύνολο',
           'mark':'MARK', 'kind':'Είδος', 'description':'Περιγραφή', 'currency':'Νόμισμα'}
 GROUPS = {'Όλες οι ομάδες':None,'Ομάδα 2 · Αγορές':'2','Ομάδα 6 · Έξοδα':'6'}
-STATES = ('Όλα τα παραστατικά','Χωρίς προετοιμασία','Με τοπική έγκριση')
+STATES = ('Όλα τα παραστατικά','Χωρίς προετοιμασία','Με τοπική έγκριση','Μη καταχωρισμένα (συμφωνία EBS)')
 ACTIONS = {'document_imported':'Εισαγωγή παραστατικού','import_duplicate':'Παράλειψη διπλοτύπου',
            'import_conflict':'Σύγκρουση εισαγωγής','document_prepared':'Τοπική έγκριση προετοιμασίας',
            'import_warning':'Προειδοποίηση εισαγωγής','amounts_rounded':'Στρογγυλοποίηση ποσών', 'pdf_linked':'Σύνδεση PDF','counterparty_named':'Συμπλήρωση επωνυμίας'}
@@ -131,6 +131,8 @@ class Desktop:
         self.notebook.add(self.reviews_tab,text='Έλεγχοι εισαγωγής')
         self.suppliers_tab=ttk.Frame(self.notebook,padding=14)
         self.notebook.add(self.suppliers_tab,text='Προμηθευτές')
+        self.reconciliation_tab=ttk.Frame(self.notebook,padding=14)
+        self.notebook.add(self.reconciliation_tab,text='Συμφωνία EBS')
         filters = ttk.Frame(self.documents_tab)
         filters.pack(fill='x',pady=(0,12))
         ttk.Label(filters,text='Αναζήτηση ΑΦΜ, επωνυμίας, παραστατικού ή MARK',style='Subtitle.TLabel').pack(anchor='w',pady=(0,5))
@@ -161,8 +163,8 @@ class Desktop:
             box.bind('<<ComboboxSelected>>',lambda _:self.refresh())
         self.result_count = tk.StringVar()
         ttk.Label(self.documents_tab,textvariable=self.result_count,style='Subtitle.TLabel').pack(anchor='w',pady=(0,8))
-        columns = ('reference','name','vat','issue_date','gross_minor','account_code','preparation_state','aade_state','pdf_state')
-        titles = ('Παραστατικό','Επωνυμία','ΑΦΜ','Ημερομηνία','Σύνολο €','Λογαριασμός','Έλεγχος','ΑΑΔΕ','PDF · κλικ για άνοιγμα')
+        columns = ('reference','description','name','vat','issue_date','gross_minor','account_code','preparation_state','aade_state','pdf_state')
+        titles = ('Παραστατικό','Είδος ΑΑΔΕ','Επωνυμία','ΑΦΜ','Ημερομηνία','Σύνολο €','Λογαριασμός','Έλεγχος','ΑΑΔΕ','PDF · κλικ για άνοιγμα')
         self.tree = table(self.documents_tab,columns,titles,{'name':190,'reference':100,'vat':95,'issue_date':90,'gross_minor':85,'account_code':120,'preparation_state':120,'aade_state':90,'pdf_state':200})
         self.tree.configure(selectmode='extended')
         for col in columns:
@@ -194,6 +196,8 @@ class Desktop:
         self.rpa_panel=RPAPanel(self,self.rpa_tab,table)
         from app.ui.suppliers import Suppliers
         self.suppliers=Suppliers(self,self.suppliers_tab)
+        from app.ui.ebs_reconciliation import ReconciliationTab
+        self.reconciliation=ReconciliationTab(self,self.reconciliation_tab)
         self.notebook.bind('<<NotebookTabChanged>>',self.tab_changed)
         footer = ttk.Frame(root,padding=(24,12,24,12))
         footer.pack(side='bottom',fill='x')
@@ -285,6 +289,7 @@ class Desktop:
 
     def tab_changed(self,event=None):
         if self.notebook.select()==str(self.suppliers_tab):self.suppliers.refresh()
+        elif self.notebook.select()==str(self.reconciliation_tab):self.reconciliation.refresh()
 
     def month_changed(self,event=None):
         self._period_initialized=True
@@ -333,11 +338,15 @@ class Desktop:
         rows = [r for r in rows if (wanted_group is None or (r.get('nature_group') or r.get('suggested_group'))==wanted_group)
                 and (self.state_filter.get()!=STATES[1] or not r.get('prepared_at'))
                 and (self.state_filter.get()!=STATES[2] or r.get('prepared_at'))]
+        if self.state_filter.get()==STATES[3]:
+            from app.application.ebs_reconciliation import EBSReconciliation
+            evidence=EBSReconciliation(self.erp).results(self.company)
+            rows=[r for r in rows if evidence[r['id']]['status']=='not_registered']
         for row in rows:
             row['reference'] = reference(row)
             row['ebs_state'] = EBS_LABELS.get(row['ebs_state'],row['ebs_state'])
             row['aade_state'] = {'not_checked':'Δεν ελέγχθηκε','matched':'Συμφωνεί','different':'Διαφορά','cancelled_at_aade':'Αναφορά ακύρωσης'}.get(row['aade_state'],row['aade_state'])
-            row['preparation_state'] = 'Εκδοθέν · εκτός εξόδων' if row['direction']=='outgoing' else 'Εγκεκριμένο' if row.get('prepared_at') else 'Πρόταση καρτέλας' if row.get('suggested_account') else 'Χρειάζεται λογαριασμό'
+            row['preparation_state'] = 'Εκδοθέν · εκτός εξόδων' if row['direction']=='outgoing' else 'Εκτός ΤΕΔ αξίας' if row['kind']!='invoice' or (row['invoice_type'] and not row['rpa_allowed']) else 'Εγκεκριμένο' if row.get('prepared_at') else 'Πρόταση καρτέλας' if row.get('suggested_account') else 'Χρειάζεται λογαριασμό'
             if not row.get('prepared_at') and row.get('suggested_account'):
                 row['nature_group']=row['suggested_group'];row['account_code']=row['suggested_account']
         key,reverse = self._sort
@@ -498,13 +507,13 @@ class Desktop:
             job = self._jobs[int(selection[0])]
             self.show_report(job['filename'],job['report'])
 
-    def open_detail(self):
+    def open_detail(self,document_id=None):
         identity=self.erp.db.execute('SELECT vat,name FROM companies WHERE id=?',(self.company,)).fetchone()
         self.company_caption.set(identity['name']+' · ΑΦΜ '+identity['vat']+' · Προετοιμασία για EBS')
         selected = self.tree.selection()
-        if not selected:
+        if document_id is None and not selected:
             return
-        document_id = int(selected[0])
+        document_id = int(selected[0]) if document_id is None else document_id
         if document_id in self._details and self._details[document_id].winfo_exists():
             self._details[document_id].lift()
             return

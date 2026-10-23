@@ -54,6 +54,8 @@ def amount(element, name):
 
 def parse_invoice(element):
     header = child(element, "invoiceHeader")
+    delivery=text(header,'isDeliveryNote')
+    if delivery not in (None,'true','false','1','0'):raise ParseError('Μη έγκυρη ένδειξη διακίνησης στο XML.')
     summary = child(element, "invoiceSummary")
     issue_date = text(header, "issueDate")
     try:
@@ -91,6 +93,7 @@ def parse_invoice(element):
         total=amount(summary, "totalGrossValue"),
         download_url=url,
         raw_xml=ET.tostring(element, encoding="unicode"),
+        is_delivery_note=delivery in ('true','1'),
     )
 
 

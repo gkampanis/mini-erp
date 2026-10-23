@@ -16,6 +16,8 @@ class MonthlyWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name);self.erp=ERP(self.root/'data')
         self.company=self.erp.company('000000008','ΣΥΝΘΕΤΙΚΗ');demos(self.root/'input');self.erp.commit_import(self.company,preview(self.root/'input/separate.xlsx'),confirmed=True)
+        from tests.fixtures import reconcile_empty
+        reconcile_empty(self.erp,self.company)
         self.ids=[r['id'] for r in Workspace(self.erp).rows(self.company)]
         self.cps=[r['counterparty_id'] for r in Workspace(self.erp).rows(self.company)]
     def tearDown(self):self.erp.close();self.tmp.cleanup()
@@ -190,6 +192,8 @@ class MonthlyWorkflowTests(unittest.TestCase):
         MyData(self.erp).import_incoming(self.company,'test','2026-10-01','2026-10-31',confirmed=True)
         document=next(d for d in self.erp.search(self.company) if d['mark']=='35000001')
         SupplierAccounts(self.erp).save(self.company,[document['counterparty_id']],'6','64.03',confirmed=True)
+        from tests.fixtures import reconcile_empty
+        reconcile_empty(self.erp,self.company)
         RPA(self.erp).create(self.company,[document['id']],confirmed=True)
         with self.assertRaises(ValueError):RPA(self.erp).create(self.company,[document['id']],mode='fill_only',confirmed=True)
     def test_account_update_requires_pause_and_rolls_back_while_job_running(self):

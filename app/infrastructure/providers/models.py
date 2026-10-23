@@ -60,6 +60,7 @@ class Invoice:
     total: Decimal | None
     download_url: str | None = field(repr=False)
     raw_xml: str = field(repr=False)
+    is_delivery_note: bool = False
 
 
 @dataclass(frozen=True)

@@ -67,7 +67,7 @@ class MyData:
                     old=self.db.execute('SELECT match_status FROM mydata_records WHERE company_id=? AND environment=? AND mark=?',(company,environment,item['mark'])).fetchone()
                     if old and old[0]=='cancelled_at_aade':state='cancelled_at_aade'
                     report[state if state!='cancelled_at_aade' else 'cancelled']+=1
-                    self.db.execute('INSERT INTO mydata_records(company_id,environment,mark,document_id,record_json,match_status,last_sync) VALUES (?,?,?,?,?,?,?) ON CONFLICT(company_id,environment,mark) DO UPDATE SET document_id=excluded.document_id,record_json=excluded.record_json,match_status=excluded.match_status,last_sync=excluded.last_sync',(company,environment,item['mark'],document['id'] if document else None,json.dumps(item,ensure_ascii=False),state,sync))
+                    self.db.execute('INSERT INTO mydata_records(company_id,environment,mark,document_id,record_json,match_status,last_sync,invoice_type,is_delivery_note) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(company_id,environment,mark) DO UPDATE SET document_id=excluded.document_id,record_json=excluded.record_json,match_status=excluded.match_status,last_sync=excluded.last_sync,invoice_type=excluded.invoice_type,is_delivery_note=excluded.is_delivery_note',(company,environment,item['mark'],document['id'] if document else None,json.dumps(item,ensure_ascii=False),state,sync,item.get('kind',''),int(item.get('is_delivery_note',False))))
                 for mark in page['cancellations']:
                     # Cancellation is an observed event only; do not cancel the local invoice.
                     self.db.execute("UPDATE mydata_records SET match_status='cancelled_at_aade',last_sync=? WHERE company_id=? AND environment=? AND mark=?",(sync,company,environment,mark))
@@ -79,6 +79,11 @@ class MyData:
 
     def records(self,company,environment):
         return [dict(r) for r in self.db.execute('SELECT * FROM mydata_records WHERE company_id=? AND environment=? ORDER BY id DESC',(company,environment))]
+
+    def document_type(self,company,document):
+        from app.domain.invoice_types import classify
+        row=self.db.execute("SELECT invoice_type,is_delivery_note FROM mydata_records WHERE company_id=? AND document_id=? ORDER BY environment='production' DESC,id DESC LIMIT 1",(company,document)).fetchone()
+        return classify(row['invoice_type'],row['is_delivery_note']) if row else classify('')
 
     def pdf_url(self,company,document,environment):
         self.erp.detail(company,document)
@@ -121,9 +126,9 @@ class MyData:
             raw=dict(item,_source='myDATA '+method,_sync=row['last_sync'])
             payload.append(raw);index=len(payload)
             try:
-                if item['kind'] not in ('1.1','1.2','1.3','2.1','2.2','2.3'):raise ValueError('Ο τύπος ΑΑΔΕ απαιτεί χωριστό έλεγχο: '+item['kind'])
-                fields=dict(vat=item['vat'] if direction=='incoming' else item['receiver'],name=item.get('name','') if direction=='incoming' else item.get('receiver_name',''),series=item['series'],number=item['number'],date=item['date'],net=item['net'],tax=item['tax'],gross=item['gross'],mark=item['mark'],kind='invoice')
-                normalized=record(fields);normalized['direction']=direction
+                from app.domain.invoice_types import aade_document
+                normalized=aade_document(item,direction)
+                fields=dict(net=item['net'],tax=item['tax'],gross=item['gross'])
                 records.append(dict(row=index,raw=raw,document=normalized,rounding_changes=rounding_changes(fields,normalized)))
             except ValueError as exc:rejected.append(dict(row=index,raw=raw,reason=str(exc)))
         if not payload:return dict(inserted=0,duplicates=0,rejected=[],warnings=[])

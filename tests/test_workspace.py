@@ -44,6 +44,8 @@ class WorkspaceTests(unittest.TestCase):
         self.company=self.erp.company('000000000','ΣΥΝΘΕΤΙΚΗ ΕΤΑΙΡΕΙΑ')
         demos(self.root/'input')
         self.erp.commit_import(self.company,preview(self.root/'input/separate.xlsx'),confirmed=True)
+        from tests.fixtures import reconcile_empty
+        reconcile_empty(self.erp,self.company)
         self.document=self.erp.search(self.company,'000000001')[0]['id']
         self.other=self.erp.company('000000009','ΑΛΛΗ ΕΤΑΙΡΕΙΑ')
 
@@ -155,7 +157,7 @@ class WorkspaceTests(unittest.TestCase):
         with self.assertRaises(ValueError):rpa.create(self.company,[self.document],mode='fill_only',confirmed=True)
         item=rpa.items(self.company,job)[1][0]
         rpa.reviewed(self.company,job,item['id'],'Χειροκίνητος έλεγχος συνθετικής προσπάθειας',confirmed=True)
-        rpa.create(self.company,[self.document],mode='fill_only',confirmed=True)
+        with self.assertRaises(ValueError):rpa.create(self.company,[self.document],mode='fill_only',confirmed=True)
         with self.erp.db:self.erp.db.execute("UPDATE rpa_items SET status='started' WHERE id=?",(item['id'],))
         self.assertEqual(rpa.recover(self.company),1)
         self.assertEqual(rpa.items(self.company,job)[1][0]['status'],'uncertain')
@@ -181,6 +183,8 @@ class WorkspaceTests(unittest.TestCase):
             row=list(ROW);row[3]='BATCH'+str(index);row[8]=str(91000000+index);rows.append(row)
         workbook(self.root/'batch.xlsx',rows)
         self.erp.commit_import(self.company,preview(self.root/'batch.xlsx'),confirmed=True)
+        from tests.fixtures import reconcile_empty
+        reconcile_empty(self.erp,self.company)
         ids=[r['id'] for r in self.erp.search(self.company) if r['number'].startswith('BATCH')]
         for document in ids:self.approve(document)
         rpa=RPA(self.erp);job=rpa.create(self.company,ids,confirmed=True)

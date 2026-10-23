@@ -21,7 +21,7 @@ class RPAPanel:
         row=ttk.Frame(parent);row.pack(fill='x',pady=(4,6))
         self.buttons['accounts']=ttk.Button(row,text='Έλεγχος λογαριασμών',command=self.accounts);self.buttons['accounts'].pack(side='left')
         self.buttons['pilot']=ttk.Button(row,text='Δοκιμή 1 εγγραφής',command=self.pilot);self.buttons['pilot'].pack(side='left',padx=6)
-        self.buttons['post']=ttk.Button(row,text='Έξοδα → EBS',style='Primary.TButton',command=self.post);self.buttons['post'].pack(side='left')
+        self.buttons['post']=ttk.Button(row,text='Καταχώριση μη καταχωρισμένων',style='Primary.TButton',command=self.post);self.buttons['post'].pack(side='left')
         options=ttk.Menubutton(row,text='Ρυθμίσεις & ιστορικό')
         self.options_menu=tk.Menu(options,tearoff=False)
         self.options_menu.add_command(label='Ρυθμίσεις EBS',command=self.settings)
@@ -96,7 +96,7 @@ class RPAPanel:
         chosen=self.owner.tree.selection()
         ids=[int(x) for x in chosen] if chosen else list(self.owner._documents)
         if not ids:messagebox.showinfo('Excel','Φόρτωσε πρώτα το Excel.',parent=self.owner.root);return
-        rows=[self.owner._documents[x] for x in ids if self.owner._documents[x]['direction']=='incoming']
+        rows=[self.owner._documents[x] for x in ids if self.owner._documents[x]['direction']=='incoming' and self.owner._documents[x]['kind']=='invoice' and (not self.owner._documents[x]['invoice_type'] or self.owner._documents[x]['rpa_allowed'])]
         if not rows:messagebox.showinfo('Έξοδα','Τα εκδοθέντα δεν καταχωρούνται στη ροή εξόδων EBS.',parent=self.owner.root);return
         ids=[r['id'] for r in rows]
         win=tk.Toplevel(self.owner.root);win.title('Έλεγχος λογαριασμών · '+str(len(ids))+' παραστατικά');win.geometry('900x630');win.minsize(780,520)
@@ -183,6 +183,14 @@ class RPAPanel:
                 if not selected:raise ValueError('Επίλεξε ένα παραστατικό για πιλοτική καταχώριση')
                 ids=[int(selected[0])]
             if not ids:raise ValueError('Δεν υπάρχουν εγγραφές. Φόρτωσε πρώτα Excel.')
+            from app.application.ebs_reconciliation import EBSReconciliation
+            matches=EBSReconciliation(self.owner.erp).results(self.owner.company)
+            excluded_registered=sum(matches[d]['status']=='registered' for d in ids)
+            excluded_review=sum(matches[d]['status'] not in ('registered','not_registered') for d in ids)
+            ids=[d for d in ids if matches[d]['status']=='not_registered']
+            if not ids:
+                self.owner.notebook.select(self.owner.reconciliation_tab)
+                raise ValueError('Δεν υπάρχουν επιβεβαιωμένα μη καταχωρισμένα στην επιλογή. Κάνε «Συμφωνία EBS» με πλήρη κατάλογο για τον μήνα. Καταχωρισμένα και αμφίβολα εξαιρούνται.')
             scope=self.rpa.expense_scope(self.owner.company,ids)
             excluded=len(scope['purchases']);issued=len(scope['outgoing'])
             if scope['needs_review']:
@@ -194,8 +202,8 @@ class RPAPanel:
             if not ids:raise ValueError('Δεν υπάρχουν εγκεκριμένα έξοδα ομάδας 6 σε αυτή την επιλογή. Οι αγορές ομάδας 2 παραμένουν στη βάση, εκτός EBS.')
             real=mode=='fill_only'
             if real and sys.platform!='win32':raise ValueError('Η πραγματική καταχώριση απαιτεί Windows με Entersoft. Η προσομοίωση λειτουργεί εδώ.')
-            if not messagebox.askyesno('Έναρξη '+('EBS' if real else 'ελέγχου χωρίς καταχώριση'),f'{len(ids)} έξοδα ομάδας 6, με τους εγκεκριμένους λογαριασμούς τους.\n{excluded} αγορές ομάδας 2 εξαιρέθηκαν και παραμένουν στη βάση. {issued} εκδοθέντα είναι εκτός ροής εξόδων.\n'+('Θα εκτελεστεί η ροή συμπλήρωση → Save → νέο ΤΕΔ. Επιβεβαιώνεις κενό ΤΕΔ και πραγματικές καταχωρίσεις;' if real else 'Δεν θα γίνει καμία ενέργεια στο EBS. Συνέχεια;'),parent=self.owner.root):return
-            self.job=self.rpa.create(self.owner.company,ids,mode,confirmed=True,execution='save_new' if real else 'fill_only',pilot=pilot)
+            if not messagebox.askyesno('Έναρξη '+('EBS' if real else 'ελέγχου χωρίς καταχώριση'),f'{len(ids)} έξοδα ομάδας 6, με τους εγκεκριμένους λογαριασμούς τους.\n{excluded_registered} καταχωρισμένα και {excluded_review} χωρίς ασφαλή συμφωνία εξαιρέθηκαν.\n{excluded} αγορές ομάδας 2 εξαιρέθηκαν και παραμένουν στη βάση. {issued} εκδοθέντα και {len(scope["excluded_types"])} μη υποστηριζόμενα είδη είναι εκτός ροής εξόδων.\n'+('Θα εκτελεστεί η ροή συμπλήρωση → Save → νέο ΤΕΔ. Επιβεβαιώνεις κενό ΤΕΔ και πραγματικές καταχωρίσεις;' if real else 'Δεν θα γίνει καμία ενέργεια στο EBS. Συνέχεια;'),parent=self.owner.root):return
+            self.job=self.rpa.create(self.owner.company,ids,mode,confirmed=True,execution='save_new' if real else 'fill_only',pilot=pilot,reconciled_only=True)
         except ValueError as exc:messagebox.showwarning('Πριν την έναρξη',str(exc),parent=self.owner.root);return
         if mode=='simulation':self.preview()
         self.start()
@@ -208,7 +216,7 @@ class RPAPanel:
         try:
             scope=self.rpa.expense_scope(self.owner.company,self.ids())
             if scope['needs_review']:raise ValueError('Υπάρχουν αταξινόμητες ή μη εγκεκριμένες εγγραφές')
-            self.job=self.rpa.create(self.owner.company,scope['expenses'],confirmed=True)
+            self.job=self.rpa.create(self.owner.company,scope['expenses'],confirmed=True,reconciled_only=True)
         except ValueError as exc:messagebox.showwarning('Έλεγχος',str(exc),parent=self.owner.root)
         self.refresh()
 

@@ -37,3 +37,16 @@ def demos(directory):
     workbook(directory/'combined.xlsx',[
         ['Gross','Invoice no','Supplier VAT','VAT amount','Date','Net','Supplier name','MARK'],
         ['12.40','Γ/3','000000003','2.40','2026-10-19','10.00','ΣΥΝΘΕΤΙΚΟΣ ΠΡΟΜΗΘΕΥΤΗΣ Γ','10000003']])
+
+
+def reconcile_empty(erp,company):
+    """Explicit synthetic prerequisite: company attests zero EBS rows in test period."""
+    from app.application.ebs_reconciliation import EBSReconciliation
+    from pathlib import Path
+    service=EBSReconciliation(erp);path=Path(erp.directory)/'synthetic-ebs-empty.xlsx'
+    workbook(path,[HEADERS])
+    mapping={'vat':0,'series':2,'number':3,'date':4,'net':5,'tax':6,'gross':7,'mark':8}
+    owner=erp.db.execute('SELECT vat FROM companies WHERE id=?',(company,)).fetchone()[0]
+    book=service.layout(path)
+    prepared=service.preview(company,path,book['sheets'][0]['name'],1,mapping,'2000-01-01','2099-12-31',owner,complete=True,company_confirmed=True)
+    return service.commit(prepared,confirmed=True)

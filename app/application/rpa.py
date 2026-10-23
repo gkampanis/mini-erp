@@ -15,11 +15,14 @@ class RPA:
         """Partition the same list; purchase cards remain visible but never enter EBS."""
         rows={r['id']:r for r in self.erp.search(company)}
         defaults={r['counterparty_id']:r['preferred_group'] for r in self.db.execute('SELECT counterparty_id,preferred_group FROM counterparty_accounts WHERE company_id=?',(company,))}
-        result=dict(expenses=[],purchases=[],needs_review=[],outgoing=[])
+        result=dict(expenses=[],purchases=[],needs_review=[],outgoing=[],excluded_types=[])
+        from app.domain.invoice_types import classify
+        types={r['document_id']:classify(r['invoice_type'],r['is_delivery_note']) for r in self.db.execute("SELECT document_id,invoice_type,is_delivery_note FROM mydata_records WHERE company_id=? AND document_id IS NOT NULL ORDER BY environment='production',id",(company,))}
         for document in documents:
             if document not in rows:raise ValueError('Δεν βρέθηκε παραστατικό στην εταιρεία')
             row=rows[document]
             if row['direction']!='incoming':result['outgoing'].append(document);continue
+            if row['kind']!='invoice' or (document in types and not types[document]['rpa_allowed']):result['excluded_types'].append(document);continue
             group=row.get('nature_group') or defaults.get(row['counterparty_id'])
             if group=='2':result['purchases'].append(document)
             elif group=='6' and row.get('prepared_at'):result['expenses'].append(document)
@@ -29,6 +32,9 @@ class RPA:
     def payload(self,company,document):
         row,_=self.erp.detail(company,document)
         if row['direction']!='incoming':raise ValueError('Τα εκδοθέντα δεν ανήκουν στη ροή εξόδων EBS')
+        kind=self.db.execute("SELECT invoice_type,is_delivery_note FROM mydata_records WHERE company_id=? AND document_id=? ORDER BY environment='production' DESC,id DESC LIMIT 1",(company,document)).fetchone()
+        from app.domain.invoice_types import classify
+        if (kind and not classify(kind['invoice_type'],kind['is_delivery_note'])['rpa_allowed']) or row['kind']!='invoice':raise ValueError('Το είδος παραστατικού δεν υποστηρίζεται από τη ροή ΤΕΔ αξίας')
         reconciliation=self.db.execute("SELECT match_status FROM mydata_records WHERE company_id=? AND document_id=? AND environment='production'",(company,document)).fetchone()
         if reconciliation and reconciliation[0] in ('different','cancelled_at_aade'):raise ValueError('Το παραστατικό έχει διαφορά ή αναφορά ακύρωσης στην ΑΑΔΕ. Έλεγξε τη συμφωνία πριν EBS.')
         approval=self.erp.preparation(company,document)
@@ -44,11 +50,14 @@ class RPA:
             snapshot=self.db.execute('SELECT environment FROM mydata_syncs WHERE id=? AND company_id=?',(source,company)).fetchone()
             if snapshot is None or snapshot[0]!='production':raise ValueError('Παραστατικό δοκιμαστικής ή μη επαληθευμένης πηγής ΑΑΔΕ: επιτρέπεται μόνο προσομοίωση, όχι πραγματική καταχώριση EBS.')
 
-    def create(self,company,documents,mode='simulation',confirmed=False,execution='fill_only',pilot=False):
+    def create(self,company,documents,mode='simulation',confirmed=False,execution='fill_only',pilot=False,reconciled_only=False):
         if confirmed is not True:raise ValueError('Απαιτείται επιβεβαίωση ουράς RPA')
         if mode not in ('simulation','fill_only'):raise ValueError('Άγνωστη λειτουργία RPA')
         if not documents or len(set(documents))!=len(documents):raise ValueError('Επίλεξε παραστατικά χωρίς επαναλήψεις')
         if execution not in ('fill_only','save_new'):raise ValueError('Άγνωστη ροή EBS')
+        from app.application.ebs_reconciliation import EBSReconciliation
+        required=mode=='fill_only' or reconciled_only
+        EBSReconciliation(self.erp).assert_rpa(company,documents,required=required)
         profile={}
         if mode=='fill_only' and execution=='save_new':
             from app.application.workspace import Workspace
@@ -65,7 +74,7 @@ class RPA:
                 pending=self.db.execute("SELECT 1 FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND i.document_id=? AND j.mode='fill_only' AND (i.status IN ('started','save_pending','filled_no_save','uncertain') OR (j.execution='save_new' AND i.status IN ('save_invoked','ui_saved_review','reviewed_by_operator')))",(company,document)).fetchone()
                 if pending:raise ValueError('Υπάρχει προηγούμενη προσπάθεια προς χειροκίνητο έλεγχο. Δεν επιτρέπεται τυφλή επανάληψη.')
         with self.db:
-            job=self.db.execute('INSERT INTO rpa_jobs(company_id,mode,status,execution,profile_json) VALUES (?,?,?,?,?)',(company,mode,'queued',execution,encoded(profile))).lastrowid
+            job=self.db.execute('INSERT INTO rpa_jobs(company_id,mode,status,execution,profile_json,reconciled_only) VALUES (?,?,?,?,?,?)',(company,mode,'queued',execution,encoded(profile),int(required))).lastrowid
             for payload in payloads:
                 self.db.execute('INSERT INTO rpa_items(job_id,document_id,payload) VALUES (?,?,?)',(job,payload['document_id'],encoded(payload)))
             self.erp.repository.audit(company,'rpa_queued',None,dict(job=job,mode=mode,count=len(payloads)))
@@ -114,6 +123,9 @@ class RPA:
         if item is None:
             with self.db:self.db.execute("UPDATE rpa_jobs SET status='completed' WHERE id=?",(job,))
             return dict(status='completed',mode=meta['mode'])
+        from app.application.ebs_reconciliation import EBSReconciliation
+        pending_ids=[i['document_id'] for i in items if i['status']=='queued']
+        EBSReconciliation(self.erp).assert_rpa(company,pending_ids,required=meta['mode']=='fill_only' or meta['reconciled_only'])
         if meta['mode']=='fill_only':
             for pending in items:
                 if pending['status']=='queued':self.live_source(company,pending['document_id'])
@@ -131,6 +143,7 @@ class RPA:
             claimed=self.db.execute("UPDATE rpa_items SET status='started',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued'",(item['id'],))
             if claimed.rowcount!=1:raise ValueError('Η προσπάθεια έχει ήδη ξεκινήσει. Δεν επαναλαμβάνεται.')
             if self.payload(company,item['document_id'])!=item['payload']:raise ValueError('Άλλαξαν τα στοιχεία πριν την εκτέλεση. Έλεγξε την ουρά.')
+            EBSReconciliation(self.erp).assert_rpa(company,[item['document_id']],required=meta['mode']=='fill_only' or meta['reconciled_only'],ignore_items=(item['id'],))
             if meta['mode']=='fill_only' and self.db.execute("SELECT 1 FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.mode='fill_only' AND i.document_id=? AND i.id<>? AND i.status IN ('started','save_pending','filled_no_save','uncertain','save_invoked','ui_saved_review')",(company,item['document_id'],item['id'])).fetchone():raise ValueError('Άλλη πραγματική προσπάθεια χρειάζεται έλεγχο. Δεν στάλθηκαν νέες εντολές.')
             self.db.execute("UPDATE rpa_jobs SET status='running' WHERE id=?",(job,))
             self.erp.repository.audit(company,'rpa_started',item['document_id'],dict(job=job,item=item['id'],mode=meta['mode']))
@@ -210,6 +223,8 @@ class RPA:
         with self.db:
             claim=self.db.execute("UPDATE rpa_items SET status='started',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued'",(item['id'],))
             if claim.rowcount!=1:raise ValueError('Η προσπάθεια έχει ήδη ξεκινήσει')
+            from app.application.ebs_reconciliation import EBSReconciliation
+            EBSReconciliation(self.erp).assert_rpa(company,[p['document_id'] for p in items if p['status']=='queued'],required=True,ignore_items=(item['id'],))
             if self.db.execute("SELECT 1 FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.mode='fill_only' AND i.document_id=? AND i.id<>? AND i.status IN ('started','save_pending','filled_no_save','uncertain','save_invoked','ui_saved_review','reviewed_by_operator')",(company,item['document_id'],item['id'])).fetchone():raise ValueError('Υπάρχει άλλη πραγματική προσπάθεια για το ίδιο παραστατικό. Δεν στάλθηκαν εντολές.')
             for pending in items:
                 if pending['status']=='queued' and self.payload(company,pending['document_id'])!=pending['payload']:raise ValueError('Άλλαξαν λογαριασμοί πριν τη συμπλήρωση. Χρειάζεται έλεγχος ουράς.')

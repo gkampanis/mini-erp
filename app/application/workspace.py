@@ -41,6 +41,8 @@ class Workspace:
             if (row.get('nature_group') or row['suggested_group'])=='2' and row['ebs_state']=='not_sent':row['ebs_state']='purchase_excluded'
             row['aade_state']=reconciled.get(row['id'],'not_checked')
             source=sources.get(row['id']);item=json.loads(source['record_json']) if source else {}
+            from app.domain.invoice_types import classify
+            row.update(classify(item.get('kind',''),item.get('is_delivery_note',False)))
             if row['id'] in pdfs:row['pdf_state']='Συνδεδεμένο'
             elif item.get('pdf_url'):
                 from app.infrastructure.providers.pdf_downloads import state_label,SAVED_STATES

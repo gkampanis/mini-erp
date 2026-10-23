@@ -93,7 +93,7 @@ def open_settings(owner,document=None,acquire=False,period=None):
     ttk.Label(data_panel,textvariable=output,style='Subtitle.TLabel',wraplength=950).pack(anchor='w',pady=10)
     controls=ttk.Frame(data_panel);controls.pack(fill='x',pady=(0,10))
     from app.ui.desktop import table
-    results=table(data_panel,('direction','mark','invoice','vat','status','pdf'),('Ροή','MARK','Παραστατικό','ΑΦΜ αντισυμβαλλομένου','Συμφωνία εγγραφής','PDF'),{'status':200,'pdf':200})
+    results=table(data_panel,('direction','mark','invoice','kind','vat','status','pdf'),('Ροή','MARK','Παραστατικό','Είδος ΑΑΔΕ','ΑΦΜ αντισυμβαλλομένου','Συμφωνία εγγραφής','PDF'),{'kind':260,'status':200,'pdf':200})
     results.configure(selectmode='extended');records={}
     labels={'matched':'Συμφωνεί με εγγραφή','different':'Διαφορά — έλεγχος','unmatched':'Δεν υπάρχει στη βασική λίστα','cancelled_at_aade':'Ακύρωση στην ΑΑΔΕ — έλεγχος'}
     def refresh():
@@ -111,7 +111,9 @@ def open_settings(owner,document=None,acquire=False,period=None):
             if kind.get()=='Εκδοθέντα' and item.get('direction')!='outgoing':continue
             row['item']=item;records[str(row['id'])]=row
             attempt=attempts.get(row['mark'])
-            results.insert('','end',iid=str(row['id']),values=('Ληφθέν' if item.get('direction')=='incoming' else 'Εκδοθέν',row['mark'],'/'.join(x for x in [item['series'],item['number']] if x),item['vat'] if item.get('direction')=='incoming' else item['receiver'],labels.get(row['match_status'],row['match_status']),state_label(attempt) if attempt else 'Διαθέσιμος σύνδεσμος' if item.get('pdf_url') else 'Χωρίς σύνδεσμο'))
+            from app.domain.invoice_types import classify
+            kind_label=classify(row['invoice_type'],row['is_delivery_note'])['description']
+            results.insert('','end',iid=str(row['id']),values=('Ληφθέν' if item.get('direction')=='incoming' else 'Εκδοθέν',row['mark'],'/'.join(x for x in [item['series'],item['number']] if x),kind_label,item['vat'] if item.get('direction')=='incoming' else item['receiver'],labels.get(row['match_status'],row['match_status']),state_label(attempt) if attempt else 'Διαθέσιμος σύνδεσμος' if item.get('pdf_url') else 'Χωρίς σύνδεσμο'))
     def fetch(test=False):
         if owner.busy or owner.rpa_panel.running:return
         vat=owner.erp.db.execute('SELECT vat FROM companies WHERE id=?',(owner.company,)).fetchone()[0]

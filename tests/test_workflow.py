@@ -56,6 +56,8 @@ class ConnectedWorkflowTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name);self.erp=ERP(self.root/'data',MemoryVault())
         self.company=self.erp.company('000000000','ΣΥΝΘΕΤΙΚΗ');self.other=self.erp.company('000000009','ΑΛΛΗ ΣΥΝΘΕΤΙΚΗ')
         demos(self.root/'input');self.erp.commit_import(self.company,preview(self.root/'input/separate.xlsx'),confirmed=True)
+        from tests.fixtures import reconcile_empty
+        reconcile_empty(self.erp,self.company)
         self.ids=[row['id'] for row in Workspace(self.erp).rows(self.company)]
         self.workspace=Workspace(self.erp);self.rpa=RPA(self.erp)
         self.profile=dict(mapping={f:[10+i,20+i] for i,(f,_) in enumerate(FIELDS)},save=[100,200],new=[300,400])
@@ -110,6 +112,8 @@ class ConnectedWorkflowTests(unittest.TestCase):
         for index in range(2):
             row=list(ROW);row[3]='LINK'+str(index);row[8]=str(92000000+index);rows.append(row)
         workbook(self.root/'new.xlsx',rows);self.erp.commit_import(self.company,preview(self.root/'new.xlsx'),confirmed=True)
+        from tests.fixtures import reconcile_empty
+        reconcile_empty(self.erp,self.company)
         ids=[r['id'] for r in self.workspace.rows(self.company) if r['number'].startswith('LINK')];self.approve(ids)
         job=self.rpa.create(self.company,ids,mode='fill_only',execution='save_new',confirmed=True);fake=FakeEBS()
         first=self.rpa.advance(self.company,job,live_confirmed=True,adapter=fake);self.assertEqual(first['item_status'],'ui_saved_review')
@@ -140,6 +144,8 @@ class ConnectedWorkflowTests(unittest.TestCase):
         for index in range(41):
             row=list(ROW);row[3]='FORTY'+str(index);row[8]=str(94000000+index);rows.append(row)
         workbook(self.root/'forty.xlsx',rows);self.erp.commit_import(self.company,preview(self.root/'forty.xlsx'),confirmed=True)
+        from tests.fixtures import reconcile_empty
+        reconcile_empty(self.erp,self.company)
         ids=[r['id'] for r in self.workspace.rows(self.company) if r['number'].startswith('FORTY')];self.approve(ids)
         job=self.rpa.create(self.company,ids,mode='fill_only',execution='save_new',confirmed=True);fake=FakeEBS()
         for _ in range(40):result=self.rpa.advance(self.company,job,live_confirmed=True,adapter=fake)
@@ -186,7 +192,7 @@ class ConnectedWorkflowTests(unittest.TestCase):
         self.workspace.approve_many(self.company,[dict(document=self.ids[0],group='2',account='20.01'),dict(document=self.ids[1],group='6',account='64.03')],confirmed=True)
         before=self.erp.detail(self.company,self.ids[0])[0]
         scope=self.rpa.expense_scope(self.company,self.ids)
-        self.assertEqual(scope,dict(expenses=[self.ids[1]],purchases=[self.ids[0]],needs_review=[],outgoing=[]))
+        self.assertEqual(scope,dict(expenses=[self.ids[1]],purchases=[self.ids[0]],needs_review=[],outgoing=[],excluded_types=[]))
         job=self.rpa.create(self.company,scope['expenses'],confirmed=True)
         self.rpa.advance(self.company,job)
         self.assertEqual([i['document_id'] for i in self.rpa.items(self.company,job)[1]],[self.ids[1]])

@@ -38,7 +38,7 @@ def parsed_page(data):
     for invoice in page.invoices:
         records.append(dict(mark=str(invoice.mark),vat=invoice.issuer_vat or '',name=names.get(str(invoice.mark),('',''))[0],receiver_name=names.get(str(invoice.mark),('',''))[1],receiver=invoice.recipient_vat or '',
                             series=invoice.series or '',number=invoice.number or '',date=invoice.issue_date,kind=invoice.invoice_type or '',
-                            net=str(invoice.net) if invoice.net is not None else '',tax=str(invoice.vat) if invoice.vat is not None else '',gross=str(invoice.total) if invoice.total is not None else '',pdf_url=invoice.download_url or ''))
+                            net=str(invoice.net) if invoice.net is not None else '',tax=str(invoice.vat) if invoice.vat is not None else '',gross=str(invoice.total) if invoice.total is not None else '',pdf_url=invoice.download_url or '',is_delivery_note=invoice.is_delivery_note))
     return dict(records=records,cancellations=cancelled+[str(c.invoice_mark) for c in page.changes if c.kind=='cancellation'],next=page.continuation)
 
 

@@ -41,6 +41,12 @@ class ProviderDatabase:
         identity=json.loads(row['record_json']).get('identity_verified',row['match_status']=='matched')
         return row if identity and row['match_status'] in ('matched','different') else None
 
+    @staticmethod
+    def attachment_kind(linked):
+        from app.domain.invoice_types import classify
+        item=json.loads(linked['record_json']);family=classify(item.get('kind',''),item.get('is_delivery_note',False))['family']
+        return 'delivery_note' if family=='delivery_note' else 'invoice' if family in ('invoice','credit_note') else 'other'
+
     def link_cached(self,mark):
         import hashlib
         linked=self.linkable(mark)
@@ -50,8 +56,9 @@ class ProviderDatabase:
         if not saved or not saved['path']:return False
         path=Path(saved['path'])
         if not path.is_file() or path.is_symlink() or path.stat().st_size!=saved['byte_count'] or hashlib.sha256(path.read_bytes()).hexdigest()!=saved['sha256']:return False
-        exists=self.erp.db.execute('SELECT 1 FROM attachments WHERE company_id=? AND document_id=? AND kind=? AND sha256=?',(self.company,linked['document_id'],'invoice',saved['sha256'])).fetchone()
-        if not exists:self.erp.attach_pdf(self.company,linked['document_id'],path,source='provider:'+saved['state'],confirmed=True)
+        kind=self.attachment_kind(linked)
+        exists=self.erp.db.execute('SELECT 1 FROM attachments WHERE company_id=? AND document_id=? AND kind=? AND sha256=?',(self.company,linked['document_id'],kind,saved['sha256'])).fetchone()
+        if not exists:self.erp.attach_pdf(self.company,linked['document_id'],path,kind=kind,source='provider:'+saved['state'],confirmed=True)
         return True
 
     def record_pdf(self,client_id,mark,state,source_hash,path=None,checksum=None,size=None):
@@ -67,8 +74,9 @@ class ProviderDatabase:
         with self.erp.db:
             self.erp.db.execute('INSERT INTO provider_attempts(company_id,environment,mark,state,source_hash,path,sha256,byte_count) VALUES (?,?,?,?,?,?,?,?)',(self.company,self.environment,str(mark),state,source_hash,path,checksum,size))
             if blob:
-                self.erp.db.execute("INSERT INTO attachments(company_id,document_id,kind,sha256,storage_path,original_filename,source) VALUES (?,?,'invoice',?,?,?,?) ON CONFLICT(company_id,document_id,kind,sha256) DO NOTHING",(self.company,linked[0],blob[0],blob[1],Path(path).name,'provider:'+state))
-                self.erp.repository.audit(self.company,'pdf_linked',linked[0],dict(kind='invoice',sha256=blob[0],source='provider:'+state))
+                kind=self.attachment_kind(linked)
+                self.erp.db.execute("INSERT INTO attachments(company_id,document_id,kind,sha256,storage_path,original_filename,source) VALUES (?,?,?,?,?,?,?) ON CONFLICT(company_id,document_id,kind,sha256) DO NOTHING",(self.company,linked[0],kind,blob[0],blob[1],Path(path).name,'provider:'+state))
+                self.erp.repository.audit(self.company,'pdf_linked',linked[0],dict(kind=kind,sha256=blob[0],source='provider:'+state))
             self.erp.repository.audit(self.company,'provider_pdf_result',None,dict(mark=str(mark),environment=self.environment,state=state,sha256=checksum))
 
 

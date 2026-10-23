@@ -105,6 +105,8 @@ class DesktopRegressions(unittest.TestCase):
 
     def import_fixture(self, filename):
         self.commit(self.open_preview(filename))
+        from tests.fixtures import reconcile_empty
+        reconcile_empty(self.app.erp,self.app.company)
         self.close_children()
 
     def close_children(self):
@@ -356,7 +358,7 @@ class DesktopRegressions(unittest.TestCase):
         self.assertIsNone(self.app.erp.preparation(self.app.company,document))
         self.assertTrue(self.button(win,'Έγκριση τοπικής προετοιμασίας').winfo_exists())
 
-    def test_document_aade_button_links_and_renders_without_url_entry(self):
+    def test_mass_download_links_and_renders_without_individual_controls(self):
         from tests.test_workspace import synthetic_pdf,MemoryVault
         self.import_fixture('combined.xlsx')
         self.app.erp.credential_store=MemoryVault()
@@ -364,15 +366,18 @@ class DesktopRegressions(unittest.TestCase):
         document=int(self.app.tree.get_children()[0])
         self.app.tree.selection_set(str(document));self.app.open_detail()
         pane=self.app._details[document].pdf_pane
-        def retrieve(sync,company,identifier):
-            self.assertEqual(identifier,document)
-            sync.erp.attach_pdf(company,identifier,'synthetic.pdf',data=synthetic_pdf(),confirmed=True)
-        with patch('app.application.sync.Sync.document_pdf',retrieve), patch('tkinter.simpledialog.askstring') as manual:
-            pane.fetch_aade()
-            wait(self.root,lambda:pane.image is not None and not self.app.busy)
+        def retrieve(sync,company,*args,**kwargs):
+            sync.erp.attach_pdf(company,document,'synthetic.pdf',data=synthetic_pdf(),confirmed=True)
+            return {'import':{'inserted':0,'duplicates':0,'rejected':[]},'pdf':{'saved':1,'pending':0}}
+        win=self.app.open_acquisition()
+        with patch('app.application.sync.Sync.run',retrieve),patch('tkinter.simpledialog.askstring') as manual:
+            win.sync_expenses();wait(self.root,lambda:pane.image is not None and not self.app.busy)
             manual.assert_not_called()
-        self.assertEqual(len(pane.files.get_children()),1)
-        self.assertTrue(pane.canvas.find_all())
+        captions=[w.cget('text') for w in widgets(pane.parent) if isinstance(w,ttk.Button)]
+        self.assertIn('Άνοιγμα Παραστατικού',captions)
+        self.assertNotIn('Προσθήκη PDF',captions);self.assertNotIn('ΑΑΔΕ → Λήψη PDF',captions)
+        self.assertFalse(any(isinstance(w,ttk.Combobox) for w in widgets(pane.parent)))
+        self.assertEqual(len(pane.files.get_children()),1);self.assertTrue(pane.canvas.find_all())
 
     def test_settings_group_components_and_export_private_crashlog(self):
         from app.infrastructure.crashlog import record
@@ -434,7 +439,7 @@ class DesktopRegressions(unittest.TestCase):
         document=int(self.app.tree.get_children()[0]);self.app.tree.selection_set(str(document));self.app.open_detail()
         detail=self.app._details[document]
         captions=[w.cget('text') for w in widgets(detail) if isinstance(w,ttk.Button)]
-        self.assertNotIn('Άντληση από σύνδεσμο',captions);self.assertIn('ΑΑΔΕ → Λήψη PDF',captions)
+        self.assertNotIn('Άντληση από σύνδεσμο',captions);self.assertNotIn('ΑΑΔΕ → Λήψη PDF',captions);self.assertIn('Άνοιγμα Παραστατικού',captions)
         from app.ui.counterparties import open_detail
         row,_=self.app.erp.detail(self.app.company,document);card=open_detail(self.app,row['counterparty_id'])
         captions=[w.cget('text') for w in widgets(card) if isinstance(w,ttk.Button)]
@@ -613,6 +618,8 @@ class DesktopRegressions(unittest.TestCase):
             row=list(ROW);row[3]=str(index+100);row[4]=day;row[8]=str(90000000+index);rows.append(row)
         workbook(self.folder/'months.xlsx',[HEADERS,*rows])
         self.app.erp.commit_import(self.app.company,preview(self.folder/'months.xlsx'),confirmed=True)
+        from tests.fixtures import reconcile_empty
+        reconcile_empty(self.app.erp,self.app.company)
         self.app.refresh();self.assertEqual(self.app.month_filter.get(),'Οκτώβριος 2026')
         self.app.month_filter.set('Σεπτέμβριος 2026');self.app.refresh()
         ids=[int(key) for key in self.app.tree.get_children()];self.assertEqual(len(ids),1)
@@ -670,6 +677,72 @@ class DesktopRegressions(unittest.TestCase):
             self.app.notebook.select(self.app.suppliers_tab);self.root.update()
             self.assertGreater(refresh.call_count,0)
         self.assertEqual(len(self.app.suppliers.tree.get_children()),2)
+
+    def ebs_fixture_dialog(self):
+        from app.application.ebs_reconciliation import EBSReconciliation
+        from tests.test_ods import ods
+        from xml.sax.saxutils import escape
+        headers=['Ημ/νία','Παρ/κό','Εναλ. παρ/κό','Συναλλασσόμενος','Τίτλος','Tύπος συν/νου','Κατ.','Αξία','ΦΠΑ','Σύνολο','Tύπος','ΑΦΜ']
+        values=['2026-10-21','ΤΕΔ-00001','ΔΟΚ/1','SYN - ΣΥΝΘΕΤΙΚΟΣ','Συνθετική εγγραφή','3','2','0,10','0,02','0,12','3','000000001']
+        rows=''.join('<table:table-row>'+''.join('<table:table-cell office:value-type="string"><text:p>'+escape(v)+'</text:p></table:table-cell>' for v in row)+'</table:table-row>' for row in (headers,values))
+        path=self.folder/'synthetic-ebs.ods';ods(path,rows)
+        book=EBSReconciliation(self.app.erp).layout(path)
+        self.app.notebook.select(self.app.reconciliation_tab);self.root.update()
+        return self.app.reconciliation.import_dialog(book)
+
+    def test_reconciliation_ods_mapping_preview_values_and_real_rpa_selection(self):
+        from app.application.ebs_reconciliation import EBSReconciliation
+        self.import_fixture('separate.xlsx');win=self.ebs_fixture_dialog()
+        win.geometry('920x650');self.root.update()
+        self.assertTrue(win.apply_button.winfo_ismapped())
+        self.assertLessEqual(win.apply_button.winfo_rooty()+win.apply_button.winfo_height(),win.winfo_rooty()+win.winfo_height())
+        self.assertEqual(win.mapping_vars['invoice'].get(),'3: Εναλ. παρ/κό')
+        self.assertEqual(win.mapping_vars['invoice_type'].get(),'—')
+        win.company_ok_var.set(True);win.complete_var.set(True);win.check()
+        wait(self.root,lambda:not self.app.busy)
+        self.assertTrue(win.apply_button.instate(['!disabled']))
+        self.assertEqual(self.count('rpa_jobs'),0)
+        with patch('app.ui.ebs_reconciliation.messagebox.askyesno',return_value=True):win.apply_button.invoke()
+        wait(self.root,lambda:not self.app.busy)
+        rows=EBSReconciliation(self.app.erp).results(self.app.company)
+        registered=[r['id'] for r in rows.values() if r['status']=='registered'];pending=[r['id'] for r in rows.values() if r['status']=='not_registered']
+        self.assertEqual((len(registered),len(pending)),(1,1))
+        tab=self.app.reconciliation;tab.tree.selection_set(str(registered[0]));comparison=tab.details()
+        labels=[comparison.comparison_tree.item(i,'values')[0] for i in comparison.comparison_tree.get_children()]
+        self.assertTrue({'Καθαρή €','ΦΠΑ €','Σύνολο €'}<=set(labels));comparison.destroy()
+        tab.pending();self.root.update()
+        self.assertEqual([int(i) for i in self.app.tree.get_children()],pending)
+        self.app.erp.prepare_document(self.app.company,pending[0],'6','64.03',confirmed=True)
+        self.app.refresh()
+        with patch('app.ui.rpa_panel.messagebox.askyesno',return_value=True):self.app.rpa_panel.simulate()
+        wait(self.root,lambda:not self.app.busy and not self.app.rpa_panel.running)
+        items=self.app.rpa_panel.rpa.items(self.app.company,self.app.rpa_panel.job)[1]
+        self.assertEqual([i['document_id'] for i in items],pending)
+        self.assertEqual(items[0]['payload']['account'],'64.03')
+        self.assertEqual(self.count('documents'),2)
+
+    def test_reconciliation_changing_fields_invalidates_inflight_preview(self):
+        from app.application.ebs_reconciliation import EBSReconciliation
+        self.import_fixture('separate.xlsx');win=self.ebs_fixture_dialog()
+        win.company_ok_var.set(True)
+        entered=threading.Event();release=threading.Event();self.releases.append(release)
+        original=EBSReconciliation.preview
+        def delayed(service,*args,**kwargs):
+            entered.set();release.wait(5);return original(service,*args,**kwargs)
+        with patch.object(EBSReconciliation,'preview',delayed):
+            win.check();wait(self.root,entered.is_set)
+            win.mapping_vars['invoice'].set('—');release.set();wait(self.root,lambda:not self.app.busy)
+        self.assertIsNone(win.packet);self.assertTrue(win.apply_button.instate(['disabled']))
+        self.assertEqual(self.count('rpa_jobs'),0)
+
+    def test_reconciliation_filters_sort_and_open_document_keep_same_identity(self):
+        self.import_fixture('separate.xlsx')
+        tab=self.app.reconciliation;self.app.notebook.select(self.app.reconciliation_tab);self.root.update()
+        self.assertEqual(len(tab.tree.get_children()),2)
+        tab.query.set('000000001');tab.refresh();self.assertEqual(len(tab.tree.get_children()),1)
+        document=int(tab.tree.get_children()[0]);tab.sort_by('net_minor');tab.sort_by('invoice')
+        tab.tree.selection_set(str(document));tab.open();self.assertTrue(self.app._details[document].winfo_exists())
+        self.assertEqual(self.count('documents'),2)
 
 
 if __name__ == '__main__':
