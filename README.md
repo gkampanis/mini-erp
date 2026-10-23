@@ -1,3 +1,11 @@
+# Νεότερη διόρθωση — Μόνο οι έξι στήλες της εξαγωγής EBS
+
+[Λήψη ZIP](MiniERP-EBS-Simple-Mapping-20261023.zip) · [Οδηγίες](MiniERP-EBS-Simple-Mapping-20261023-guide.md) · [Κανόνες](MiniERP-EBS-Simple-Mapping-20261023-rules.md) · [Έλεγχοι](MiniERP-EBS-Simple-Mapping-20261023.verification.json) · [SHA-256](MiniERP-EBS-Simple-Mapping-20261023.zip.sha256)
+
+Ημ/νία, Εναλ. παρ/κό, Α.Φ.Μ., Αξία, ΦΠΑ, Σύνολο. **Παρ/κό και Κατ. δεν αντιστοιχίζονται.** Το Κατ. 2 δεν ορίζει ομάδα αγορών. Αυτόματη αναγνώριση των έξι στηλών, έξυπνη σύγκριση αριθμού χωρίς σειρά μόνο με ίδιο ΑΦΜ, ημερομηνία και όλες τις αξίες, με μοναδική αντιστοίχιση.
+
+131 backend + 33 GUI checks και επανάληψη μέσα στο ZIP: επιτυχία. Windows/EBS/παραγωγική ΑΑΔΕ δεν εκτελέστηκαν εδώ. Η νέα εξαγωγή με ΑΦΜ ελέγχθηκε ως διάταξη από την εικόνα, με συνθετικά δεδομένα στις δοκιμές.
+
 # Νεότερη δοκιμαστική έκδοση — Συμφωνία Excel/ODS EBS
 
 [Λήψη ZIP](MiniERP-EBS-Reconciliation-20261023.zip) · [Οδηγίες](MiniERP-EBS-Reconciliation-20261023-guide.md) · [Κανόνες / έρευνα](MiniERP-EBS-Reconciliation-20261023-rules.md) · [Έλεγχοι](MiniERP-EBS-Reconciliation-20261023.verification.json) · [SHA-256](MiniERP-EBS-Reconciliation-20261023.zip.sha256)
