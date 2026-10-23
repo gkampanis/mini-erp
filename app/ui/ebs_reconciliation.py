@@ -8,7 +8,7 @@ from app.application.ebs_reconciliation import EBSReconciliation
 from app.application.service import ERP
 from app.application.periods import MONTHS,month_bounds
 
-COLUMNS={'date':'Ημ/νία','invoice':'Εναλ. παρ/κό','vat':'Α.Φ.Μ.','net':'Αξία','tax':'ΦΠΑ','gross':'Σύνολο'}
+COLUMNS={'invoice':'Εναλ. παρ/κό','vat':'Α.Φ.Μ.','net':'Αξία','tax':'ΦΠΑ','gross':'Σύνολο'}
 
 STATES={'Όλα':None,'Καταχωρισμένα':'registered','Μη καταχωρισμένα':'not_registered','Χρειάζονται έλεγχο':'review','Δεν εντοπίστηκε στο Excel':'not_found','Χωρίς συμφωνία':'unreconciled'}
 TITLES={v:k for k,v in STATES.items() if v}
@@ -71,7 +71,7 @@ class ReconciliationTab:
         for entry in entries or [None]:
             item=entry['normalized'] if entry else {}
             tree.insert('','end',values=('Γραμμή Excel','',entry['row_number'] if entry else 'Δεν υπάρχει αντιστοίχιση'))
-            values=[('ΑΦΜ',row['vat'],item.get('vat','—')),('Παραστατικό',reference(row),entry['original_reference'] if entry else '—'),('Ημερομηνία',row['issue_date'],item.get('date','—'))]
+            values=[('ΑΦΜ',row['vat'],item.get('vat','—')),('Παραστατικό',reference(row),entry['original_reference'] if entry else '—')]
             values.extend((label,amount(row[key]),amount(item[key]) if key in item else '—') for label,key in (('Καθαρή €','net_minor'),('ΦΠΑ €','tax_minor'),('Σύνολο €','gross_minor')))
             for values_row in values:tree.insert('','end',values=values_row)
         win.comparison_tree=tree;return win
@@ -136,7 +136,7 @@ class ReconciliationTab:
         ttk.Checkbutton(footer,text=f'Επιβεβαιώνω ότι η εξαγωγή ανήκει στην εταιρεία ΑΦΜ {owner["vat"]} και στον επιλεγμένο μήνα',variable=company_ok).pack(anchor='w',pady=4)
         ttk.Checkbutton(footer,text='Πλήρης κατάλογος όλων των καταχωρισμένων για την εταιρεία και τον μήνα',variable=complete).pack(anchor='w',pady=4)
         ttk.Checkbutton(footer,text='Αποθήκευση αντιστοίχισης για ίδια διάταξη αρχείου',variable=remember).pack(anchor='w',pady=4)
-        status=tk.StringVar(value='Έλεγξε τις έξι στήλες και επίλεξε «Προεπισκόπηση συμφωνίας».')
+        status=tk.StringVar(value='Έλεγξε τις πέντε στήλες και επίλεξε «Προεπισκόπηση συμφωνίας».')
         ttk.Label(footer,textvariable=status,style='Subtitle.TLabel',wraplength=870).pack(anchor='w',pady=8)
         bottom=ttk.Frame(footer);bottom.pack(fill='x')
         def invalid(*_):
@@ -144,14 +144,14 @@ class ReconciliationTab:
             if hasattr(win,'apply_button'):win.apply_button.state(['disabled'])
         for var in (*vars.values(),year,month,company_ok,complete,sheet,header):var.trace_add('write',invalid)
         def load_headers(event=None):
-            from app.infrastructure.importers.legacy_primitives import norm
+            from app.infrastructure.importers.legacy_primitives import norm,NAMES
             invalid()
             try:line=int(header.get())
             except ValueError:status.set('Γράψε έγκυρο αριθμό γραμμής τίτλων.');return
             selected_sheet=next(s for s in book['sheets'] if s['name']==sheet.get());headers.clear();headers.update(next((raw for number,raw in selected_sheet['rows'] if number==line),{}))
             # These are explicitly unrelated to reconciliation. Retain their
             # raw cells, but do not offer them as mapping choices.
-            labels={f'{index+1}: {title}':index for index,title in headers.items() if norm(title) not in ('παρ κο','κατ','συναλλασσομενος','τιτλος')};win.column_labels=labels
+            labels={f'{index+1}: {title}':index for index,title in headers.items() if norm(title) not in NAMES['date'] and norm(title) not in ('παρ κο','κατ','συναλλασσομενος','τιτλος')};win.column_labels=labels
             proposed=self.service.saved_mapping(self.owner.company,headers)
             if not proposed:
                 proposed={k:v for k,v in header_mapping(headers).items() if k in COLUMNS}
@@ -167,7 +167,7 @@ class ReconciliationTab:
                 if number<line:continue
                 sample.insert('','end',values=(number,' | '.join(f'{headers.get(i,i+1)}: {v}' for i,v in raw.items())))
                 if len(sample.get_children())>=8:break
-            hint.set('«Εναλ. παρ/κό» ↔ «Παραστατικό» Mini ERP, μαζί με ΑΦΜ, ημερομηνία και τις τρεις αξίες. Το «Κατ.» αγνοείται· δεν ορίζει ομάδα αγορών ή εξόδων. Οι άλλες στήλες διατηρούνται μόνο στο αρχικό αρχείο.')
+            hint.set('«Εναλ. παρ/κό» ↔ «Παραστατικό» Mini ERP, μαζί με ΑΦΜ, Αξία, ΦΠΑ και Σύνολο. Ο μήνας ορίζει την περίοδο εργασίας· η ημερομηνία δεν είναι κριτήριο συμφωνίας. «Παρ/κό» και «Κατ.» αγνοούνται.')
         sheet_box.bind('<<ComboboxSelected>>',load_headers);header_box.bind('<Return>',load_headers)
         header.trace_add('write',lambda *_:load_headers())
         ttk.Button(top,text='Εμφάνιση στηλών',command=load_headers).pack(side='right')
@@ -176,6 +176,7 @@ class ReconciliationTab:
                 start,end=month_bounds(year.get(),MONTHS.index(month.get())+1);line=int(header.get())
                 mapping={key:win.column_labels[value.get()] for key,value in vars.items() if value.get()!='—'}
             except (ValueError,KeyError):status.set('Έλεγξε μήνα, έτος, γραμμή τίτλων και στήλες.');return
+            if len(mapping)!=len(COLUMNS):status.set('Επίλεξε και τις πέντε στήλες: Εναλ. παρ/κό, Α.Φ.Μ., Αξία, ΦΠΑ, Σύνολο.');return
             selected_sheet=sheet.get();attested=company_ok.get();full=complete.get()
             generation=win.generation
             def execute():

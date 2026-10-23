@@ -29,6 +29,18 @@ class ReconciliationTests(unittest.TestCase):
         owner=self.erp.db.execute('SELECT vat FROM companies WHERE id=?',(company,)).fetchone()[0]
         return self.service.preview(company,path,'Συνθετικά',1,mapping or MAPPING,'2026-10-01','2026-10-31',owner,complete=complete,company_confirmed=True)
     def save(self,rows,**kwargs):return self.service.commit(self.packet(rows,**kwargs),confirmed=True,remember=True)
+    def test_five_column_export_commits_without_date_and_keeps_selected_period(self):
+        path=self.root/'five-columns.xlsx'
+        workbook(path,[['Εναλ. παρ/κό','Α.Φ.Μ.','Αξία','ΦΠΑ','Σύνολο'],['1','000000001','0,10','0,02','0,12']])
+        mapping={'invoice':0,'vat':1,'net':2,'tax':3,'gross':4}
+        def preview(start,end):return self.service.preview(self.company,path,'Συνθετικά',1,mapping,start,end,'000000000',complete=True,company_confirmed=True)
+        self.assertEqual(preview('2026-09-01','2026-09-30')['results'],{})
+        packet=preview('2026-10-01','2026-10-31')
+        self.assertFalse(packet['rows'][0]['error']);self.assertNotIn('date',packet['rows'][0]['normalized'])
+        self.service.commit(packet,confirmed=True,remember=True)
+        self.assertEqual(self.service.results(self.company)[self.document]['status'],'registered')
+        self.assertEqual(self.service.saved_mapping(self.company,{i:h for i,h in enumerate(['Εναλ. παρ/κό','Α.Φ.Μ.','Αξία','ΦΠΑ','Σύνολο'])}),mapping)
+        self.assertEqual(self.ids,[r['id'] for r in self.erp.search(self.company)])
     def test_exact_match_missing_vs_complete_and_mapping_persist(self):
         result=self.save([ROW]);states=self.service.results(self.company)
         self.assertEqual(states[self.document]['status'],'registered')

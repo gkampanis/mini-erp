@@ -37,8 +37,8 @@ def normalize(raw,mapping,epoch1904=False):
                 item[key]=value
             else:item[key]=reference(value)
         except (ValueError,OverflowError) as exc:errors.append(LABELS[key]+': '+str(exc))
-    for key in ('vat','date','net_minor','tax_minor','gross_minor'):
-        if key not in item:errors.append('Λείπει '+{'vat':'ΑΦΜ προμηθευτή','date':'ημερομηνία','net_minor':'καθαρή αξία','tax_minor':'ΦΠΑ','gross_minor':'συνολική αξία'}[key])
+    for key in ('vat','net_minor','tax_minor','gross_minor'):
+        if key not in item:errors.append('Λείπει '+{'vat':'ΑΦΜ προμηθευτή','net_minor':'καθαρή αξία','tax_minor':'ΦΠΑ','gross_minor':'συνολική αξία'}[key])
     if not item.get('invoice') and not (item.get('number') and 'series' in item):errors.append('Χρειάζεται πλήρες παραστατικό ή χωριστά σειρά και αριθμός')
     return item,' · '.join(dict.fromkeys(errors))
 
@@ -61,7 +61,7 @@ def equivalent_reference(left,right):
 def number_only_reference(item,doc):
     """A bare EBS supplier number can omit the local series, never digits/zeros.
 
-    Acceptance still requires VAT, date, all three amounts and one-to-one
+    Acceptance still requires VAT, all three amounts and one-to-one
     ownership in compare(); this is not arbitrary suffix/fuzzy matching.
     """
     invoice=item.get('invoice','');number=reference(doc.get('number'))
@@ -104,8 +104,11 @@ def compare(documents,excel_rows,complete):
         if len(candidates)>1:state='review';reason='Πολλαπλές αντιστοιχίσεις / διπλές γραμμές Excel'
         elif candidates:
             candidate=next(iter(candidates.values()));item=candidate['normalized'];differences=[]
-            for key,doc_key in (('vat','vat'),('date','issue_date'),('net_minor','net_minor'),('tax_minor','tax_minor'),('gross_minor','gross_minor')):
+            for key,doc_key in (('vat','vat'),('net_minor','net_minor'),('tax_minor','tax_minor'),('gross_minor','gross_minor')):
                 if item.get(key)!=doc[doc_key]:differences.append({'vat':'ΑΦΜ','date':'ημερομηνία','net_minor':'καθαρή αξία','tax_minor':'ΦΠΑ','gross_minor':'συνολική αξία'}[key])
+            # Preserve validation of legacy, explicitly date-mapped evidence.
+            # New UI imports use only reference, VAT and the three amounts.
+            if 'date' in item and item['date']!=doc['issue_date']:differences.append('ημερομηνία')
             if item.get('invoice'):
                 if not equivalent_reference(item['invoice'],ref) and not number_only_reference(item,doc):differences.append('πλήρες αναγνωριστικό / σειρά / αριθμός')
                 if 'series' in item and item['series']!=reference(doc['series']):differences.append('χωριστή στήλη σειράς')
@@ -119,7 +122,7 @@ def compare(documents,excel_rows,complete):
                 if item.get('invoice')!=ref and number_only_reference(item,doc):identity='Ίδιος ακριβής αριθμός προμηθευτή· το Εναλ. παρ/κό δεν περιέχει τη σειρά'
                 elif item.get('invoice') and item['invoice']!=ref:identity='Ισοδύναμο πλήρες αναγνωριστικό: ίδια γράμματα/ψηφία με διαφορετικούς διαχωριστές'
                 else:identity='Ίδιο πλήρες αναγνωριστικό παραστατικού'
-                state='registered';reason=('Ίδιο MARK και ' if item.get('mark') and item.get('mark')==doc.get('mark') else 'Ίδιο ')+ 'ΑΦΜ, ημερομηνία, καθαρή, ΦΠΑ και συνολική αξία. '+identity
+                state='registered';reason=('Ίδιο MARK και ' if item.get('mark') and item.get('mark')==doc.get('mark') else 'Ίδιο ')+ 'ΑΦΜ, '+('ημερομηνία, ' if 'date' in item else '')+'καθαρή, ΦΠΑ και συνολική αξία. '+identity
                 owners.setdefault(candidate['row'],[]).append(doc['id'])
         results[doc['id']]=dict(status=state,reason=reason,excel_rows=numbers,snapshot_hash=fingerprint(doc))
     for row,ids in owners.items():
