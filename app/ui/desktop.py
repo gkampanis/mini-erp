@@ -99,7 +99,8 @@ class Desktop:
         self._details = {}
         self._sort = ('source_record_id',False)
         self.status = tk.StringVar(value='')
-        root.title('Mini ERP · Προετοιμασία παραστατικών για EBS')
+        from app import __version__
+        root.title('Mini ERP · Προετοιμασία παραστατικών για EBS · '+__version__)
         root.geometry(f'{min(1320,root.winfo_screenwidth()-40)}x{min(880,root.winfo_screenheight()-40)}')
         root.minsize(960,650)
         try:
@@ -181,7 +182,7 @@ class Desktop:
         self.tree = table(self.documents_tab,columns,titles,{'name':190,'reference':100,'vat':95,'issue_date':90,'gross_minor':85,'account_code':120,'preparation_state':120,'aade_state':90,'pdf_state':200})
         self.tree.configure(selectmode='extended')
         from app.ui.column_filters import ColumnFilters
-        self.column_filters=ColumnFilters(self.tree,self.filter_documents,rows=lambda:self._documents,extra_menu=self.purchase_menu,show_summary=True)
+        self.column_filters=ColumnFilters(self.tree,self.filter_documents,rows=lambda:self._documents,extra_menu=lambda event,tree,menu:self.rpa_panel.document_menu(event,tree,menu),show_summary=True)
         self.tree.configure(displaycolumns=('reference','name','vat','issue_date','net_minor','tax_minor','gross_minor','account_code','preparation_state','pdf_state'))
         for key,width in {'reference':95,'name':180,'vat':90,'issue_date':85,'net_minor':80,'tax_minor':80,'gross_minor':80,'account_code':100,'preparation_state':125,'pdf_state':135}.items():self.tree.column(key,width=width)
         for col in columns:
@@ -471,16 +472,16 @@ class Desktop:
         elif self.state_filter.get()==STATES[7]:
             rows=[r for r in rows if evidence[r['id']]['status']=='review' and evidence[r['id']].get('match_kind')=='normalized']
         elif self.state_filter.get()==STATES[8]:
-            rows=[r for r in rows if evidence[r['id']]['status']=='review' and evidence[r['id']].get('match_kind')=='attempt']
+            rows=[r for r in rows if evidence[r['id']]['status']=='review' and evidence[r['id']].get('match_kind')=='attempt' and not evidence[r['id']].get('submitted')]
         elif self.state_filter.get() in STATES[4:7]:
             wanted=dict(zip(STATES[4:7],('registered','review','not_found')))[self.state_filter.get()]
-            rows=[r for r in rows if evidence[r['id']]['status']==wanted and r['direction']=='incoming']
+            rows=[r for r in rows if r['direction']=='incoming' and ((evidence[r['id']]['status']==wanted and not (wanted=='review' and evidence[r['id']].get('submitted'))) or (wanted=='registered' and evidence[r['id']].get('submitted')))]
         for row in rows:
             row['reference'] = reference(row)
             row['ebs_state'] = EBS_LABELS.get(row['ebs_state'],row['ebs_state'])
             row['aade_state'] = {'not_checked':'Δεν ελέγχθηκε','matched':'Συμφωνεί','different':'Διαφορά','cancelled_at_aade':'Αναφορά ακύρωσης'}.get(row['aade_state'],row['aade_state'])
             row['preparation_state'] = 'Εκδοθέν · εκτός εξόδων' if row['direction']=='outgoing' else 'Εκτός ΤΕΔ αξίας' if row['kind']!='invoice' or (row['invoice_type'] and not row['rpa_allowed']) else 'Εγκεκριμένο' if row.get('prepared_at') else 'Πρόταση καρτέλας' if row.get('suggested_account') else 'Χρειάζεται λογαριασμό'
-            if evidence[row['id']]['status']=='review' and evidence[row['id']].get('match_kind')=='attempt':row['preparation_state']='Χρειάζεται έλεγχος στο EBS'
+            if not evidence[row['id']].get('submitted') and evidence[row['id']]['status']=='review' and evidence[row['id']].get('match_kind')=='attempt':row['preparation_state']='Χρειάζεται έλεγχος στο EBS'
             if not row.get('prepared_at') and row.get('suggested_account'):
                 row['nature_group']=row['suggested_group'];row['account_code']=row['suggested_account']
         rows=self.column_filters.apply(rows)
@@ -505,9 +506,13 @@ class Desktop:
                 self.tree.column(key,width=max(80,body_font.measure(longest)+18))
         caption=f'{len(rows)} παραστατικά · {self.month_filter.get()}'
         if self.state_filter.get()==STATES[3] and not rows:
-            statuses={evidence[r['id']]['status'] for r in month_rows if r['direction']=='incoming'}
+            statuses={evidence[r['id']]['status'] for r in month_rows if r['direction']=='incoming' and not evidence[r['id']].get('submitted')}
             if statuses & {'unreconciled','not_found','review'}:caption+=' · Χρειάζεται πλήρης συμφωνία Excel EBS ή έλεγχος εκκρεμοτήτων.'
+            elif any(evidence[r['id']].get('submitted') for r in month_rows):caption+=' · Τα ολοκληρωμένα RPA βρίσκονται στα «Καταχωρισμένα».'
             elif not month_rows:caption+=' · Ξεκίνα με «Άντληση ΑΑΔΕ & PDF».'
+        if self.state_filter.get()==STATES[4]:
+            unverified=sum(bool(evidence[r['id']].get('submitted') and not evidence[r['id']].get('storage_verified')) for r in rows)
+            if unverified:caption+=f' · {unverified} ολοκληρωμένα RPA χωρίς οπτική επιβεβαίωση αποθήκευσης'
         if self.column_filters.filters:caption+=f' · Φίλτρα στηλών: {len(self.column_filters.filters)}'
         self.result_count.set(caption)
         self.rpa_panel.update_selection_actions()

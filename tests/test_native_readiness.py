@@ -73,3 +73,30 @@ class NativeReadinessTests(unittest.TestCase):
             session.pid=77
             with self.assertRaises(RuntimeError):session._activate_fresh_ted(202)
         self.assertFalse(any(c.args[1]==0x0222 for c in user.SendMessageTimeoutW.call_args_list))
+    def test_open_new_does_not_return_a_handle_recreated_during_activation(self):
+        user,session=self.make(active=201);session.pg=Mock()
+        state={'active':201,'new':202}
+        session._mdi_forms.side_effect=lambda:{201,state['new']} if session.pg.click.called else {201}
+        user.GetParent.side_effect=lambda h:150 if h in (201,202,203) else 100 if h==150 else 0
+        def message(hwnd,msg,wp,lp,flags,ms,result):
+            if msg==0x0222:
+                # WinForms can recreate its HWND while applying layout/DPI.
+                state['new']=203;state['active']=203;result._obj.value=0
+            elif msg==0x0229:result._obj.value=state['active']
+            return 1
+        user.SendMessageTimeoutW.side_effect=message
+        with patch.object(ctypes,'windll',SimpleNamespace(user32=user),create=True):
+            fresh=session.open_new((30,40))
+            self.assertEqual(fresh,203)
+            self.assertEqual(session.prepare({'save':(10,20),'new':(30,40)},fresh),203)
+        session.pg.click.assert_called_once_with(30,40)
+    def test_mapping_point_on_an_old_ted_cannot_be_typed_even_in_same_ebs_process(self):
+        from app.infrastructure.ebs_adapter.adapter import WindowsAdapter
+        user,session=self.make();session.expected_ted=202
+        user.WindowFromPoint=Mock(return_value=220)
+        parent=user.GetParent.side_effect
+        user.GetParent.side_effect=lambda h:201 if h==220 else parent(h)
+        with patch.object(ctypes,'windll',SimpleNamespace(user32=user),create=True),patch.object(WindowsAdapter,'validate_target',return_value=(10,20)):
+            with self.assertRaisesRegex(RuntimeError,'δεν ανήκει'):session.validate_target('AFM_CREDITOR',(10,20))
+            user.GetParent.side_effect=lambda h:202 if h==220 else parent(h)
+            self.assertEqual(session.validate_target('AFM_CREDITOR',(10,20)),(10,20))

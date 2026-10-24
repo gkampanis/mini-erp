@@ -17,6 +17,7 @@ TITLES={v:k for k,v in STATES.items() if v}
 SOURCES={'excel_ebs':'Excel EBS','normalization_operator':'Επιβεβαίωση μερικής αντιστοίχισης','rpa_operator':'RPA · οπτικός έλεγχος','rpa_attempt':'Προσπάθεια RPA · εκκρεμεί έλεγχος','manual_operator':'Χειροκίνητη επιβεβαίωση','':'—'}
 
 def display_state(row):
+    if row.get('submitted'):return 'registered'
     if row['status']=='review' and row.get('match_kind')=='attempt':return 'ebs_review'
     return 'partial' if row['status']=='review' and row.get('match_kind')=='normalized' else row['status']
 
@@ -43,6 +44,7 @@ def reference_note(left,right):
     return 'διαφορά στην παρουσίαση σειράς / αριθμού — έλεγξε τα δύο αρχικά αναγνωριστικά'
 
 def result_title(row):
+    if row.get('submitted') and row['status']!='registered':return 'RPA ολοκληρώθηκε · αναμένει οπτικό έλεγχο'
     if row.get('match_kind')=='exact' and row['status']=='registered':return 'Καταχωρισμένο — Ακριβής συμφωνία'
     if row.get('match_kind')=='normalized_confirmed' and row['status']=='registered':return 'Καταχωρισμένο — Επιβεβαιωμένη μερική συμφωνία'
     return TITLES.get(display_state(row),row['status'])

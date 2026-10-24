@@ -26,7 +26,7 @@ class SupplierPurchases:
             state=evidence.get(row['id'],{});history=attempts.get(row['id'],[]);reason=''
             if state.get('status')=='registered':reason='Υπάρχει απόδειξη συμφωνίας ή οπτική επιβεβαίωση EBS'
             elif any(a['job_state']=='running' or a['status'] in ('started','save_pending') for a in history):reason='Ενεργή προσπάθεια ή ενεργή ουρά RPA'
-            elif any(a['mode']=='fill_only' and a['status']!='queued' and a['status']!='excluded_purchase' for a in history):reason='Προηγούμενη πραγματική προσπάθεια· χρειάζεται έλεγχος στο EBS'
+            elif any(a['mode']=='fill_only' and a['status'] not in ('queued','excluded_purchase','not_saved_confirmed') for a in history):reason='Προηγούμενη πραγματική προσπάθεια· χρειάζεται έλεγχος στο EBS'
             elif any(a['status']=='simulated' for a in history):reason='Ολοκληρωμένος έλεγχος προσομοίωσης· η εγγραφή διατηρείται'
             if reason:exceptions.append(dict(document=row['id'],reason=reason))
             else:eligible.append(row['id'])

@@ -79,7 +79,7 @@ class SupplierAccounts:
             if doc['kind']!='invoice' or (document in types and not types[document]['rpa_allowed']):report['needs_review'].append(document);continue
             attempts=self.db.execute('SELECT i.*,j.mode,j.status AS job_state FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND i.document_id=?',(company,document)).fetchall()
             if any(a['job_state']=='running' and a['status']=='queued' for a in attempts):raise ValueError('Παύσε πρώτα την ενεργή ουρά RPA πριν αλλάξεις λογαριασμούς')
-            if any(a['mode']=='fill_only' and a['status']!='queued' for a in attempts):report['protected'].append(document);continue
+            if any(a['mode']=='fill_only' and a['status'] not in ('queued','not_saved_confirmed') for a in attempts):report['protected'].append(document);continue
             approval=self.erp.preparation(company,document);group=approval['nature_group'] if approval else values['preferred_group']
             if group not in groups:continue
             account=values['purchases_account' if group=='2' else 'expenses_account']

@@ -154,9 +154,12 @@ class EBSReconciliation:
         runs=[dict(r) for r in self.db.execute('SELECT r.* FROM ebs_reconciliation_runs r JOIN companies c ON c.id=r.company_id AND c.vat=r.company_vat WHERE r.company_id=? ORDER BY r.id DESC',(company,))]
         matches={(r['run_id'],r['document_id']):dict(r) for r in self.db.execute('SELECT m.* FROM ebs_matches m JOIN ebs_reconciliation_runs r ON r.id=m.run_id JOIN companies c ON c.id=r.company_id AND c.vat=r.company_vat WHERE r.company_id=?',(company,))}
         previous={r['document_id'] for r in matches.values() if r['status']=='registered' or r['match_kind']=='normalized'}
-        items=[dict(r) for r in self.db.execute('SELECT i.id,i.document_id,i.status,j.mode FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=?',(company,))]
+        items=[dict(r) for r in self.db.execute('SELECT i.id,i.job_id,i.document_id,i.status,j.mode,j.execution FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? ORDER BY i.id',(company,))]
         item_documents={r['id']:r['document_id'] for r in items}
-        attempted={r['document_id'] for r in items if r['id'] not in ignore_items and r['mode']=='fill_only' and r['status']!='queued'}
+        attempted={r['document_id'] for r in items if r['id'] not in ignore_items and r['mode']=='fill_only' and r['status'] not in ('queued','not_saved_confirmed')}
+        latest={r['document_id']:r for r in items if r['id'] not in ignore_items and r['mode']=='fill_only' and r['status']!='queued'}
+        saves={(r['entity_id'],json.loads(r['payload']).get('job')) for r in self.db.execute("SELECT entity_id,payload FROM audit_events WHERE company_id=? AND action='rpa_save_invoked' AND id>coalesce((SELECT max(id) FROM audit_events WHERE company_id=? AND action='company_identified'),0)",(company,company))}
+        submitted={doc for doc,r in latest.items() if r['execution']=='save_new' and r['status'] in ('save_invoked','ui_saved_review','reviewed_by_operator') and (doc,r['job_id']) in saves}
         confirmations={}
         partial_confirmations={}
         for event in self.db.execute("SELECT entity_id,payload FROM audit_events WHERE company_id=? AND action='ebs_partial_confirmed' AND id>coalesce((SELECT max(id) FROM audit_events WHERE company_id=? AND action='company_identified'),0) ORDER BY id",(company,company)):
@@ -178,7 +181,7 @@ class EBSReconciliation:
                 if state['status'] in ('not_registered','not_found') and doc['id'] in previous:state.update(status='review',reason='Προηγούμενο Excel την περιλάμβανε· χρειάζεται έλεγχος πριν νέα καταχώριση')
             if doc['id'] in confirmations:state.update(status='registered',**confirmations[doc['id']])
             elif doc['id'] in attempted and state['status']!='registered':state.update(status='review',match_kind='attempt',match_signature='',reason='Υπάρχει προηγούμενη προσπάθεια RPA· απαιτείται οπτικός έλεγχος στο EBS',source='rpa_attempt')
-            result[doc['id']]=dict(doc,**state)
+            result[doc['id']]=dict(doc,**state,submitted=doc['id'] in submitted,storage_verified=state['status']=='registered')
         return result
 
     def confirm_partial(self,company,document):

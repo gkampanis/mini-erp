@@ -64,6 +64,18 @@ class ColumnFilters:
         self.filters.pop(column,None);self.cell_filters.pop(column,None)
         self.sync_headings();self.on_change()
 
+    def remove_rule(self,column,rule):
+        if rule is None:self.filters.pop(column,None)
+        else:
+            rules=self.cell_filters.get(column,[])
+            if rule in rules:rules.remove(rule)
+            if not rules:self.cell_filters.pop(column,None)
+        self.sync_headings();self.on_change()
+
+    def rule_label(self,column,value):
+        from app.ui.desktop import amount,when
+        return amount(value) if column.endswith('_minor') and value is not None else when(str(value)) if column=='issue_date' and value else str(value if value is not None else 'κενό')
+
     def apply(self,rows):
         def matches(row,column,query):
             raw=self.raw(row,column)
@@ -111,7 +123,11 @@ class ColumnFilters:
         menu.add_command(label='Καθαρισμός όλων των φίλτρων',command=lambda:self.clear(notify=True))
         submenu=tk.Menu(menu,tearoff=False)
         for active in sorted(set(self.filters)|set(self.cell_filters)):
-            submenu.add_command(label=self.tree.heading(active,'text').removeprefix('● '),command=lambda c=active:self.remove(c))
+            title=self.tree.heading(active,'text').removeprefix('● ')
+            if active in self.filters:submenu.add_command(label=title+': '+self.filters[active],command=lambda c=active:self.remove_rule(c,None))
+            for rule in self.cell_filters.get(active,[]):
+                exclude,value=rule
+                submenu.add_command(label=title+(' ≠ ' if exclude else ' = ')+self.rule_label(active,value),command=lambda c=active,r=rule:self.remove_rule(c,r))
         menu.add_cascade(label='Αφαίρεση συγκεκριμένου φίλτρου',menu=submenu)
 
     def popup(self,event):

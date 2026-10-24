@@ -84,11 +84,13 @@ class PostingActionsTests(unittest.TestCase):
         fake=FakeEBS();self.run_job(report['job'],fake)
         self.assertEqual([c[0] for c in fake.calls],['prepare','fill','save'])
         self.assertIsNone(self.workspace.profile(self.company)['pilot_at'])
-    def test_uncertain_save_persists_and_blocks_new_batch_until_review(self):
+    def test_uncertain_save_blocks_only_that_document_and_isolates_other_safe_documents(self):
         report=self.rpa.posting(self.company,self.ids[:1]);fake=FakeEBS(fail='save')
         result=self.run_job(report['job'],fake);self.assertEqual(result['item_status'],'uncertain')
         self.erp.close();self.erp=ERP(self.root/'data');self.rpa=RPA(self.erp);self.rpa.recover(self.company)
-        with self.assertRaises(ValueError):self.rpa.posting(self.company,self.ids[1:2])
+        blocked=self.rpa.posting(self.company,self.ids[:1]);self.assertIsNone(blocked['job'])
+        other=self.rpa.posting(self.company,self.ids[1:2]);self.assertIsNotNone(other['job'])
+        self.assertEqual(self.rpa.items(self.company,other['job'])[0]['need_new'],1)
         self.assertEqual(self.rpa.items(self.company,report['job'])[1][0]['status'],'uncertain')
     def test_new_filtered_scope_keeps_old_unattempted_items_in_history(self):
         report=self.rpa.posting(self.company,self.ids[:2]);job=report['job']
@@ -134,7 +136,7 @@ class PostingActionsTests(unittest.TestCase):
         planned=self.rpa.plan(self.company,self.ids[:4])
         self.assertEqual(planned['documents'],[self.ids[1],self.ids[3]])
 
-    def test_scope_replacement_is_atomic_and_cannot_replace_running_or_uncertain_jobs(self):
+    def test_scope_replacement_is_atomic_blocks_running_and_preserves_uncertain_items(self):
         from unittest.mock import patch
         old=self.rpa.posting(self.company,self.ids[:2])['job'];self.rpa.pause(self.company,old)
         before=self.rpa.items(self.company,old);audit=self.erp.repository.audit
@@ -150,8 +152,9 @@ class PostingActionsTests(unittest.TestCase):
         with self.erp.db:
             self.erp.db.execute("UPDATE rpa_jobs SET status='paused' WHERE id=?",(old,))
             self.erp.db.execute("UPDATE rpa_items SET status='uncertain' WHERE job_id=? AND document_id=?",(old,self.ids[0]))
-        with self.assertRaises(ValueError):self.rpa.posting(self.company,self.ids[2:3])
-        self.assertEqual(self.erp.db.execute('SELECT count(*) FROM rpa_jobs').fetchone()[0],1)
+        other=self.rpa.posting(self.company,self.ids[2:3])
+        self.assertIsNotNone(other['job']);self.assertEqual(self.rpa.items(self.company,other['job'])[0]['need_new'],1)
+        self.assertEqual(self.rpa.items(self.company,old)[1][0]['status'],'uncertain')
 
     def test_stop_during_prepare_prevents_a_stale_worker_from_claiming_the_old_queue(self):
         job=self.rpa.posting(self.company,self.ids[:1])['job'];fake=FakeEBS();prepare=fake.prepare
@@ -206,3 +209,18 @@ class PostingActionsTests(unittest.TestCase):
         self.assertEqual([c[0] for c in fake.calls],['new'])
         self.assertEqual(fake.prepare.call_count,2)
         self.assertEqual(self.rpa.items(self.company,job)[1][0]['status'],'queued')
+
+    def test_operator_can_return_only_an_unconfirmed_failed_document_to_pending(self):
+        from app.application.ebs_reconciliation import EBSReconciliation
+        job=self.rpa.posting(self.company,self.ids[:1])['job']
+        self.run_job(job,FakeEBS(fail='save'))
+        self.assertEqual(EBSReconciliation(self.erp).results(self.company)[self.ids[0]]['status'],'review')
+        self.rpa.confirm_not_saved(self.company,self.ids[0])
+        self.assertEqual(EBSReconciliation(self.erp).results(self.company)[self.ids[0]]['status'],'not_registered')
+        self.assertEqual(self.rpa.items(self.company,job)[1][0]['status'],'not_saved_confirmed')
+        retry=self.rpa.posting(self.company,self.ids[:1]);self.assertEqual(self.rpa.items(self.company,retry['job'])[0]['need_new'],1)
+        fake=FakeEBS();self.run_job(retry['job'],fake,resume=True)
+        self.assertEqual([c[0] for c in fake.calls],['new','prepare','fill','save'])
+        item=self.rpa.items(self.company,retry['job'])[1][0]
+        self.rpa.reviewed(self.company,retry['job'],item['id'],'Synthetic visual check',confirmed=True,stored_in_ebs=True)
+        with self.assertRaises(ValueError):self.rpa.confirm_not_saved(self.company,self.ids[0])

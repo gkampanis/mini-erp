@@ -53,13 +53,29 @@ class WindowsSession(WindowsAdapter):
         while True:
             active=self._active_ted()
             if active is not None and (expected is None or active==expected):
-                self.expected_ted=active;return active
+                self.expected_ted=active
+                for field,point in profile.get('mapping',{}).items():self.validate_target(field,point)
+                return active
             if time.monotonic()>=deadline:break
             time.sleep(.1);self.health()
         if active is None:
             if expected is not None:raise TEDContextChanged('Το προηγούμενο ΤΕΔ της ουράς δεν είναι πλέον διαθέσιμο.')
             raise RuntimeError('Δεν προσδιορίστηκε το ενεργό ΤΕΔ. Άνοιξε κενό ΤΕΔ.')
         raise TEDContextChanged('Δεν είναι ενεργό το νέο ΤΕΔ της ουράς')
+
+    def validate_target(self,field,point):
+        point=super().validate_target(field,point)
+        if self.expected_ted is None:return point  # Mapping capture, no typing.
+        class Point(ctypes.Structure):_fields_=[('x',wintypes.LONG),('y',wintypes.LONG)]
+        u=ctypes.windll.user32
+        u.WindowFromPoint.argtypes=[Point];u.WindowFromPoint.restype=wintypes.HWND
+        u.GetParent.argtypes=[wintypes.HWND];u.GetParent.restype=wintypes.HWND
+        handle=u.WindowFromPoint(Point(*point))
+        for _ in range(32):
+            if not handle:break
+            if handle==self.expected_ted:return point
+            handle=u.GetParent(handle)
+        raise RuntimeError('Η θέση του πεδίου '+field+' δεν ανήκει στο ενεργό ΤΕΔ της ουράς. Έλεγξε το mapping πριν καταχώριση.')
 
     def save(self,point):
         self.health()
@@ -69,16 +85,30 @@ class WindowsSession(WindowsAdapter):
     def open_new(self,point):
         self.health();self.at_ebs(point);existing=self._mdi_forms()
         self.pg.click(*point);deadline=time.monotonic()+12
+        stable=None;stable_since=None;fresh=set()
         while time.monotonic()<deadline:
             self.health();fresh=self._mdi_forms()-existing
-            if len(fresh)==1:
-                self.expected_ted=next(iter(fresh));self._activate_fresh_ted(self.expected_ted);return self.expected_ted
-            if len(fresh)>1:
-                active=self._active_ted()
-                if active in fresh:self.expected_ted=active;self._activate_fresh_ted(active);return active
-                raise RuntimeError('Πολλές νέες φόρμες ΤΕΔ, χωρίς ασφαλή ενεργή φόρμα')
-            time.sleep(.3)
-        raise RuntimeError('Δεν αναγνωρίστηκε νέο ΤΕΔ. Δεν επιτρέπεται επανάληψη παραστατικού.')
+            active=self._active_ted()
+            candidate=next(iter(fresh)) if len(fresh)==1 else active if active in fresh else None
+            if candidate is not None:
+                if active!=candidate:
+                    try:self._activate_fresh_ted(candidate)
+                    except RuntimeError:
+                        # Handle recreation during layout is transient. Other
+                        # native errors are still surfaced, never swallowed.
+                        if candidate in self._mdi_forms():raise
+                # Activation/layout can recreate the HWND. Re-observe instead
+                # of returning the handle captured before WM_MDIACTIVATE.
+                fresh=self._mdi_forms()-existing;active=self._active_ted()
+                if active in fresh:
+                    if active!=stable:stable=active;stable_since=time.monotonic()
+                    elif time.monotonic()-stable_since>=.6:
+                        self.expected_ted=active;return active
+                else:stable=None;stable_since=None
+            else:stable=None;stable_since=None
+            time.sleep(.15)
+        if len(fresh)>1:raise RuntimeError('Πολλές νέες φόρμες ΤΕΔ, χωρίς ασφαλή ενεργή φόρμα')
+        raise RuntimeError('Δεν αναγνωρίστηκε σταθερό νέο ΤΕΔ. Δεν επιτρέπεται επανάληψη παραστατικού.')
 
     def _activate_fresh_ted(self,handle):
         """Focus only the child just discovered by open_new, never a cached HWND."""

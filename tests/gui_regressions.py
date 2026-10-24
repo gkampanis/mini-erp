@@ -1444,5 +1444,120 @@ class DesktopRegressions(unittest.TestCase):
             view.column_filters.reset_button.invoke();self.root.update()
             self.assertFalse(view.column_filters.cell_filters)
 
+    def test_p1_filtered_mixed_sources_stable_ids_all_three_actions_and_registered_view(self):
+        from types import SimpleNamespace
+        from app.application.mydata import MyData
+        from app.application.ebs_reconciliation import EBSReconciliation
+        from app.infrastructure.aade.client import parsed_page
+        from app.infrastructure.ebs_adapter.adapter import FIELDS
+        from tests.test_workflow import FakeEBS,response
+        from tests.fixtures import reconcile_empty
+        app=self.app
+        with app.erp.db:app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(app.company,))
+        rows=[]
+        for i,(vat,number) in enumerate((('000000004','MANUAL-A'),('000000005','OTHER'),('000000004','MANUAL-B'),('000000004','ALREADY'))):
+            row=list(ROW);row[0]=vat;row[1]='SYNTHETIC '+vat;row[3]=number;row[8]='';rows.append(row)
+        workbook(self.folder/'inputs/mixed-no-mark.xlsx',[HEADERS,*rows]);self.import_fixture('mixed-no-mark.xlsx')
+        api=MyData(app.erp)
+        for code,mark,number in [('1.1','99020001','API-A'),('9.3','99020002','DISPATCH')]:
+            xml=response(mark=mark,number=number,issuer='000000004',receiver='000000008').replace(b'<invoiceType>1.1</invoiceType>',f'<invoiceType>{code}</invoiceType>'.encode())
+            api.persist(app.company,'production','2026-10-01','2026-10-31',[(xml,parsed_page(xml))],'RequestDocs')
+        api.import_documents(app.company,'production','2026-10-01','2026-10-31',confirmed=True)
+        reconcile_empty(app.erp,app.company)
+        data=app.erp.search(app.company);ids={r['number']:r['id'] for r in data}
+        for row in data:
+            if row['kind']=='invoice':app.erp.prepare_document(app.company,row['id'],'6','64.03',confirmed=True)
+        EBSReconciliation(app.erp).confirm_manual(app.company,ids['ALREADY'],'Synthetic confirmed prior entry',confirmed=True)
+        panel=app.rpa_panel
+        panel.workspace.save_profile(app.company,dict(mapping={f:[10,20] for f,_ in FIELDS},save=[100,200],new=[300,400]))
+        with app.erp.db:app.erp.db.execute('UPDATE ebs_profiles SET pilot_at=CURRENT_TIMESTAMP WHERE company_id=?',(app.company,))
+        app.state_filter.set('Μη καταχωρισμένα');app.refresh()
+        app.column_filters.cell('vat','000000004');app.column_filters.cell('name','SYNTHETIC 000000005',True)
+        app.sort_documents('reference');self.root.update()
+        visible=list(app.tree.get_children());self.assertIn(str(ids['MANUAL-A']),visible)
+        self.assertIn(str(ids['API-A']),visible);self.assertNotIn(str(ids['DISPATCH']),visible);self.assertNotIn(str(ids['ALREADY']),visible)
+        self.assertEqual(app.erp.detail(app.company,ids['MANUAL-A'])[0]['mark'],None)
+        fake=FakeEBS()
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=fake),patch('ctypes.windll',SimpleNamespace(user32=SimpleNamespace(GetAsyncKeyState=lambda _:0)),create=True),patch('app.ui.rpa_panel.messagebox.showerror') as error:
+            app.tree.selection_set(str(ids['MANUAL-A']));panel.post_selected();wait(self.root,lambda:not app.busy and not panel.running)
+            self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],[ids['MANUAL-A']])
+            app.tree.selection_set(str(ids['API-A']));panel.post_one();wait(self.root,lambda:not app.busy and not panel.running)
+            panel.post();wait(self.root,lambda:not app.busy and not panel.running)
+            error.assert_not_called()
+        self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],[ids['MANUAL-A'],ids['API-A'],ids['MANUAL-B']])
+        self.assertFalse(app.tree.get_children())
+        app.state_filter.set('Καταχωρισμένα');app.filter_documents()
+        self.assertEqual(set(map(int,app.tree.get_children())),{ids['MANUAL-A'],ids['MANUAL-B'],ids['API-A'],ids['ALREADY']})
+        for document in (ids['MANUAL-A'],ids['API-A'],ids['MANUAL-B']):
+            self.assertTrue(app._evidence[document]['submitted']);self.assertFalse(app._evidence[document]['storage_verified'])
+            with self.assertRaises(ValueError):panel.rpa.create(app.company,[document],mode='fill_only',confirmed=True)
+        self.assertEqual(self.count('documents'),6)
+        labels=[panel.options_menu.entrycget(i,'label') for i in range(panel.options_menu.index('end')+1)]
+        self.assertFalse(any('Ιστορικό' in label or 'Προβολή ουράς' in label for label in labels))
+        app.tree.selection_set(str(ids['API-A']));panel.update_selection_actions()
+        with patch('app.ui.rpa_panel.messagebox.askyesno') as confirm,patch('app.ui.rpa_panel.simpledialog.askstring') as note:
+            panel.confirm_selected();confirm.assert_not_called();note.assert_not_called()
+        self.assertTrue(app._evidence[ids['API-A']]['storage_verified'])
+
+    def test_p1_failed_other_supplier_does_not_block_filtered_post_and_no_history_prompt(self):
+        from types import SimpleNamespace
+        from app.infrastructure.ebs_adapter.adapter import FIELDS
+        from tests.test_workflow import FakeEBS
+        app=self.app
+        with app.erp.db:app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(app.company,))
+        rows=[]
+        for i,vat in enumerate(('000000004','000000005')):
+            row=list(ROW);row[0]=vat;row[1]='SYNTHETIC '+vat;row[3]='BANK'+str(i);row[8]='';rows.append(row)
+        workbook(self.folder/'inputs/isolated-failure.xlsx',[HEADERS,*rows]);self.import_fixture('isolated-failure.xlsx');app.refresh()
+        panel=app.rpa_panel;ids=list(app._documents)
+        panel.workspace.approve_many(app.company,[dict(document=d,group='6',account='64.03') for d in ids],confirmed=True)
+        panel.workspace.save_profile(app.company,dict(mapping={f:[10,20] for f,_ in FIELDS},save=[100,200],new=[300,400]))
+        with app.erp.db:app.erp.db.execute('UPDATE ebs_profiles SET pilot_at=CURRENT_TIMESTAMP WHERE company_id=?',(app.company,))
+        failed=panel.rpa.posting(app.company,ids[:1])['job']
+        result=panel.rpa.advance(app.company,failed,live_confirmed=True,adapter=FakeEBS(fail='save'))
+        self.assertEqual(result['item_status'],'uncertain')
+        app.state_filter.set('Μη καταχωρισμένα');app.refresh();app.column_filters.cell('vat','000000005')
+        self.assertEqual(list(app._documents),ids[1:]);fake=FakeEBS()
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=fake),patch('ctypes.windll',SimpleNamespace(user32=SimpleNamespace(GetAsyncKeyState=lambda _:0)),create=True),patch('app.ui.rpa_panel.messagebox.showerror') as error,patch('app.ui.rpa_panel.simpledialog.askstring') as note,patch('app.ui.rpa_panel.messagebox.askyesno') as confirm:
+            panel.post();wait(self.root,lambda:not app.busy and not panel.running)
+            self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],ids[1:])
+            self.assertEqual(fake.calls[0][0],'new')
+            self.assertEqual(panel.rpa.items(app.company,failed)[1][0]['status'],'uncertain')
+            app.column_filters.clear(notify=True);app.state_filter.set('Χρειάζεται έλεγχος στο EBS');app.filter_documents();self.root.update()
+            x,y,w,h=app.tree.bbox(str(ids[0]),'name')
+            with patch('tkinter.Menu.tk_popup'):
+                app.tree.event_generate('<Button-3>',x=x+5,y=y+5);self.root.update()
+            menu=app.column_filters.menu
+            index=next(i for i in range(menu.index('end')+1) if menu.type(i)=='command' and menu.entrycget(i,'label')=='Δεν καταχωρίστηκε · επαναφορά στα εκκρεμή')
+            menu.invoke(index);self.root.update()
+            self.assertEqual(panel.rpa.items(app.company,failed)[1][0]['status'],'not_saved_confirmed')
+            app.state_filter.set('Μη καταχωρισμένα');app.filter_documents();self.assertEqual(list(app._documents),ids[:1])
+            app.tree.selection_set(str(ids[0]));panel.post_one();wait(self.root,lambda:not app.busy and not panel.running)
+            self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],[ids[1],ids[0]])
+            note.assert_not_called();confirm.assert_not_called();error.assert_not_called()
+
+    def test_p1_first_success_can_be_confirmed_without_history_window_or_notes(self):
+        from types import SimpleNamespace
+        from app.infrastructure.ebs_adapter.adapter import FIELDS
+        from tests.test_workflow import FakeEBS
+        app=self.app
+        with app.erp.db:app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(app.company,))
+        row=list(ROW);row[0]='000000004';row[8]=''
+        workbook(self.folder/'inputs/first-no-history.xlsx',[HEADERS,row]);self.import_fixture('first-no-history.xlsx');app.refresh()
+        doc=next(iter(app._documents));panel=app.rpa_panel
+        panel.workspace.approve_many(app.company,[dict(document=doc,group='6',account='64.03')],confirmed=True)
+        panel.workspace.save_profile(app.company,dict(mapping={f:[10,20] for f,_ in FIELDS},save=[100,200],new=[300,400]))
+        app.state_filter.set('Μη καταχωρισμένα');app.refresh();fake=FakeEBS()
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=fake),patch('ctypes.windll',SimpleNamespace(user32=SimpleNamespace(GetAsyncKeyState=lambda _:0)),create=True):
+            panel.post();wait(self.root,lambda:not app.busy and not panel.running)
+        self.assertFalse(app.tree.get_children());self.assertIsNone(panel.workspace.profile(app.company)['pilot_at'])
+        app.state_filter.set('Καταχωρισμένα');app.filter_documents();app.tree.selection_set(str(doc));panel.update_selection_actions()
+        with patch('app.ui.rpa_panel.messagebox.askyesno') as confirm,patch('app.ui.rpa_panel.simpledialog.askstring') as note:
+            panel.options_menu.invoke(1);self.root.update();confirm.assert_not_called();note.assert_not_called()
+        self.assertTrue(panel.workspace.profile(app.company)['pilot_at'])
+        self.assertTrue(app._evidence[doc]['storage_verified'])
+        self.assertEqual([c[0] for c in fake.calls],['prepare','fill','save'])
+        self.assertIn('2026.10.25-P1',self.root.title())
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

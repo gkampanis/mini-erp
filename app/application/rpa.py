@@ -61,7 +61,7 @@ class RPA:
         from app.application.ebs_reconciliation import EBSReconciliation
         from app.application.supplier_accounts import SupplierAccounts
         if len(set(documents))!=len(documents):raise ValueError('Διπλή επιλογή παραστατικών')
-        unresolved=self.db.execute("SELECT 1 FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.mode='fill_only' AND i.status IN ('started','save_pending','uncertain','filled_no_save') LIMIT 1",(company,)).fetchone()
+        unresolved=self.db.execute("SELECT 1 FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.mode='fill_only' AND i.status IN ('started','save_pending') LIMIT 1",(company,)).fetchone()
         if unresolved:raise ValueError('Χρειάζεται έλεγχος στο EBS προηγούμενης προσπάθειας από το Ιστορικό. Δεν γίνεται αυτόματη επανάληψη.')
         rows={r['id']:r for r in self.erp.search(company)}
         if any(d not in rows for d in documents):raise ValueError('Δεν βρέθηκε παραστατικό στην ενεργή εταιρεία')
@@ -98,7 +98,7 @@ class RPA:
         active=self.db.execute("SELECT j.id,j.status,j.execution FROM rpa_jobs j WHERE company_id=? AND mode='fill_only' AND status IN ('queued','running','paused') AND EXISTS(SELECT 1 FROM rpa_items i WHERE i.job_id=j.id AND i.status='queued') ORDER BY j.id",(company,)).fetchall()
         if any(j['status']=='running' or j['execution']!='save_new' for j in active):
             raise ValueError('Υπάρχει εκκρεμής παρτίδα EBS. Χρησιμοποίησε Συνέχεια ή Διακοπή από το ιστορικό.')
-        if active and self.db.execute("SELECT 1 FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.mode='fill_only' AND i.status IN ('started','save_pending','uncertain','filled_no_save') LIMIT 1",(company,)).fetchone():
+        if self.db.execute("SELECT 1 FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.mode='fill_only' AND i.status IN ('started','save_pending') LIMIT 1",(company,)).fetchone():
             raise ValueError('Χρειάζεται έλεγχος στο EBS προηγούμενης προσπάθειας. Δεν επαναλαμβάνεται αυτόματα.')
         saved=Workspace(self.erp).profile(company)
         if saved is None:raise ValueError('Όρισε πρώτα τις θέσεις στις Ρυθμίσεις EBS.')
@@ -107,7 +107,7 @@ class RPA:
             meta,items=self.items(company,active[0]['id'])
             pending=[i['document_id'] for i in items if i['status']=='queued']
             same=pending==documents if limit is None else pending==documents[:len(pending)]
-            if same and json.loads(meta['profile_json'])==saved['profile']:
+            if same and not any(i['status'] in ('uncertain','filled_no_save') for i in items) and json.loads(meta['profile_json'])==saved['profile']:
                 with self.db:self.erp.repository.audit(company,'rpa_existing_scope_selected',None,dict(job=meta['id'],documents=pending))
                 return dict(job=meta['id'],documents=pending,skipped=[],pilot=pilot,resumed=True)
         replacing=tuple(j['id'] for j in active)
@@ -147,7 +147,7 @@ class RPA:
                 if not self.db.in_transaction:self.db.execute('BEGIN IMMEDIATE')
                 old=self.db.execute("SELECT id,status,execution FROM rpa_jobs WHERE company_id=? AND mode='fill_only' AND status IN ('queued','paused','running') AND EXISTS(SELECT 1 FROM rpa_items i WHERE i.job_id=rpa_jobs.id AND i.status='queued')",(company,)).fetchall()
                 if {r['id'] for r in old}!=set(replacing) or any(r['status']=='running' or r['execution']!='save_new' for r in old):raise ValueError('Άλλαξε η ενεργή ουρά. Δεν ξεκίνησε νέα καταχώριση.')
-                if self.db.execute("SELECT 1 FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.mode='fill_only' AND i.status IN ('started','save_pending','uncertain','filled_no_save') LIMIT 1",(company,)).fetchone():raise ValueError('Προηγούμενη προσπάθεια χρειάζεται έλεγχο EBS.')
+                if self.db.execute("SELECT 1 FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.mode='fill_only' AND i.status IN ('started','save_pending') LIMIT 1",(company,)).fetchone():raise ValueError('Προηγούμενη προσπάθεια χρειάζεται έλεγχο EBS.')
                 # Replace scheduling only. All old item IDs, payloads, attempted
                 # states and receipts remain in history; hidden rows are not run.
                 for previous in replacing:
@@ -158,7 +158,8 @@ class RPA:
             need_new=0
             if fresh_after_previous:
                 previous=self.db.execute("SELECT i.status,j.profile_json FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.mode='fill_only' AND j.execution='save_new' AND i.status IN ('save_invoked','ui_saved_review','reviewed_by_operator') ORDER BY i.id DESC LIMIT 1",(company,)).fetchone()
-                need_new=int(bool(previous and previous['status'] in ('save_invoked','reviewed_by_operator') and json.loads(previous['profile_json'])==profile))
+                isolation=self.db.execute("SELECT 1 FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.mode='fill_only' AND i.status IN ('uncertain','filled_no_save','not_saved_confirmed') LIMIT 1",(company,)).fetchone()
+                need_new=int(bool(isolation or (previous and previous['status'] in ('save_invoked','reviewed_by_operator') and json.loads(previous['profile_json'])==profile)))
             job=self.db.execute('INSERT INTO rpa_jobs(company_id,mode,status,execution,profile_json,reconciled_only,need_new) VALUES (?,?,?,?,?,?,?)',(company,mode,'queued',execution,encoded(profile),int(required),need_new)).lastrowid
             for payload in payloads:
                 self.db.execute('INSERT INTO rpa_items(job_id,document_id,payload) VALUES (?,?,?)',(job,payload['document_id'],encoded(payload)))
@@ -283,6 +284,17 @@ class RPA:
             self.erp.repository.audit(company,'rpa_manual_review',item['document_id'],dict(job=job,item=item_id,note=note.strip()[:2000],not_database_verified=True))
             if stored_in_ebs is True:self.erp.repository.audit(company,'ebs_storage_operator_confirmed',item['document_id'],dict(job=job,item=item_id,note=note.strip()[:2000],verification='visual_operator',not_database_verified=True))
 
+    def confirm_not_saved(self,company,document):
+        from app.application.ebs_reconciliation import EBSReconciliation
+        if EBSReconciliation(self.erp).results(company).get(document,{}).get('status')=='registered':raise ValueError('Υπάρχει επιβεβαιωμένη καταχώριση· δεν επιτρέπεται επαναφορά για νέα αποστολή.')
+        row=self.db.execute("SELECT i.*,j.status AS job_status FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.mode='fill_only' AND i.document_id=? ORDER BY i.id DESC LIMIT 1",(company,document)).fetchone()
+        if not row or row['status'] not in ('uncertain','filled_no_save') or row['job_status']=='running':raise ValueError('Δεν υπάρχει διακοπείσα προσπάθεια προς επιβεβαίωση.')
+        with self.db:
+            changed=self.db.execute("UPDATE rpa_items SET status='not_saved_confirmed',reason='Ο χειριστής επιβεβαίωσε ότι δεν αποθηκεύτηκε στο EBS',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=?",(row['id'],row['status']))
+            if changed.rowcount!=1:raise ValueError('Άλλαξε η προσπάθεια· ανανέωσε την προβολή.')
+            self.db.execute("UPDATE rpa_jobs SET need_new=1,expected_ted=NULL WHERE id=?",(row['job_id'],))
+            self.erp.repository.audit(company,'ebs_not_saved_operator_confirmed',document,dict(job=row['job_id'],item=row['id'],previous=row['status'],verification='visual_operator'))
+
     def pause(self,company,job):
         self.items(company,job)
         with self.db:
@@ -362,7 +374,8 @@ class RPA:
             # native exception messages/window titles or invoice data.
             from app.infrastructure.ebs_adapter.adapter import FIELDS
             safe={f'Δεν επαληθεύτηκε το EBS στο πεδίο {field}. Δεν στάλθηκε Save.' for field,_ in FIELDS}
-            safe.update(('Άλλαξε η διεργασία EBS. Η συμπλήρωση διακόπηκε.','Άλλαξε το ενεργό ΤΕΔ πριν το Save','Δεν αναγνωρίστηκε νέο ΤΕΔ. Δεν επιτρέπεται επανάληψη παραστατικού.','Διακόπηκε η εισαγωγή Unicode στο EBS'))
+            safe.update(f'Η θέση του πεδίου {field} δεν ανήκει στο ενεργό ΤΕΔ της ουράς. Έλεγξε το mapping πριν καταχώριση.' for field,_ in FIELDS)
+            safe.update(('Άλλαξε η διεργασία EBS. Η συμπλήρωση διακόπηκε.','Άλλαξε το ενεργό ΤΕΔ πριν το Save','Δεν αναγνωρίστηκε νέο ΤΕΔ. Δεν επιτρέπεται επανάληψη παραστατικού.','Δεν αναγνωρίστηκε σταθερό νέο ΤΕΔ. Δεν επιτρέπεται επανάληψη παραστατικού.','Διακόπηκε η εισαγωγή Unicode στο EBS'))
             if str(exc) in safe:reason+=' '+str(exc)
             from app.infrastructure.crashlog import record
             record(self.erp.directory,exc,'worker')

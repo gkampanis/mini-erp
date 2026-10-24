@@ -23,3 +23,19 @@ def sort_tree(tree,rows,key,reverse=False,*,value=None):
     if x:tree.xview_moveto(x[0])
     if y:tree.yview_moveto(y[0])
     return children
+
+
+def posting_ids(tree,mode):
+    """Snapshot stable DB IDs in displayed order; filtering is never selection."""
+    try:
+        visible=[int(key) for key in tree.get_children()]
+        selected={int(key) for key in tree.selection()}
+    except (TypeError,ValueError):raise ValueError('Η γραμμή δεν έχει έγκυρο αναγνωριστικό παραστατικού. Κάνε ανανέωση.') from None
+    if len(visible)!=len(set(visible)):raise ValueError('Διπλά αναγνωριστικά παραστατικών στην προβολή.')
+    if mode=='batch':return visible
+    chosen=[key for key in visible if key in selected]
+    if mode=='one':
+        if len(chosen)!=1:raise ValueError('Επίλεξε ακριβώς ένα παραστατικό.')
+        return chosen
+    if mode=='selected':return chosen
+    raise ValueError('Άγνωστη επιλογή καταχώρισης.')

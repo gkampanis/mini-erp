@@ -54,3 +54,11 @@ class CellFiltersTests(unittest.TestCase):
         self.filters.set('name','=ONE');self.assertEqual(self.ids(),[1])
         self.assertNotIn('name',self.filters.cell_filters)
         self.assertIn('net_minor',self.filters.cell_filters)
+    def test_remove_one_supplier_exclusion_keeps_the_other_exclusion_and_date(self):
+        self.filters.cell('name','ONE',True);self.filters.cell('name','TWO',True)
+        self.filters.cell('issue_date',date(2026,10,1))
+        self.assertEqual(self.ids(),[])
+        self.filters.remove_rule('name',(True,'ONE'))
+        self.assertEqual(self.ids(),[1])
+        self.assertEqual(self.filters.cell_filters['name'],[(True,'TWO')])
+        self.assertIn('issue_date',self.filters.cell_filters)
