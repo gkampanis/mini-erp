@@ -1,0 +1,131 @@
+{
+  "source_commit": "a53b310df6c8df6094930fde155c441480a2a7ba",
+  "registry_benchmark": {
+    "scope": "Synthetic CPU/SQLite comparison only; no network or production data",
+    "counterparties": 200,
+    "documents": 2500,
+    "transport": "Injected immediate synthetic responses",
+    "blank_names": {
+      "new": {
+        "seconds": 0.01415,
+        "sql_statements": 1806,
+        "document_list_queries": 0,
+        "transport_calls": 200,
+        "unique_requested_vats": 200,
+        "request_phase_notices": 200,
+        "filled": 200,
+        "skipped": 0,
+        "not_found": 0,
+        "failed": 0,
+        "candidates": 200
+      },
+      "old": {
+        "seconds": 0.237318,
+        "sql_statements": 3006,
+        "document_list_queries": 400,
+        "transport_calls": 200,
+        "unique_requested_vats": 200,
+        "request_phase_notices": 0,
+        "filled": 200,
+        "skipped": 0,
+        "not_found": 0,
+        "failed": 0,
+        "candidates": 200
+      }
+    },
+    "placeholder_names": {
+      "new": {
+        "seconds": 0.013621,
+        "sql_statements": 1806,
+        "document_list_queries": 0,
+        "transport_calls": 200,
+        "unique_requested_vats": 200,
+        "request_phase_notices": 200,
+        "filled": 200,
+        "skipped": 0,
+        "not_found": 0,
+        "failed": 0,
+        "candidates": 200
+      },
+      "old": {
+        "seconds": 0.000303,
+        "sql_statements": 6,
+        "document_list_queries": 0,
+        "transport_calls": 0,
+        "unique_requested_vats": 0,
+        "request_phase_notices": 0,
+        "filled": 0,
+        "skipped": 0,
+        "not_found": 0,
+        "failed": 0,
+        "candidates": 0
+      }
+    }
+  },
+  "ui_benchmark": {
+    "scope": "Synthetic Linux UI/SQLite timings; no network, AADE or EBS",
+    "documents": 2500,
+    "previous_sort_full_refresh": {
+      "seconds": 0.14055,
+      "sql_statements": 23,
+      "visible_rows": 2500
+    },
+    "new_sort_move_only": {
+      "seconds": 0.033837,
+      "sql_statements": 0,
+      "visible_rows": 2500
+    },
+    "previous_search_full_refresh": {
+      "seconds": 0.091134,
+      "sql_statements": 23,
+      "visible_rows": 9
+    },
+    "new_search_cached": {
+      "seconds": 0.014298,
+      "sql_statements": 0,
+      "visible_rows": 9
+    }
+  },
+  "tests": {
+    "source_tests": {
+      "tests": 207,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "source_gui": {
+      "tests": 51,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "package_tests": {
+      "tests": 207,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "package_gui": {
+      "tests": 51,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    }
+  },
+  "native_windows": "NOT_RUN",
+  "production_registry_aade": "NOT_RUN",
+  "production_ebs": "NOT_RUN",
+  "exa": "NOT_AVAILABLE; official public documentation researched directly"
+}
