@@ -318,7 +318,14 @@ class RPA:
         except Exception as exc:
             status='uncertain';state='paused'
             reason='Διακοπή στη φάση '+phase+'. Έλεγξε το EBS πριν συνέχεια. Δεν επιτρέπεται αυτόματη επανάληψη.'
-            # Do not retain arbitrary native messages/window titles in public logs.
+            # Preserve actionable, application-owned field errors, never arbitrary
+            # native exception messages/window titles or invoice data.
+            from app.infrastructure.ebs_adapter.adapter import FIELDS
+            safe={f'Δεν επαληθεύτηκε το EBS στο πεδίο {field}. Δεν στάλθηκε Save.' for field,_ in FIELDS}
+            safe.update(('Άλλαξε η διεργασία EBS. Η συμπλήρωση διακόπηκε.','Άλλαξε το ενεργό ΤΕΔ πριν το Save','Δεν αναγνωρίστηκε νέο ΤΕΔ. Δεν επιτρέπεται επανάληψη παραστατικού.','Διακόπηκε η εισαγωγή Unicode στο EBS'))
+            if str(exc) in safe:reason+=' '+str(exc)
+            from app.infrastructure.crashlog import record
+            record(self.erp.directory,exc,'worker')
         with self.db:
             self.db.execute('UPDATE rpa_items SET status=?,reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',(status,reason,item['id']))
             self.db.execute('UPDATE rpa_jobs SET status=? WHERE id=?',(state,job))

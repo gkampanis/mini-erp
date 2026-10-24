@@ -338,7 +338,16 @@ class RPAPanel:
                 if self.stop_requested:self.rpa.stop(self.owner.company,job)
                 elif self.pause_requested:self.rpa.pause(self.owner.company,job)
                 self.running=False;self.owner.root.deiconify();self.refresh()
-        self.owner.run_worker(execute,done)
+                if result['status']=='blocked' or result.get('item_status')=='uncertain':
+                    messagebox.showerror('Η καταχώριση σταμάτησε',result.get('reason') or 'Έλεγξε το EBS και το ιστορικό πριν συνέχεια.',parent=self.owner.root)
+        def dispatch():
+            self._next_after=None
+            if self.running and not self.owner._closing:self.owner.run_worker(execute,done)
+        if meta['mode']=='fill_only':
+            # Match the original Agent: let the window hide and EBS regain focus
+            # before its worker inspects coordinates or native child windows.
+            self._next_after=self.owner.root.after(850,dispatch)
+        else:dispatch()
 
     def cancel_next(self):
         if self._next_after is not None:self.owner.root.after_cancel(self._next_after);self._next_after=None

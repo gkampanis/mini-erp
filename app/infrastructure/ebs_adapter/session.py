@@ -45,11 +45,15 @@ class WindowsSession(WindowsAdapter):
 
     def prepare(self,profile,expected=None):
         self.at_ebs(profile['save']);self.at_ebs(profile['new']);self.health()
-        active=self._active_ted()
+        deadline=time.monotonic()+2
+        while True:
+            active=self._active_ted()
+            if active is not None and (expected is None or active==expected):
+                self.expected_ted=active;return active
+            if time.monotonic()>=deadline:break
+            time.sleep(.1);self.health()
         if active is None:raise RuntimeError('Δεν προσδιορίστηκε το ενεργό ΤΕΔ. Άνοιξε κενό ΤΕΔ.')
-        if expected is not None and active!=expected:raise RuntimeError('Δεν είναι ενεργό το νέο ΤΕΔ της ουράς')
-        self.expected_ted=active
-        return active
+        raise RuntimeError('Δεν είναι ενεργό το νέο ΤΕΔ της ουράς')
 
     def save(self,point):
         self.health()
@@ -87,7 +91,9 @@ class WindowsSession(WindowsAdapter):
      u.EnumChildWindows.argtypes=[wintypes.HWND,cbtype,wintypes.LPARAM]
      def outer(h,l):
       t=title(h).upper()
-      if 'EBS ERP' in t or 'ENTERSOFT' in t:u.EnumChildWindows(h,icb,0)
+      if 'EBS ERP' in t or 'ENTERSOFT' in t:
+       pid=wintypes.DWORD();u.GetWindowThreadProcessId(h,ctypes.byref(pid))
+       if self.pid is None or pid.value==self.pid:u.EnumChildWindows(h,icb,0)
       return True
      ocb=cbtype(outer);u.EnumWindows.argtypes=[cbtype,wintypes.LPARAM];u.EnumWindows(ocb,0)
      # WinForms MDI may expose both an outer TED form and nested TED-labelled
@@ -120,9 +126,25 @@ class WindowsSession(WindowsAdapter):
      if not fg:return None
      pid=wintypes.DWORD()
      tid=u.GetWindowThreadProcessId(fg,ctypes.byref(pid))
+     if self.pid is not None and pid.value!=self.pid:return None
+     forms=self._mdi_forms()
+     # EBS may host its MDI child on another GUI thread. Ask the verified
+     # MDIClient for its active child; foreground-thread focus is insufficient.
+     u.GetClassNameW.argtypes=[wintypes.HWND,wintypes.LPWSTR,ctypes.c_int]
+     send=u.SendMessageTimeoutW
+     send.argtypes=[wintypes.HWND,wintypes.UINT,ctypes.c_size_t,ctypes.c_ssize_t,wintypes.UINT,wintypes.UINT,ctypes.POINTER(ctypes.c_size_t)]
+     send.restype=ctypes.c_ssize_t
+     active=set()
+     for parent in {u.GetParent(form) for form in forms}:
+      if not parent:continue
+      name=ctypes.create_unicode_buffer(256);u.GetClassNameW(parent,name,256)
+      if 'mdiclient' not in name.value.casefold():continue
+      result=ctypes.c_size_t()
+      if not send(parent,0x0229,0,0,0x0002,250,ctypes.byref(result)) or result.value not in forms:return None
+      active.add(result.value)
+     if active:return next(iter(active)) if len(active)==1 else None
      info=GUITHREADINFO();info.cbSize=ctypes.sizeof(info)
      if not u.GetGUIThreadInfo(tid,ctypes.byref(info)):return None
-     forms=self._mdi_forms()
      for root in (info.hwndFocus, info.hwndActive):
       h=root
       for _ in range(32):

@@ -1250,5 +1250,50 @@ class DesktopRegressions(unittest.TestCase):
         self.assertNotIn('88000001',{r['mark'] for r in app._documents.values()})
         self.assertEqual(self.count('rpa_jobs'),0)
 
+    def test_real_posting_worker_opens_new_then_fills_and_saves_without_mocking_engine(self):
+        from types import SimpleNamespace
+        from app.infrastructure.ebs_adapter.adapter import FIELDS
+        from tests.test_workflow import FakeEBS
+        # All values remain synthetic; patch only the OS boundary, not posting/advance.
+        app=self.app
+        with app.erp.db:app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(app.company,))
+        row=list(ROW);row[0]='000000004'
+        workbook(self.folder/'inputs/worker-post.xlsx',[HEADERS,row]);self.import_fixture('worker-post.xlsx');app.refresh()
+        ids=list(app._documents);panel=app.rpa_panel
+        panel.workspace.approve_many(app.company,[dict(document=d,group='6',account='64.03') for d in ids],confirmed=True,remember=True)
+        panel.workspace.save_profile(app.company,dict(mapping={f:[10,20] for f,_ in FIELDS},save=[100,200],new=[300,400]))
+        job=panel.rpa.posting(app.company,ids)['job']
+        with app.erp.db:app.erp.db.execute('UPDATE rpa_jobs SET need_new=1 WHERE id=?',(job,))
+        panel.job=job;fake=FakeEBS()
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=fake),patch('ctypes.windll',SimpleNamespace(user32=SimpleNamespace(GetAsyncKeyState=lambda _:0)),create=True):
+            panel.start()
+            self.assertEqual(fake.calls,[])  # EBS is not inspected before Tk hides.
+            wait(self.root,lambda:not app.busy and not panel.running)
+        self.assertEqual([c[0] for c in fake.calls],['new','prepare','fill','save'])
+        self.assertEqual(panel.rpa.items(app.company,job)[0]['status'],'completed')
+        self.assertEqual(panel.rpa.progress(app.company,job)['save_requested'],1)
+        self.assertEqual(panel.rpa.progress(app.company,job)['automatically_verified'],0)
+
+    def test_real_worker_prepare_failure_is_visible_and_resume_does_not_open_another_ted(self):
+        from types import SimpleNamespace
+        from app.infrastructure.ebs_adapter.adapter import FIELDS
+        from tests.test_workflow import FakeEBS
+        app=self.app
+        with app.erp.db:app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(app.company,))
+        row=list(ROW);row[0]='000000004'
+        workbook(self.folder/'inputs/worker-stop.xlsx',[HEADERS,row]);self.import_fixture('worker-stop.xlsx');app.refresh()
+        ids=list(app._documents);panel=app.rpa_panel
+        panel.workspace.approve_many(app.company,[dict(document=d,group='6',account='64.03') for d in ids],confirmed=True)
+        panel.workspace.save_profile(app.company,dict(mapping={f:[10,20] for f,_ in FIELDS},save=[100,200],new=[300,400]))
+        job=panel.rpa.posting(app.company,ids)['job']
+        with app.erp.db:app.erp.db.execute('UPDATE rpa_jobs SET need_new=1 WHERE id=?',(job,))
+        panel.job=job;fake=FakeEBS(fail='prepare')
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=fake),patch('ctypes.windll',SimpleNamespace(user32=SimpleNamespace(GetAsyncKeyState=lambda _:0)),create=True),patch('app.ui.rpa_panel.messagebox.showerror') as error:
+            panel.start();wait(self.root,lambda:not app.busy and not panel.running)
+            error.assert_called_once();self.assertIn('synthetic target mismatch',error.call_args.args[1])
+            fake.fail=None;panel.start();wait(self.root,lambda:not app.busy and not panel.running)
+        self.assertEqual([c[0] for c in fake.calls],['new','prepare','prepare','fill','save'])
+        self.assertEqual(str(self.root.state()),'normal')
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

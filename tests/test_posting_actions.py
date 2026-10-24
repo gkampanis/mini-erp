@@ -96,3 +96,15 @@ class PostingActionsTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.rpa.posting(self.company,self.ids[2:3])
         self.assertEqual(self.erp.db.execute('SELECT count(*) FROM rpa_jobs').fetchone()[0],1)
         self.assertEqual(self.rpa.items(self.company,job)[0]['status'],'paused')
+
+    def test_fill_failure_keeps_safe_field_reason_and_shareable_stack_without_secrets(self):
+        from unittest.mock import Mock
+        report=self.rpa.posting(self.company,self.ids[:1]);fake=FakeEBS()
+        fake.fill=Mock(side_effect=RuntimeError('Δεν επαληθεύτηκε το EBS στο πεδίο AFM_CREDITOR. Δεν στάλθηκε Save.'))
+        result=self.run_job(report['job'],fake)
+        self.assertEqual(result['item_status'],'uncertain')
+        self.assertIn('AFM_CREDITOR',result['reason'])
+        self.assertFalse(any(call[0]=='save' for call in fake.calls))
+        log=(self.erp.directory/'diagnostics'/'crashlog.jsonl').read_text()
+        self.assertIn('app/application/rpa.py',log);self.assertNotIn('AFM_CREDITOR',log)
+        self.assertNotIn('POST0',log)
