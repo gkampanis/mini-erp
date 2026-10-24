@@ -1,0 +1,50 @@
+{
+  "source_commit": "e5121b7152d2f7a0d17731bac9fd69c9e9f577a7",
+  "delivery_gate": "PASSED",
+  "sha256": "70a609623512169e3239cea4a5f56e74a78c94a44bae5246a402b70dd40f3d51",
+  "counts": {
+    "source_tests": {
+      "tests": 235,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "source_gui": {
+      "tests": 70,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "package_tests": {
+      "tests": 235,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "package_gui": {
+      "tests": 70,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    }
+  },
+  "windows_desktop": "NOT_RUN",
+  "windows_launcher": "NOT_RUN",
+  "ebs_live": "NOT_RUN",
+  "aade_live": "NOT_RUN",
+  "reported_error": "Δεν είναι ενεργό το νέο ΤΕΔ της ουράς",
+  "native_test_scope": "Synthetic Win32 MDI activation, stale context before claim, no retry after fill begins",
+  "filter_test_scope": "Visible reset for counterparty include + preparation status exclusion; no SQLite changes"
+}
