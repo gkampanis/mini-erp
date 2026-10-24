@@ -5,7 +5,7 @@ from tkinter import ttk,filedialog,messagebox,simpledialog
 from app.application.service import ERP
 from app.application.rpa import RPA
 from app.application.workspace import Workspace
-from app.infrastructure.ebs_adapter.adapter import load_mapper
+from app.infrastructure.ebs_adapter.adapter import load_mapper,FIELDS
 
 LABELS={'outgoing_excluded':'Εκδοθέν · εκτός εξόδων','purchase_excluded':'Αγορές · εκτός EBS','excluded_purchase':'Αγορές · αποκλείστηκε πριν εκτέλεση','not_sent':'Χωρίς προσπάθεια','queued':'Σε αναμονή','started':'Συμπλήρωση','save_pending':'Save σε εξέλιξη','simulated':'Ελέγχθηκε χωρίς καταχώριση','filled_no_save':'Συμπληρώθηκε χωρίς Save','uncertain':'Χρειάζεται έλεγχος στο EBS','failed':'Απέτυχε','save_invoked':'Εντολή Save · οπτικός έλεγχος','ui_saved_review':'Save → νέο ΤΕΔ · έλεγχος','reviewed_by_operator':'Ελέγχθηκε από χειριστή'}
 
@@ -146,13 +146,23 @@ class RPAPanel:
 
     def settings(self):
         if self.owner.busy or self.running:return
-        win=tk.Toplevel(self.owner.root);win.title('Ρυθμίσεις EBS · αποθηκεύονται μία φορά');win.geometry('760x530')
+        existing=getattr(self,'_settings',None)
+        if existing is not None and existing.winfo_exists():existing.deiconify();existing.lift();return existing
+        win=tk.Toplevel(self.owner.root);self._settings=win
+        win.title('Ρυθμίσεις EBS · Mapping οθόνης');win.geometry('820x700')
         body=ttk.Frame(win,padding=20);body.pack(fill='both',expand=True)
         saved=self.workspace.profile(self.owner.company);profile=saved['profile'] if saved else {'mapping':{},'save':None,'new':None}
+        company=self.owner.company;capture_timer=None
+        labels={'AFM_CREDITOR':'ΑΦΜ πιστωτή','INVOICE_REFERENCE':'Αριθμός παραστατικού','INVOICE_DATE':'Ημερομηνία · πρώτο ψηφίο','EXPENSE_ACCOUNT_GRID_CELL':'Κελί λογαριασμού εξόδων','NET_AMOUNT_GRID_CELL':'Κελί καθαρής αξίας','save':'Save','new':'Νέο ΤΕΔ'}
+        positions={key:tk.StringVar() for key in labels}
         status=tk.StringVar()
-        def describe():status.set(f"Mapper: {'φορτωμένος' if profile['mapping'] else 'δεν ορίστηκε'}\nSave: {profile['save'] or 'δεν ορίστηκε'}\nΝέο ΤΕΔ: {profile['new'] or 'δεν ορίστηκε'}\nΠιλοτικός έλεγχος: {'επιβεβαιωμένος' if saved and saved['pilot_at'] else 'εκκρεμεί'}")
-        ttk.Label(body,text='Mapper, Save και Νέο ΤΕΔ',style='Section.TLabel').pack(anchor='w')
-        ttk.Label(body,text='Χρησιμοποίησε την ίδια διάταξη Entersoft με τον αρχικό agent. Οι θέσεις διατηρούνται για την επόμενη εκκίνηση.',wraplength=690,style='Subtitle.TLabel').pack(anchor='w',pady=10)
+        def describe():
+            for key,var in positions.items():
+                point=profile.get(key) if key in ('save','new') else profile['mapping'].get(key)
+                var.set(f'{point[0]}, {point[1]}' if point is not None else 'Δεν ορίστηκε')
+            status.set('Οι αλλαγές εφαρμόζονται με «Αποθήκευση ρυθμίσεων». Νέες θέσεις απαιτούν νέο πιλοτικό έλεγχο.')
+        ttk.Label(body,text='Mapping πεδίων στην οθόνη σου',style='Section.TLabel').pack(anchor='w')
+        ttk.Label(body,text='Άνοιξε κενό ΤΕΔ στην οθόνη όπου θα δουλεύεις. Πάτησε «Καταγραφή» και τοποθέτησε το ποντίκι στο αντίστοιχο πεδίο μέσα σε 3 δευτερόλεπτα. Δεν γίνεται κλικ ή πληκτρολόγηση. Μετά μην αλλάξεις θέση, μέγεθος ή κλιμάκωση του EBS.',wraplength=750,style='Subtitle.TLabel').pack(anchor='w',pady=10)
         def mapper():
             filename=filedialog.askopenfilename(parent=win,filetypes=[('CSV mapper','*.csv')])
             if not filename:return
@@ -160,24 +170,43 @@ class RPAPanel:
             except (ValueError,OSError) as exc:messagebox.showerror('Mapper',str(exc),parent=win)
         ttk.Button(body,text='Φόρτωση υπάρχοντος CSV mapper',command=mapper).pack(anchor='w',pady=8)
         def capture(key):
+            nonlocal capture_timer
+            if capture_timer is not None:return
             if sys.platform!='win32':messagebox.showinfo('Windows','Η καταγραφή θέσεων γίνεται στον υπολογιστή με Entersoft.',parent=win);return
             from app.infrastructure.ebs_adapter.session import WindowsSession
             try:backend=WindowsSession()
             except RuntimeError as exc:messagebox.showerror('Adapter',str(exc),parent=win);return
-            messagebox.showinfo('Καταγραφή θέσης','Μετά το ΟΚ βάλε το ποντίκι πάνω στο '+('Save' if key=='save' else 'Νέο ΤΕΔ')+' του Entersoft. Σε 3 δευτερόλεπτα καταγράφεται χωρίς κλικ.',parent=win)
+            messagebox.showinfo('Καταγραφή θέσης','Μετά το ΟΚ βάλε το ποντίκι πάνω στο πεδίο «'+labels[key]+'» του Entersoft. Σε 3 δευτερόλεπτα καταγράφεται χωρίς κλικ.',parent=win)
             win.withdraw();self.owner.root.withdraw()
             def finish():
+                nonlocal capture_timer
+                capture_timer=None
+                error=None
                 try:
-                    point=tuple(backend.pg.position());backend.at_ebs(point);profile[key]=point;describe()
-                except Exception as exc:messagebox.showerror('Θέση EBS',str(exc),parent=win)
+                    point=tuple(backend.pg.position())
+                    if key in ('save','new'):backend.at_ebs(point);profile[key]=point
+                    else:
+                        backend.validate_target(key,point)
+                        profile['mapping'][key]=point
+                    describe()
+                except Exception as exc:error=str(exc)
                 finally:self.owner.root.deiconify();win.deiconify()
-            self.owner.root.after(3000,finish)
-        line=ttk.Frame(body);line.pack(fill='x',pady=8)
-        ttk.Button(line,text='Καταγραφή Save',command=lambda:capture('save')).pack(side='left')
-        ttk.Button(line,text='Καταγραφή Νέο ΤΕΔ',command=lambda:capture('new')).pack(side='left',padx=8)
+                if error:messagebox.showerror('Θέση EBS',error,parent=win)
+            capture_timer=self.owner.root.after(3000,finish)
+        grid=ttk.Frame(body);grid.pack(fill='x',pady=8);grid.columnconfigure(0,weight=1)
+        for row,key in enumerate(labels):
+            ttk.Label(grid,text=labels[key]).grid(row=row,column=0,sticky='w',pady=5)
+            ttk.Label(grid,textvariable=positions[key],width=20).grid(row=row,column=1,sticky='w',padx=12)
+            ttk.Button(grid,text='Καταγραφή '+labels[key],command=lambda key=key:capture(key)).grid(row=row,column=2,sticky='ew',pady=5)
         ttk.Label(body,textvariable=status,style='Subtitle.TLabel',justify='left').pack(anchor='w',pady=12);describe()
+        def close():
+            nonlocal capture_timer
+            if capture_timer is not None:self.owner.root.after_cancel(capture_timer);capture_timer=None;self.owner.root.deiconify()
+            win.destroy()
+        win.protocol('WM_DELETE_WINDOW',close)
         def save():
-            try:self.workspace.save_profile(self.owner.company,profile)
+            if self.owner.company!=company:messagebox.showerror('Ρυθμίσεις','Άλλαξε η ενεργή εταιρεία. Κλείσε και άνοιξε ξανά τις ρυθμίσεις EBS.',parent=win);return
+            try:self.workspace.save_profile(company,profile)
             except ValueError as exc:messagebox.showerror('Ρυθμίσεις',str(exc),parent=win);return
             win.destroy();self.state.set('Οι θέσεις αποθηκεύτηκαν. Επόμενο: δοκιμή μίας εγγραφής και έλεγχος στο EBS.')
         ttk.Button(body,text='Εγκατάσταση RPA adapter · Ρυθμίσεις',command=self.owner.open_settings).pack(anchor='w',pady=8)

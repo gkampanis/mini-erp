@@ -181,13 +181,12 @@ class Desktop:
         self.tree = table(self.documents_tab,columns,titles,{'name':190,'reference':100,'vat':95,'issue_date':90,'gross_minor':85,'account_code':120,'preparation_state':120,'aade_state':90,'pdf_state':200})
         self.tree.configure(selectmode='extended')
         from app.ui.column_filters import ColumnFilters
-        self.column_filters=ColumnFilters(self.tree,self.filter_documents)
+        self.column_filters=ColumnFilters(self.tree,self.filter_documents,rows=lambda:self._documents,extra_menu=self.purchase_menu,show_summary=True)
         self.tree.configure(displaycolumns=('reference','name','vat','issue_date','net_minor','tax_minor','gross_minor','account_code','preparation_state','pdf_state'))
         for key,width in {'reference':95,'name':180,'vat':90,'issue_date':85,'net_minor':80,'tax_minor':80,'gross_minor':80,'account_code':100,'preparation_state':125,'pdf_state':135}.items():self.tree.column(key,width=width)
         for col in columns:
             self.tree.heading(col,command=lambda key=col:self.sort_documents(key))
         self.tree.bind('<ButtonRelease-1>',self.pdf_click)
-        self.tree.bind('<Button-3>',lambda event:self.purchase_menu(event,self.tree),add='+')
         self.tree.bind('<Double-1>',self.document_double_click)
         self.tree.bind('<Return>',lambda _:self.open_detail())
         actions = ttk.Frame(self.documents_tab)
@@ -201,6 +200,7 @@ class Desktop:
         ttk.Label(self.reviews_tab,text='Οι αναφορές διατηρούνται μετά το κλείσιμο της εφαρμογής. Διπλό κλικ για αναλυτικό έλεγχο.',style='Subtitle.TLabel').pack(anchor='w',pady=(4,12))
         self.review_tree = table(self.reviews_tab,('created_at','filename','inserted','duplicates','rejected','warnings'),
                                  ('Χρόνος εισαγωγής','Αρχείο','Νέα','Διπλότυπα','Εξαιρέσεις','Προειδοποιήσεις'),{'filename':300})
+        self.review_filters=ColumnFilters(self.review_tree,self.filter_reviews,rows=lambda:getattr(self,'_review_rows',{}),show_summary=True)
         self.review_tree.bind('<Double-1>',lambda _:self.open_review())
         ttk.Button(self.reviews_tab,text='Προβολή αναφοράς',command=self.open_review).pack(side='bottom',anchor='e',pady=(12,0))
         self.review_tree.master.pack_forget()
@@ -346,14 +346,14 @@ class Desktop:
         from app.ui.pdf_pane import open_document
         return open_document(self,document if document is not None else int(selected[0]),self.root)
 
-    def purchase_menu(self,event,tree):
+    def purchase_menu(self,event,tree,menu=None):
         if self.busy or self.rpa_panel.running or tree.identify_region(event.x,event.y)!='cell':return
         columns=list(tree['displaycolumns'])
         if columns==['#all']:columns=list(tree['columns'])
         if tree.identify_column(event.x)!='#'+str(columns.index('name')+1):return
         selected=tree.identify_row(event.y)
         if not selected:return
-        tree.selection_set(selected)
+        if menu is None:tree.selection_set(selected)
         row=next((r for r in self._month_rows if r['id']==int(selected)),None)
         if row is None:return
         from app.application.supplier_purchases import SupplierPurchases
@@ -364,9 +364,11 @@ class Desktop:
         enabled=not scope['enabled'];count=sum((d not in scope['tagged']) if enabled else (d in scope['tagged']) for d in scope['eligible'])
         previous=getattr(self,'_purchase_menu',None)
         if previous is not None:previous.destroy()
-        menu=tk.Menu(tree,tearoff=False);self._purchase_menu=menu
+        supplied=menu is not None
+        menu=menu if supplied else tk.Menu(tree,tearoff=False);self._purchase_menu=menu
         label='Ορισμός ως προμηθευτής αγορών' if enabled else 'Άρση χαρακτηρισμού προμηθευτή αγορών'
         menu.add_command(label=f'{label} — αφορά {count} εκκρεμή παραστατικά',command=lambda:self.set_purchase(row['vat'],enabled))
+        if supplied:menu.add_separator();return
         try:menu.tk_popup(event.x_root,event.y_root)
         finally:menu.grab_release()
 
@@ -438,10 +440,8 @@ class Desktop:
         self.metrics['pending'].set(str(sum(r['direction']=='incoming' and not r['is_purchase'] and not r.get('prepared_at') for r in month_rows)))
         self.metrics['issues'].set(str(sum(len(j['report'].get('rejected',[]))+len(j['report'].get('warnings',[])) for j in jobs)))
         self._jobs = {j['id']:j for j in jobs}
-        self.review_tree.delete(*self.review_tree.get_children())
-        for job in jobs:
-            report = job['report']
-            self.review_tree.insert('','end',iid=str(job['id']),values=(job['created_at'],job['filename'],report.get('inserted',0),report.get('duplicates',0),len(report.get('rejected',[])),len(report.get('warnings',[]))))
+        self._review_rows={j['id']:dict(id=j['id'],created_at=j['created_at'],filename=j['filename'],inserted=j['report'].get('inserted',0),duplicates=j['report'].get('duplicates',0),rejected=len(j['report'].get('rejected',[])),warnings=len(j['report'].get('warnings',[]))) for j in jobs}
+        self.filter_reviews()
         for view in self.document_views.values():view.refresh(render=self.notebook.select()==str(view.parent))
         self.reconciliation.refresh(evidence,render=self.notebook.select()==str(self.reconciliation_tab))
         if self.notebook.select()==str(self.suppliers_tab):self.suppliers.refresh()
@@ -449,6 +449,11 @@ class Desktop:
         if not self.busy:
             self.status.set('Τα παραστατικά και οι αναφορές έχουν φορτωθεί από τη βάση.')
 
+
+    def filter_reviews(self):
+        self.review_tree.delete(*self.review_tree.get_children())
+        for row in self.review_filters.apply(list(getattr(self,'_review_rows',{}).values())):
+            self.review_tree.insert('','end',iid=str(row['id']),values=[row[k] for k in self.review_tree['columns']])
 
     def filter_documents(self,*,fit_columns=False):
         if not hasattr(self,'_month_rows'):return

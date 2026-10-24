@@ -486,7 +486,8 @@ class DesktopRegressions(unittest.TestCase):
         self.app.notebook.select(self.app.suppliers_tab);self.root.update()
         tab=self.app.suppliers;tab.tree.selection_set(tab.tree.get_children());original=set(self.app.tree.get_children())
         win=tab.bulk();win.account_var.set('64.09')
-        with patch('app.ui.suppliers.messagebox.askyesno',return_value=True):self.button(win,'Έγκριση & ενημέρωση εκκρεμών').invoke()
+        with patch('app.ui.suppliers.messagebox.askyesno') as confirm:
+            self.button(win,'OK').invoke();confirm.assert_not_called()
         self.assertEqual(set(self.app.tree.get_children()),original)
         self.assertTrue(all(self.app._documents[int(d)]['account_code']=='64.09' for d in original))
         self.assertTrue(all(self.app.erp.preparation(self.app.company,int(d)) for d in original))
@@ -569,14 +570,13 @@ class DesktopRegressions(unittest.TestCase):
         from app.ui.counterparties import open_detail
         cp=self.app.erp.search(self.app.company,'000000001')[0]['counterparty_id']
         card=open_detail(self.app,cp)
-        card.apply_pending_var.set(False)
         card.account_fields[0].set('20.01');card.account_fields[1].set('64.03');card.account_fields[2].set('6 · Έξοδα')
         with patch('app.ui.counterparties.messagebox.askyesno',return_value=True):self.button(card,'Αποθήκευση καρτέλας').invoke()
         self.app.query.set('000000001');self.app.refresh()
         document=int(self.app.tree.get_children()[0])
         self.assertEqual(self.app._documents[document]['account_code'],'64.03')
-        self.assertEqual(self.app._documents[document]['preparation_state'],'Πρόταση καρτέλας')
-        self.assertIsNone(self.app.erp.preparation(self.app.company,document))
+        self.assertEqual(self.app._documents[document]['preparation_state'],'Εγκεκριμένο')
+        self.assertEqual(self.app.erp.preparation(self.app.company,document)['account_code'],'64.03')
         accounts=self.app.rpa_panel.accounts()
         fields=[w for w in widgets(accounts) if isinstance(w,ttk.Entry) and not isinstance(w,ttk.Combobox)]
         self.assertIn('64.03',[w.get() for w in fields])
@@ -1060,6 +1060,88 @@ class DesktopRegressions(unittest.TestCase):
         self.assertEqual(len(tree.get_children()),1);self.assertTrue(tree.heading('gross_minor','text').startswith('● '))
         self.assertEqual(self.count('rpa_jobs'),0)
 
+
+    def test_ebs_screen_mapping_captures_all_fields_without_clicks_and_persists(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from app.infrastructure.ebs_adapter.adapter import FIELDS
+        panel=self.app.rpa_panel;win=panel.settings();self.root.update()
+        self.assertIs(panel.settings(),win)
+        backend=Mock();backend.pg.position.return_value=(-1350,240)
+        callbacks=[]
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=backend),patch('app.ui.rpa_panel.messagebox.showinfo'),patch.object(self.root,'after',side_effect=lambda ms,fn:callbacks.append(fn) or 'capture'):
+            for field in ('ΑΦΜ πιστωτή','Αριθμός παραστατικού','Ημερομηνία · πρώτο ψηφίο','Κελί λογαριασμού εξόδων','Κελί καθαρής αξίας','Save','Νέο ΤΕΔ'):
+                self.button(win,'Καταγραφή '+field).invoke()
+                self.assertEqual(str(self.root.state()),'withdrawn')
+                callbacks.pop()()
+        self.assertEqual(backend.validate_target.call_count,5)
+        backend.validate_target.assert_any_call('INVOICE_DATE',(-1350,240))
+        self.assertEqual(backend.at_ebs.call_count,2)
+        backend.pg.click.assert_not_called();backend.pg.write.assert_not_called()
+        self.assertIsNone(panel.workspace.profile(self.app.company))
+        self.button(win,'Αποθήκευση ρυθμίσεων').invoke();self.root.update()
+        saved=panel.workspace.profile(self.app.company)
+        self.assertEqual(saved['profile']['mapping'],{key:[-1350,240] for key,_ in FIELDS})
+        self.assertEqual(saved['profile']['save'],[-1350,240]);self.assertIsNone(saved['pilot_at'])
+        self.assertEqual(self.count('rpa_jobs'),0)
+
+    def test_ebs_mapping_rejects_wrong_window_and_close_cancels_capture(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        panel=self.app.rpa_panel;win=panel.settings();self.root.update()
+        backend=Mock();backend.pg.position.return_value=(500,300)
+        backend.validate_target.side_effect=RuntimeError('Το σημείο δεν ανήκει στο Entersoft')
+        callbacks=[]
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=backend),patch('app.ui.rpa_panel.messagebox.showinfo'),patch('app.ui.rpa_panel.messagebox.showerror') as error,patch.object(self.root,'after',side_effect=lambda ms,fn:callbacks.append(fn) or 'capture'):
+            self.button(win,'Καταγραφή ΑΦΜ πιστωτή').invoke();callbacks.pop()()
+            error.assert_called_once();self.assertEqual(str(self.root.state()),'normal')
+            with patch.object(self.root,'after_cancel') as cancel:
+                self.button(win,'Καταγραφή ΑΦΜ πιστωτή').invoke()
+                self.root.tk.call(win.protocol('WM_DELETE_WINDOW'))
+                cancel.assert_called_once_with('capture')
+                self.assertEqual(str(self.root.state()),'normal')
+        self.assertIsNone(panel.workspace.profile(self.app.company))
+        backend.pg.click.assert_not_called()
+
+    def test_cell_menu_filters_and_excludes_without_selecting_or_database_refresh(self):
+        self.import_fixture('separate.xlsx');self.app.refresh();self.root.update()
+        tree=self.app.tree;filters=self.app.column_filters
+        rows=list(self.app._documents.values());row=rows[0];other=rows[1]
+        tree.selection_set(str(other['id']))
+        column=list(tree['displaycolumns']).index('name')
+        x,y,w,h=tree.bbox(str(row['id']),'name')
+        with patch('tkinter.Menu.tk_popup'),patch.object(self.app,'refresh',side_effect=AssertionError('SQL reload')):
+            tree.event_generate('<Button-3>',x=x+5,y=y+5);self.root.update()
+            menu=filters.menu
+            labels=[menu.entrycget(i,'label') for i in range(menu.index('end')+1) if menu.type(i)=='command']
+            self.assertIn('Φίλτρο με αυτή την τιμή',labels)
+            index=next(i for i in range(menu.index('end')+1) if menu.type(i)=='command' and menu.entrycget(i,'label')=='Φίλτρο με αυτή την τιμή')
+            menu.invoke(index)
+            self.assertEqual(list(self.app._documents),[row['id']])
+            self.assertEqual(tree.selection(),())  # Hidden selection is never promoted to all visible.
+            filters.clear(notify=True);filters.cell('name',row['name'],True)
+            self.assertEqual(list(self.app._documents),[other['id']])
+            filters.clear(notify=True);self.assertEqual(len(self.app._documents),2)
+        self.assertEqual(self.count('rpa_jobs'),0)
+
+    def test_cell_filters_shared_across_supplier_document_and_review_views(self):
+        self.import_fixture('separate.xlsx');self.app.refresh()
+        views=list(self.app.document_views.values())
+        for view in views:
+            view.refresh()
+            if view.rows:
+                row=next(iter(view.rows.values()));view.column_filters.cell('vat',row['vat'])
+                self.assertTrue(all(r['vat']==row['vat'] for r in view.rows.values()))
+                view.column_filters.clear(notify=True)
+        tab=self.app.suppliers;tab.refresh();row=next(iter(tab.rows.values()))
+        with patch.object(tab.service,'rows',side_effect=AssertionError('Unnecessary reload')):
+            tab.column_filters.cell('vat',row['vat'])
+            self.assertEqual(len(tab.rows),1);tab.column_filters.clear(notify=True)
+        review=self.app.review_filters
+        before=len(self.app.review_tree.get_children());job=next(iter(self.app._review_rows.values()))
+        review.cell('filename',job['filename'],True)
+        self.assertLess(len(self.app.review_tree.get_children()),before)
+        review.clear(notify=True);self.assertEqual(len(self.app.review_tree.get_children()),before)
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

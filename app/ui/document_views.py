@@ -44,9 +44,8 @@ class DocumentView:
         for key in columns:self.tree.heading(key,command=lambda k=key:self.sort_by(k))
         self.tree.bind('<Double-1>',self.double_click);self.tree.bind('<Return>',lambda _:self.detail())
         self.tree.bind('<ButtonRelease-1>',self.click_pdf)
-        if view in ('expenses','purchases'):self.tree.bind('<Button-3>',lambda event:owner.purchase_menu(event,self.tree))
         from app.ui.column_filters import ColumnFilters
-        self.column_filters=ColumnFilters(self.tree,self.refresh)
+        self.column_filters=ColumnFilters(self.tree,self.refresh,rows=lambda:self.rows,extra_menu=owner.purchase_menu if view in ('expenses','purchases') else None,show_summary=True)
 
     def clear(self):self.query.set('');self.kind.set('Όλα');self.column_filters.clear(notify=False);self.refresh()
     def sort_by(self,key):

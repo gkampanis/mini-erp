@@ -76,7 +76,7 @@ class ReconciliationTab:
         self.tree.bind('<<TreeviewSelect>>',self.selection_changed)
         for key in self.tree['columns']:self.tree.heading(key,command=lambda k=key:self.sort_by(k))
         from app.ui.column_filters import ColumnFilters
-        self.column_filters=ColumnFilters(self.tree,lambda:self.refresh(self.rows),value=lambda row,key:result_title(row) if key=='status' else SOURCES[row['source']] if key=='source' else row.get(key))
+        self.column_filters=ColumnFilters(self.tree,lambda:self.refresh(self.rows),rows=lambda:self.rows,value=lambda row,key:result_title(row) if key=='status' else SOURCES[row['source']] if key=='source' else row.get(key),show_summary=True)
     def clear(self):
         self.query.set('');self.filter.set('Όλα');self.column_filters.clear(notify=False);self.refresh(self.rows)
     def sort_by(self,key):
