@@ -1,0 +1,55 @@
+{
+  "delivery": "MiniERP-TED-Filters-BugReport-20261025",
+  "version": "2026.10.25-P2",
+  "source_commit": "db7a45f810afd1274a543d99a882bd2c7a131ae8",
+  "gate": "PASSED",
+  "sha256": "0e866c77dc90739b8710b30d98164b8ae0d5bdc5593978681449e45f02b85df8",
+  "bytes": 1154693,
+  "counts": {
+    "source_tests": {
+      "tests": 254,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "source_gui": {
+      "tests": 76,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "package_tests": {
+      "tests": 254,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "package_gui": {
+      "tests": 76,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    }
+  },
+  "windows_desktop": "NOT_RUN",
+  "windows_launcher": "NOT_RUN",
+  "pywinauto": "NOT_RUN",
+  "ebs_live": "NOT_RUN",
+  "aade_live": "NOT_RUN",
+  "bug_report_export": "Ρυθμίσεις → Υποστήριξη → Αποθήκευση crashlog για αποστολή",
+  "native_verification": "Actual enumeration/field validation/fill/save/new code against synthetic Win32 graph and input driver; no real native Windows or EBS application used",
+  "filter_verification": "Real Tk context-menu and reset callbacks, long summary layout regression, search independence, stateful Hypothesis",
+  "diagnostic_verification": "Prepare/fill/save/new stages, failsafe, no replay, readonly native metadata, no credentials/captions/invoice payload, bounded retention and export"
+}
