@@ -300,10 +300,8 @@ class Desktop:
         self._poll_after = self.root.after(80,self.poll)
 
     def reset_filters(self):
+        # Search clear preserves the independently selected filters/exclusions.
         self.query.set('')
-        self.state_filter.set(STATES[0])
-        self.group_filter.set('Όλες οι ομάδες')
-        self.column_filters.clear()
         self.filter_documents()
 
     def sort_documents(self, key):

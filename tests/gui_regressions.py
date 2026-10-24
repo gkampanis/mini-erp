@@ -987,7 +987,7 @@ class DesktopRegressions(unittest.TestCase):
                 self.assertEqual(tree.column('vat','width'),vat_width)
                 self.app.column_filters.set('reference','=does-not-exist')
                 self.assertFalse(tree.get_children());self.assertTrue(self.app.rpa_panel.buttons['post'].instate(['disabled']))
-                self.app.reset_filters();self.assertEqual(len(tree.get_children()),2)
+                self.app.column_filters.clear(notify=True);self.app.reset_filters();self.assertEqual(len(tree.get_children()),2)
                 self.app.query.set('ΔΟΚ/1');self.app.filter_documents();self.assertEqual(len(tree.get_children()),1)
                 reload.assert_not_called();rpa.assert_not_called()
         finally:self.app.erp.db.set_trace_callback(None)
@@ -1169,6 +1169,86 @@ class DesktopRegressions(unittest.TestCase):
         panel.restore_job();panel.refresh();self.root.update()
         self.assertEqual(panel.job,job);self.assertIn('0/2',panel.state.get())
         self.assertTrue(panel.buttons['resume'].winfo_ismapped());self.assertFalse(panel.buttons['pause'].winfo_ismapped())
+
+    def test_search_clear_preserves_pending_group_and_cell_exclusions_through_refresh(self):
+        from copy import deepcopy
+        from tests.fixtures import reconcile_empty
+        self.import_fixture('separate.xlsx');app=self.app
+        ids=list(app._documents)
+        app.rpa_panel.workspace.approve_many(app.company,[dict(document=d,group='6',account='64.03') for d in ids],confirmed=True,remember=True)
+        app.state_filter.set('Μη καταχωρισμένα');app.group_filter.set('Ομάδα 6 · Έξοδα');app.refresh();self.root.update()
+        excluded=app._documents[ids[0]]['name'];tree=app.tree
+        x,y,w,h=tree.bbox(str(ids[0]),'name')
+        with patch('tkinter.Menu.tk_popup'):
+            tree.event_generate('<Button-3>',x=x+5,y=y+5);self.root.update()
+            menu=app.column_filters.menu
+            index=next(i for i in range(menu.index('end')+1) if menu.type(i)=='command' and menu.entrycget(i,'label')=='Εξαίρεση αυτής της τιμής')
+            menu.invoke(index)
+        app.column_filters.set('gross_minor','>=0,00')
+        expected=set(app._documents);self.assertEqual(expected,{ids[1]})
+        before_filters=deepcopy((app.column_filters.filters,app.column_filters.cell_filters))
+        app.query.set('unmatched query');app.filter_documents();self.assertFalse(app._documents)
+        before_db=list(app.erp.db.iterdump());before_evidence=deepcopy(app._evidence)
+        self.button(app.documents_tab,'Καθαρισμός').invoke()
+        self.assertEqual(app.query.get(),'');self.assertEqual(app.state_filter.get(),'Μη καταχωρισμένα')
+        self.assertEqual(app.group_filter.get(),'Ομάδα 6 · Έξοδα')
+        self.assertEqual((app.column_filters.filters,app.column_filters.cell_filters),before_filters)
+        self.assertEqual(set(app._documents),expected);self.assertTrue(all(r['name']!=excluded for r in app._documents.values()))
+        self.assertEqual(list(app.erp.db.iterdump()),before_db);self.assertEqual(app._evidence,before_evidence)
+        app.notebook.select(app.reconciliation_tab);self.root.update();app.notebook.select(app.documents_tab);self.root.update()
+        app.refresh();self.assertEqual(set(app._documents),expected)
+        reconcile_empty(app.erp,app.company);app.refresh()
+        self.assertEqual(set(app._documents),expected)
+        self.assertEqual((app.column_filters.filters,app.column_filters.cell_filters),before_filters)
+        app.column_filters.remove('name');self.assertEqual(set(app._documents),set(ids))
+        app.column_filters.clear(notify=True);self.assertFalse(app.column_filters.cell_filters)
+        self.assertEqual(app.state_filter.get(),'Μη καταχωρισμένα')
+
+    def test_other_search_clear_handlers_preserve_kind_status_date_and_amount_exclusions(self):
+        from copy import deepcopy
+        self.import_fixture('separate.xlsx');app=self.app;app.refresh()
+        for view in app.document_views.values():
+            view.kind.set('Δελτία αποστολής' if view.view=='movement' else 'Τιμολόγια')
+            view.column_filters.cell('issue_date','2026-10-21',True)
+            if 'gross_minor' in view.tree['columns']:view.column_filters.cell('gross_minor',12,True)
+            wanted=deepcopy((view.column_filters.filters,view.column_filters.cell_filters));kind=view.kind.get()
+            view.query.set('unmatched query');view.refresh()
+            self.button(view.parent,'Καθαρισμός').invoke()
+            self.assertEqual(view.query.get(),'');self.assertEqual(view.kind.get(),kind)
+            self.assertEqual((view.column_filters.filters,view.column_filters.cell_filters),wanted)
+            self.assertTrue(all(r['issue_date']!='2026-10-21' for r in view.rows.values()))
+            view.column_filters.clear(notify=True);self.assertFalse(view.column_filters.cell_filters)
+        view=app.reconciliation;view.filter.set('Μη καταχωρισμένα')
+        view.column_filters.cell('issue_date','2026-10-21',True);view.column_filters.cell('gross_minor',12,True)
+        wanted=deepcopy((view.column_filters.filters,view.column_filters.cell_filters))
+        view.query.set('unmatched query');view.refresh(view.rows)
+        before=list(app.erp.db.iterdump())
+        self.button(app.reconciliation_tab,'Καθαρισμός').invoke()
+        self.assertEqual(view.query.get(),'');self.assertEqual(view.filter.get(),'Μη καταχωρισμένα')
+        self.assertEqual((view.column_filters.filters,view.column_filters.cell_filters),wanted)
+        self.assertEqual(list(app.erp.db.iterdump()),before)
+        self.assertEqual(len(view.tree.get_children()),1)
+        app.refresh();self.assertEqual((view.column_filters.filters,view.column_filters.cell_filters),wanted)
+        view.column_filters.clear(notify=True);self.assertFalse(view.column_filters.cell_filters)
+
+    def test_clear_search_cannot_reintroduce_delivery_note_into_posting_list(self):
+        from app.application.mydata import MyData
+        from app.infrastructure.aade.client import parsed_page
+        from tests.test_workflow import response
+        from tests.fixtures import reconcile_empty
+        self.import_fixture('separate.xlsx');app=self.app
+        xml=response(mark='88000001',number='DELIVERY').replace(b'<invoiceType>1.1</invoiceType>',b'<invoiceType>9.3</invoiceType>')
+        api=MyData(app.erp);api.persist(app.company,'production','2026-10-01','2026-10-31',[(xml,parsed_page(xml))],'RequestDocs')
+        api.import_documents(app.company,'production','2026-10-01','2026-10-31',confirmed=True)
+        reconcile_empty(app.erp,app.company)
+        app.state_filter.set('Μη καταχωρισμένα');app.refresh()
+        self.assertTrue(any(r['mark']=='88000001' for r in app._month_rows))
+        app.query.set('DELIVERY');app.filter_documents()
+        self.button(app.documents_tab,'Καθαρισμός').invoke();app.refresh()
+        self.assertTrue(app._documents)
+        self.assertTrue(all(r['kind']=='invoice' and (not r['invoice_type'] or r['rpa_allowed']) for r in app._documents.values()))
+        self.assertNotIn('88000001',{r['mark'] for r in app._documents.values()})
+        self.assertEqual(self.count('rpa_jobs'),0)
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

@@ -78,7 +78,7 @@ class ReconciliationTab:
         from app.ui.column_filters import ColumnFilters
         self.column_filters=ColumnFilters(self.tree,lambda:self.refresh(self.rows),rows=lambda:self.rows,value=lambda row,key:result_title(row) if key=='status' else SOURCES[row['source']] if key=='source' else row.get(key),show_summary=True)
     def clear(self):
-        self.query.set('');self.filter.set('Όλα');self.column_filters.clear(notify=False);self.refresh(self.rows)
+        self.query.set('');self.refresh(self.rows)
     def sort_by(self,key):
         from app.ui.table_actions import sort_tree
         self.sort=(key,not self.sort[1] if self.sort[0]==key else False)

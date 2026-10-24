@@ -47,7 +47,7 @@ class DocumentView:
         from app.ui.column_filters import ColumnFilters
         self.column_filters=ColumnFilters(self.tree,self.refresh,rows=lambda:self.rows,extra_menu=owner.purchase_menu if view in ('expenses','purchases') else None,show_summary=True)
 
-    def clear(self):self.query.set('');self.kind.set('Όλα');self.column_filters.clear(notify=False);self.refresh()
+    def clear(self):self.query.set('');self.refresh()
     def sort_by(self,key):
         from app.ui.table_actions import sort_tree
         self.sort=(key,not self.sort[1] if self.sort[0]==key else False)
