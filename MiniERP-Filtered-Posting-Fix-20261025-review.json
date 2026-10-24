@@ -1,0 +1,56 @@
+{
+  "source_commit": "12d477bdaa42acbc01e734b653f399a40b2372c7",
+  "delivery_gate": "PASSED",
+  "sha256": "8ae5232154936539c69785a89d2762c056458a6440d99c1771f6337b0c73b0a1",
+  "counts": {
+    "source_tests": {
+      "tests": 229,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "source_gui": {
+      "tests": 69,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "package_tests": {
+      "tests": 229,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "package_gui": {
+      "tests": 69,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    }
+  },
+  "windows_desktop": "NOT_RUN",
+  "windows_launcher": "NOT_RUN",
+  "ebs_live": "NOT_RUN",
+  "aade_live": "NOT_RUN",
+  "synthetic_end_to_end": "Visible filtered row only, old queue safely superseded, clear filter, remaining rows only; real posting/advance and background workers with FakeEBS OS boundary",
+  "changed_files": [
+    "app/application/rpa.py",
+    "app/ui/column_filters.py",
+    "app/ui/rpa_panel.py",
+    "tests/gui_regressions.py",
+    "tests/test_cell_filters.py",
+    "tests/test_posting_actions.py"
+  ]
+}
