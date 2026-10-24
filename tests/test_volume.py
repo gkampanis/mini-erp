@@ -47,7 +47,7 @@ class VolumeTests(unittest.TestCase):
         self.assertTrue(all(r['issue_date']=='2026-09-15' for r in september))
         self.assertFalse({r['id'] for r in september}&{r['id'] for r in october})
         scope,queries=self.counted(lambda:RPA(self.erp).expense_scope(self.company,[r['id'] for r in september]))
-        self.assertLessEqual(queries,3);self.assertEqual(len(scope['needs_review']),1250)
+        self.assertLessEqual(queries,4);self.assertEqual(len(scope['needs_review']),1250)  # One additional batched purchase-tag query.
         self.assertEqual(len(self.erp.search(self.company)),2500)
         self.assertEqual(self.erp.search(self.other,month='2026-09'),[])
         self.assertEqual(self.erp.search(self.company,month='2026-12'),[])

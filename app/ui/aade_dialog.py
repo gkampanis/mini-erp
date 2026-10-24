@@ -180,6 +180,10 @@ def open_settings(owner,document=None,acquire=False,period=None):
         if camoufox and not selected:
             messagebox.showinfo('Ανάκτηση PDF','Επίλεξε τα εκκρεμή παραστατικά που θέλεις να ανακτήσεις.',parent=win);return
         marks=[records[x]['mark'] for x in selected] if selected else [r['mark'] for r in records.values()]
+        from app.domain.invoice_types import income_record
+        income={r['mark'] for r in records.values() if income_record(json.loads(r['record_json']))}
+        single_income=len(selected)==1 and len(marks)==1 and marks[0] in income and not camoufox
+        marks=[mark for mark in marks if mark not in income or single_income]
         if camoufox:
             from app.application.provider_pdf import ProviderDatabase
             pending={str(r['mark']) for r in ProviderDatabase(owner.erp,owner.company,choices[environment.get()]).failed_download_candidates(str(owner.company))}
@@ -200,7 +204,7 @@ def open_settings(owner,document=None,acquire=False,period=None):
                 if camoufox:
                     from app.application.camoufox_pdf import run as recover_camoufox
                     return recover_camoufox(service,owner.company,env,marks,cancel)
-                return run(service,owner.company,env,destination,cancel,marks,recovery,notice=lambda msg:notifications.put(msg),observer=lambda p:notifications.put(p.text()))
+                return run(service,owner.company,env,destination,cancel,marks,recovery,notice=lambda msg:notifications.put(msg),observer=lambda p:notifications.put(p.text()),allow_income=single_income)
             finally:service.close()
         def done(result):
             if not win.winfo_exists():return

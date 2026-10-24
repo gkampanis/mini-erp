@@ -16,7 +16,7 @@ LABELS = {'vat':'ΑΦΜ', 'name':'Επωνυμία', 'date':'Ημερομηνί�
           'series':'Σειρά', 'number':'Αριθμός', 'net':'Καθαρή', 'tax':'ΦΠΑ', 'gross':'Σύνολο',
           'mark':'MARK', 'kind':'Είδος', 'description':'Περιγραφή', 'currency':'Νόμισμα'}
 GROUPS = {'Όλες οι ομάδες':None,'Ομάδα 2 · Αγορές':'2','Ομάδα 6 · Έξοδα':'6'}
-STATES = ('Όλα τα παραστατικά','Χωρίς προετοιμασία','Με τοπική έγκριση','Μη καταχωρισμένα','Καταχωρισμένα','Χρειάζονται έλεγχο','Δεν βρέθηκαν στο Excel','Μερική συμφωνία')
+STATES = ('Όλα τα παραστατικά','Χωρίς προετοιμασία','Με τοπική έγκριση','Μη καταχωρισμένα','Καταχωρισμένα','Χρειάζονται έλεγχο','Δεν βρέθηκαν στο Excel','Μερική συμφωνία','Χρειάζεται έλεγχος στο EBS')
 ACTIONS = {'document_imported':'Εισαγωγή παραστατικού','import_duplicate':'Παράλειψη διπλοτύπου',
            'import_conflict':'Σύγκρουση εισαγωγής','document_prepared':'Τοπική έγκριση προετοιμασίας',
            'import_warning':'Προειδοποίηση εισαγωγής','amounts_rounded':'Στρογγυλοποίηση ποσών', 'pdf_linked':'Σύνδεση PDF','counterparty_named':'Συμπλήρωση επωνυμίας'}
@@ -136,7 +136,7 @@ class Desktop:
         self.notebook.add(self.documents_tab,text='Μη καταχωρισμένα στο EBS')
         from app.ui.document_views import DocumentView
         self.document_views={}
-        for view,title in (('expenses','Έξοδα / Αγορές'),('income','Έσοδα'),('movement','Δελτία Αποστολής')):
+        for view,title in (('expenses','Έξοδα'),('purchases','Αγορές'),('income','Έσοδα'),('movement','Δελτία Αποστολής')):
             parent=ttk.Frame(self.notebook,padding=14);self.notebook.add(parent,text=title)
             self.document_views[view]=DocumentView(self,parent,view)
         self.notebook.add(self.reviews_tab,text='Έλεγχοι εισαγωγής')
@@ -176,7 +176,7 @@ class Desktop:
         self.result_count = tk.StringVar()
         ttk.Label(self.documents_tab,textvariable=self.result_count,style='Subtitle.TLabel').pack(anchor='w',pady=(0,8))
         columns = ('reference','description','name','vat','issue_date','net_minor','tax_minor','gross_minor','account_code','preparation_state','aade_state','pdf_state')
-        titles = ('Παραστατικό','Είδος ΑΑΔΕ','Επωνυμία','ΑΦΜ','Ημερομηνία','Καθαρή €','ΦΠΑ €','Σύνολο €','Λογαριασμός','Έλεγχος','ΑΑΔΕ','PDF · κλικ για άνοιγμα')
+        titles = ('Παραστατικό','Είδος ΑΑΔΕ','Συναλλασσόμενος','ΑΦΜ','Ημερομηνία','Καθαρή €','ΦΠΑ €','Σύνολο €','Λογαριασμός','Έλεγχος','ΑΑΔΕ','PDF · κλικ για άνοιγμα')
         self.tree = table(self.documents_tab,columns,titles,{'name':190,'reference':100,'vat':95,'issue_date':90,'gross_minor':85,'account_code':120,'preparation_state':120,'aade_state':90,'pdf_state':200})
         self.tree.configure(selectmode='extended')
         self.tree.configure(displaycolumns=('reference','name','vat','issue_date','net_minor','tax_minor','gross_minor','account_code','preparation_state','pdf_state'))
@@ -184,6 +184,7 @@ class Desktop:
         for col in columns:
             self.tree.heading(col,command=lambda key=col:self.sort_documents(key))
         self.tree.bind('<ButtonRelease-1>',self.pdf_click)
+        self.tree.bind('<Button-3>',lambda event:self.purchase_menu(event,self.tree))
         self.tree.bind('<Double-1>',self.document_double_click)
         self.tree.bind('<Return>',lambda _:self.open_detail())
         actions = ttk.Frame(self.documents_tab)
@@ -217,6 +218,8 @@ class Desktop:
         self.notebook.pack_forget()
         self.notebook.pack(fill='both',expand=True,padx=24)
         self.progress = ttk.Progressbar(footer,mode='indeterminate',length=110)
+        self.purchase_undo_button=ttk.Button(footer,text='Αναίρεση χαρακτηρισμού',command=self.undo_purchase)
+        self.purchase_exceptions_button=ttk.Button(footer,text='Εξαιρέσεις χαρακτηρισμού',command=self.show_purchase_exceptions)
         status_label=ttk.Label(footer,textvariable=self.status,style='Subtitle.TLabel',wraplength=1100);status_label.pack(anchor='w')
         footer.bind('<Configure>',lambda event:status_label.configure(wraplength=max(200,event.width-48)))
         root.protocol('WM_DELETE_WINDOW',self.close)
@@ -322,6 +325,7 @@ class Desktop:
             self.status.set('Κλείσε πρώτα τις ανοικτές καρτέλες ή ολοκλήρωσε την εργασία πριν αλλάξεις επιχείρηση.')
             return
         self.company=chosen;self.rpa_panel.job=None;self.rpa_panel.mapping=None
+        self._purchase_undo=None;self._purchase_exceptions=[];self.purchase_undo_button.pack_forget();self.purchase_exceptions_button.pack_forget()
         self.rpa_panel.scope.set('Εκκρεμή προς EBS')
         self.rpa_panel.state.set('Έλεγχος χωρίς καταχώριση: ελέγχει την επιλογή χωρίς ενέργεια στο EBS.')
         self.rpa_panel.rpa.recover(chosen);self.query.set('');self.state_filter.set(STATES[3])
@@ -332,6 +336,56 @@ class Desktop:
         if document is None and not selected:return
         from app.ui.pdf_pane import open_document
         return open_document(self,document if document is not None else int(selected[0]),self.root)
+
+    def purchase_menu(self,event,tree):
+        if self.busy or self.rpa_panel.running or tree.identify_region(event.x,event.y)!='cell':return
+        columns=list(tree['displaycolumns'])
+        if columns==['#all']:columns=list(tree['columns'])
+        if tree.identify_column(event.x)!='#'+str(columns.index('name')+1):return
+        selected=tree.identify_row(event.y)
+        if not selected:return
+        tree.selection_set(selected)
+        row=next((r for r in self._month_rows if r['id']==int(selected)),None)
+        if row is None:return
+        from app.application.supplier_purchases import SupplierPurchases
+        from app.ui.document_views import belongs
+        if not (belongs(row,'expenses') or belongs(row,'purchases')):return
+        try:scope=SupplierPurchases(self.erp).inspect(self.company,row['vat'])
+        except ValueError as exc:self.status.set(str(exc));return
+        enabled=not scope['enabled'];count=sum((d not in scope['tagged']) if enabled else (d in scope['tagged']) for d in scope['eligible'])
+        previous=getattr(self,'_purchase_menu',None)
+        if previous is not None:previous.destroy()
+        menu=tk.Menu(tree,tearoff=False);self._purchase_menu=menu
+        label='Ορισμός ως προμηθευτής αγορών' if enabled else 'Άρση χαρακτηρισμού προμηθευτή αγορών'
+        menu.add_command(label=f'{label} — αφορά {count} εκκρεμή παραστατικά',command=lambda:self.set_purchase(row['vat'],enabled))
+        try:menu.tk_popup(event.x_root,event.y_root)
+        finally:menu.grab_release()
+
+    def set_purchase(self,supplier,enabled,expected_version=None):
+        if self.busy or self.rpa_panel.running:return
+        from app.application.supplier_purchases import SupplierPurchases
+        try:report=SupplierPurchases(self.erp).set(self.company,supplier,enabled,expected_version=expected_version)
+        except (ValueError,sqlite3.Error) as exc:self.status.set(str(exc));return
+        self._purchase_undo=(self.company,supplier,report['previous'],report['version'])
+        self._purchase_exceptions=report['exceptions'];self.purchase_undo_button.pack(side='right')
+        self.purchase_exceptions_button.pack_forget()
+        if report['exceptions']:self.purchase_exceptions_button.pack(side='right',padx=6)
+        self.refresh()
+        self.status.set(f"{'Χαρακτηρίστηκαν ως αγορές' if enabled else 'Αφαιρέθηκε ο χαρακτηρισμός από'}: {report['changed']} παραστατικά σε όλους τους μήνες. {report['queues']} αναμονές ουρών αποκλείστηκαν. {len(report['exceptions'])} προστατευμένες εξαιρέσεις.")
+
+    def undo_purchase(self):
+        previous=getattr(self,'_purchase_undo',None)
+        if previous and previous[0]==self.company:
+            self.set_purchase(previous[1],previous[2],previous[3]);self.purchase_undo_button.pack_forget()
+            self._purchase_undo=None
+
+    def show_purchase_exceptions(self):
+        win=tk.Toplevel(self.root);win.title('Προστατευμένες εγγραφές · χωρίς μεταβολή')
+        entries=[]
+        for exception in getattr(self,'_purchase_exceptions',[]):
+            row,_=self.erp.detail(self.company,exception['document'])
+            entries.append(f"{reference(row)} · {row['name']} · ΑΦΜ {row['vat']}\n{exception['reason']}")
+        read_text(win,'\n\n'.join(entries))
 
     def pdf_click(self,event):
         if self.tree.identify_region(event.x,event.y)!='cell':return
@@ -380,9 +434,11 @@ class Desktop:
         if self.state_filter.get()==STATES[3]:
             rows=[r for r in rows if evidence[r['id']]['status']=='not_registered' and r['direction']=='incoming'
                   and r['kind']=='invoice' and (not r['invoice_type'] or r['rpa_allowed'])
-                  and (r.get('nature_group') or r.get('suggested_group'))!='2']
+                  and not r['is_purchase']]
         elif self.state_filter.get()==STATES[7]:
             rows=[r for r in rows if evidence[r['id']]['status']=='review' and evidence[r['id']].get('match_kind')=='normalized']
+        elif self.state_filter.get()==STATES[8]:
+            rows=[r for r in rows if evidence[r['id']]['status']=='review' and evidence[r['id']].get('match_kind')=='attempt']
         elif self.state_filter.get() in STATES[4:7]:
             wanted=dict(zip(STATES[4:7],('registered','review','not_found')))[self.state_filter.get()]
             rows=[r for r in rows if evidence[r['id']]['status']==wanted and r['direction']=='incoming']
@@ -391,6 +447,7 @@ class Desktop:
             row['ebs_state'] = EBS_LABELS.get(row['ebs_state'],row['ebs_state'])
             row['aade_state'] = {'not_checked':'Δεν ελέγχθηκε','matched':'Συμφωνεί','different':'Διαφορά','cancelled_at_aade':'Αναφορά ακύρωσης'}.get(row['aade_state'],row['aade_state'])
             row['preparation_state'] = 'Εκδοθέν · εκτός εξόδων' if row['direction']=='outgoing' else 'Εκτός ΤΕΔ αξίας' if row['kind']!='invoice' or (row['invoice_type'] and not row['rpa_allowed']) else 'Εγκεκριμένο' if row.get('prepared_at') else 'Πρόταση καρτέλας' if row.get('suggested_account') else 'Χρειάζεται λογαριασμό'
+            if evidence[row['id']]['status']=='review' and evidence[row['id']].get('match_kind')=='attempt':row['preparation_state']='Χρειάζεται έλεγχος στο EBS'
             if not row.get('prepared_at') and row.get('suggested_account'):
                 row['nature_group']=row['suggested_group'];row['account_code']=row['suggested_account']
         key,reverse = self._sort
@@ -602,6 +659,15 @@ class Desktop:
         left=ttk.Frame(split,width=640);right=ttk.Frame(split,width=480)
         split.add(left,weight=1);split.add(right,weight=1)
         win.after_idle(lambda:split.sashpos(0,int(split.winfo_width()*.52)) if split.winfo_exists() else None)
+        from app.domain.invoice_types import classify
+        from app.ui.document_views import belongs
+        kind=self.erp.db.execute("SELECT invoice_type,is_delivery_note FROM mydata_records WHERE company_id=? AND document_id=? AND environment=coalesce((SELECT environment FROM aade_settings WHERE company_id=?),'production') ORDER BY id DESC LIMIT 1",(self.company,document_id,self.company)).fetchone()
+        category=classify(kind['invoice_type'],kind['is_delivery_note']) if kind else classify('')
+        if belongs(dict(row,**category),'income'):
+            for label,value in [('ΑΦΜ',row['vat']),('Παραστατικό',reference(row)),('Ημερομηνία',when(row['issue_date'])),('MARK',row['mark'] or '—')]:
+                ttk.Label(left,text=label+'  ·  '+value,padding=12).pack(anchor='w')
+            from app.ui.pdf_pane import PDFPane
+            win.pdf_pane=PDFPane(self,right,document_id,win);return win
         pages = ttk.Notebook(left)
         pages.pack(fill='both',expand=True)
         summary,prepare_tab,source,history = [ttk.Frame(pages,padding=12) for _ in range(4)]

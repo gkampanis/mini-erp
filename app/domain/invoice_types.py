@@ -51,6 +51,11 @@ def classify(code,is_delivery_note=False):
     return dict(invoice_type=code,description=description,family=family,is_delivery_note=bool(is_delivery_note),rpa_allowed=code in RPA_TYPES,self_recorded_expense=code in SELF_EXPENSES)
 
 
+def income_record(item):
+    kind=classify(item.get('kind',''),item.get('is_delivery_note',False))
+    return item.get('direction')=='outgoing' and not kind['self_recorded_expense'] and kind['family'] not in ('delivery_note','quantity_receipt')
+
+
 def aade_document(item,direction):
     """Preserve AADE category/sign; non-value records never become value invoices."""
     import re

@@ -7,7 +7,7 @@ from app.application.rpa import RPA
 from app.application.workspace import Workspace
 from app.infrastructure.ebs_adapter.adapter import load_mapper
 
-LABELS={'outgoing_excluded':'Εκδοθέν · εκτός εξόδων','purchase_excluded':'Αγορές · εκτός EBS','not_sent':'Χωρίς προσπάθεια','queued':'Σε αναμονή','started':'Συμπλήρωση','save_pending':'Save σε εξέλιξη','simulated':'Ελέγχθηκε χωρίς καταχώριση','filled_no_save':'Συμπληρώθηκε χωρίς Save','uncertain':'Έλεγχος στο EBS','failed':'Απέτυχε','save_invoked':'Εντολή Save · οπτικός έλεγχος','ui_saved_review':'Save → νέο ΤΕΔ · έλεγχος','reviewed_by_operator':'Ελέγχθηκε από χειριστή'}
+LABELS={'outgoing_excluded':'Εκδοθέν · εκτός εξόδων','purchase_excluded':'Αγορές · εκτός EBS','excluded_purchase':'Αγορές · αποκλείστηκε πριν εκτέλεση','not_sent':'Χωρίς προσπάθεια','queued':'Σε αναμονή','started':'Συμπλήρωση','save_pending':'Save σε εξέλιξη','simulated':'Ελέγχθηκε χωρίς καταχώριση','filled_no_save':'Συμπληρώθηκε χωρίς Save','uncertain':'Χρειάζεται έλεγχος στο EBS','failed':'Απέτυχε','save_invoked':'Εντολή Save · οπτικός έλεγχος','ui_saved_review':'Save → νέο ΤΕΔ · έλεγχος','reviewed_by_operator':'Ελέγχθηκε από χειριστή'}
 
 
 class RPAPanel:

@@ -34,14 +34,17 @@ class Workspace:
         reconciled={r['document_id']:r['match_status'] for r in self.db.execute("SELECT document_id,match_status FROM mydata_records WHERE company_id=? AND environment='production' AND document_id IS NOT NULL",(company,))}
         pdfs={r[0] for r in self.db.execute('SELECT DISTINCT document_id FROM attachments WHERE company_id=?',(company,))}
         accounts={r['counterparty_id']:r for r in self.db.execute('SELECT * FROM counterparty_accounts WHERE company_id=?',(company,))}
+        purchases={r[0] for r in self.db.execute('SELECT document_id FROM document_purchase_tags WHERE company_id=?',(company,))}
         for row in rows:
             row['environment']=environment
             defaults=accounts.get(row['counterparty_id'])
             row['suggested_group']=defaults['preferred_group'] if defaults else None
             row['suggested_account']=(defaults['purchases_account'] if defaults['preferred_group']=='2' else defaults['expenses_account'] if defaults['preferred_group']=='6' else '') if defaults else ''
+            row['purchase_classified']=row['id'] in purchases
+            row['is_purchase']=row['purchase_classified'] or (row.get('nature_group') or row['suggested_group'])=='2'
             row['ebs_state']=latest.get(row['id'],'not_sent')
             if row['direction']=='outgoing' and row['ebs_state']=='not_sent':row['ebs_state']='outgoing_excluded'
-            if (row.get('nature_group') or row['suggested_group'])=='2' and row['ebs_state']=='not_sent':row['ebs_state']='purchase_excluded'
+            if row['is_purchase'] and row['ebs_state']=='not_sent':row['ebs_state']='purchase_excluded'
             row['aade_state']=reconciled.get(row['id'],'not_checked')
             source=sources.get(row['id']);item=json.loads(source['record_json']) if source else {}
             from app.domain.invoice_types import classify

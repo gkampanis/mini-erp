@@ -16,6 +16,8 @@ class Suppliers:
         entry.bind('<Return>',lambda _:self.refresh());self.filter=tk.StringVar(value='Όλοι')
         box=ttk.Combobox(filters,textvariable=self.filter,values=('Όλοι','Χωρίς λογαριασμό','Με λογαριασμό'),state='readonly',width=24);box.pack(side='left',padx=8);box.bind('<<ComboboxSelected>>',lambda _:self.refresh())
         ttk.Button(filters,text='Αναζήτηση',command=self.refresh).pack(side='left')
+        self.names_button=ttk.Button(header,text='Συμπλήρωση κενών επωνυμιών από ΑΦΜ',command=self.fill_missing_names)
+        self.names_button.pack(anchor='w',pady=(8,0))
         actions=ttk.Frame(parent);actions.pack(side='bottom',fill='x',pady=10)
         ttk.Button(actions,text='Μαζική αντιστοίχιση & ενημέρωση εκκρεμών',style='Primary.TButton',command=self.bulk).pack(side='left')
         ttk.Button(actions,text='Όλες οι καρτέλες αντισυμβαλλομένων',command=owner.open_counterparties).pack(side='right',padx=8)
@@ -25,12 +27,16 @@ class Suppliers:
         self.tree=table(parent,('name','vat','group','account','state','count'),('Επωνυμία','ΑΦΜ','Ομάδα','Λογαριασμός EBS','Κατάσταση','Παραστατικά'),{'name':260,'state':260,'account':170})
         self.tree.configure(selectmode='extended');self.tree.bind('<Double-1>',lambda _:self.open_card())
     def refresh(self):
+        self.names_button.state(['disabled'] if self.owner.busy or self.owner.rpa_panel.running else ['!disabled'])
         selected=self.tree.selection();self.tree.delete(*self.tree.get_children());self.rows={}
         for row in self.service.rows(self.owner.company,self.query.get().strip()):
             if self.filter.get()=='Χωρίς λογαριασμό' and row['account']:continue
             if self.filter.get()=='Με λογαριασμό' and not row['account']:continue
             self.rows[row['id']]=row;self.tree.insert('','end',iid=str(row['id']),values=(row['name'],row['vat'],row['group'] or '—',row['account'] or '—',row['account_state'],row['document_count']))
         self.tree.selection_set([key for key in selected if self.tree.exists(key)])
+    def fill_missing_names(self):
+        from app.ui.registry import fill_missing
+        return fill_missing(self.owner)
     def open_card(self):
         from app.ui.counterparties import open_detail
         selected=self.tree.selection()
@@ -51,7 +57,7 @@ class Suppliers:
             try:report=self.service.save(self.owner.company,ids,group.get()[0],account.get(),confirmed=True)
             except (ValueError,sqlite3.Error) as exc:messagebox.showerror('Αντιστοίχιση',str(exc),parent=win);return
             win.destroy();self.owner.refresh()
-            self.status.set(f"Ενημερώθηκαν {report['updated']} παραστατικά / {report['queues']} εγγραφές ουρών. {len(report['protected'])} προσπάθειες EBS εξαιρέθηκαν. {len(report['needs_review'])} απαιτούν έλεγχο.")
+            self.status.set(f"Ενημερώθηκαν {report['updated']} παραστατικά / {report['queues']} εγγραφές ουρών. {len(report['purchases'])} ταξινομημένες αγορές διατηρήθηκαν. {len(report['protected'])} προσπάθειες EBS εξαιρέθηκαν. {len(report['needs_review'])} απαιτούν έλεγχο.")
             if report['protected']:messagebox.showinfo('Χωριστός έλεγχος EBS','Δεν τροποποιήθηκαν προηγούμενες προσπάθειες ή αποθηκευμένα παραστατικά EBS. Δεν υποστηρίζεται αυτόματη μεταβολή τους· έλεγξέ τα από το Ιστορικό / EBS.',parent=self.owner.root)
         ttk.Button(body,text='Έγκριση & ενημέρωση εκκρεμών',style='Primary.TButton',command=save).pack(side='bottom',anchor='e')
         win.account_var=account;win.group_var=group;return win

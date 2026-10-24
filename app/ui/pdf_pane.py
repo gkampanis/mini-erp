@@ -18,6 +18,21 @@ def open_document(owner,document,window,selected_attachment=None):
             if sys.platform=='win32':os.startfile(str(path))
             elif not webbrowser.open(path.resolve().as_uri()):raise ValueError('Δεν άνοιξε το τοπικό PDF. Όρισε εφαρμογή προβολής PDF στο λειτουργικό.')
             return
+        row,_=owner.erp.detail(owner.company,document)
+        kind=owner.erp.db.execute("SELECT invoice_type FROM mydata_records WHERE company_id=? AND document_id=? AND environment=coalesce((SELECT environment FROM aade_settings WHERE company_id=?),'production') ORDER BY id DESC LIMIT 1",(owner.company,document,owner.company)).fetchone()
+        from app.domain.invoice_types import income_record
+        if income_record(dict(direction=row['direction'],kind=kind[0] if kind else '')):
+            if owner.busy:return
+            from app.application.sync import Sync
+            company=owner.company
+            def execute():
+                erp=ERP(owner.directory,credential_store=owner.erp.credential_store)
+                try:return Sync(erp).document_pdf(company,document)
+                finally:erp.close()
+            def done(_):
+                owner.refresh()
+                if owner.erp.attachments(company,document):open_document(owner,document,window)
+            return owner.run_worker(execute,done)
         from app.application.mydata import MyData
         active=owner.erp.db.execute('SELECT environment FROM aade_settings WHERE company_id=?',(owner.company,)).fetchone()
         url=MyData(owner.erp).pdf_url(owner.company,document,active[0] if active else 'production')
@@ -84,6 +99,10 @@ class PDFPane:
         from app.infrastructure.providers.pdf_downloads import state_label
         active=self.owner.erp.db.execute('SELECT environment FROM aade_settings WHERE company_id=?',(self.owner.company,)).fetchone()
         environment=active[0] if active else 'production'
+        row,_=self.owner.erp.detail(self.owner.company,self.document)
+        kind=self.owner.erp.db.execute('SELECT invoice_type FROM mydata_records WHERE company_id=? AND document_id=? AND environment=?',(self.owner.company,self.document,environment)).fetchone()
+        from app.domain.invoice_types import income_record
+        if income_record(dict(direction=row['direction'],kind=kind[0] if kind else '')):return 'Δεν υπάρχει τοπικό PDF. Πάτησε «Άνοιγμα Παραστατικού» για μεμονωμένη λήψη. Δεν γίνεται αυτόματη ή μαζική λήψη εσόδων.'
         try:MyData(self.owner.erp).pdf_url(self.owner.company,self.document,environment)
         except ValueError as exc:return str(exc)+'\nΗ λήψη γίνεται από τη μαζική «Άντληση ΑΑΔΕ & PDF».'
         source=self.owner.erp.db.execute('SELECT mark FROM mydata_records WHERE company_id=? AND document_id=? AND environment=?',(self.owner.company,self.document,environment)).fetchone()

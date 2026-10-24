@@ -81,12 +81,12 @@ class MonthlyWorkflowTests(unittest.TestCase):
         with patch('app.infrastructure.providers.pdf_downloads.build_opener',return_value=provider),patch('app.infrastructure.providers.pdf_downloads.socket.getaddrinfo',return_value=public):
             opener=Opener(bodies);result=Sync(self.erp).run(self.company,'test','2026-10-01','2026-10-31',book=False,client=Client('test','synthetic','synthetic',opener=opener),methods=['RequestDocs','RequestTransmittedDocs'])
             self.assertEqual(len(opener.requests),3);self.assertIn('nextPartitionKey=P',opener.requests[1].full_url)
-            self.assertEqual(result['import']['inserted'],3);self.assertEqual(result['pdf']['saved'],3)
-            self.assertEqual(len(provider.calls),3)
+            self.assertEqual(result['import']['inserted'],3);self.assertEqual(result['pdf']['saved'],2)
+            self.assertEqual(len(provider.calls),2)  # Revenue PDFs require an explicit individual action.
             result=Sync(self.erp).run(self.company,'test','2026-10-01','2026-10-31',book=False,client=Client('test','synthetic','synthetic',opener=Opener(bodies)),methods=['RequestDocs','RequestTransmittedDocs'])
-            self.assertEqual(result['import']['inserted'],0);self.assertEqual(result['pdf']['skipped'],3);self.assertEqual(len(provider.calls),3)
+            self.assertEqual(result['import']['inserted'],0);self.assertEqual(result['pdf']['skipped'],2);self.assertEqual(len(provider.calls),2)
         docs=self.erp.search(self.company)
-        self.assertEqual(len(docs),5);self.assertEqual(self.erp.db.execute('SELECT count(*) FROM attachments').fetchone()[0],3)
+        self.assertEqual(len(docs),5);self.assertEqual(self.erp.db.execute('SELECT count(*) FROM attachments').fetchone()[0],2)
         outgoing=next(d for d in docs if d['direction']=='outgoing')
         self.assertEqual(outgoing['vat'],'000000007')
         self.assertIn(outgoing['id'],RPA(self.erp).expense_scope(self.company,[outgoing['id']])['outgoing'])

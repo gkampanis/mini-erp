@@ -10,14 +10,17 @@ from app.infrastructure.providers.browser_recovery import RecoveryPDFDownloader
 
 
 class ProviderDatabase:
-    def __init__(self,erp,company,environment,marks=None):
+    def __init__(self,erp,company,environment,marks=None,*,allow_income=False):
         self.erp=erp;self.company=company;self.environment=environment;self.marks=None if marks is None else {str(x) for x in marks}
+        self.allow_income=allow_income and self.marks is not None and len(self.marks)==1
         self.path=erp.directory/'mini_erp.sqlite3'
 
     def download_candidates(self,client_id,dates=None):
         rows=[]
         for record in self.erp.db.execute('SELECT * FROM mydata_records WHERE company_id=? AND environment=? ORDER BY id',(self.company,self.environment)):
             item=json.loads(record['record_json'])
+            from app.domain.invoice_types import income_record
+            if income_record(item) and not self.allow_income:continue
             if self.marks is not None and item['mark'] not in self.marks:continue
             if record['match_status']=='cancelled_at_aade' or not item.get('pdf_url'):continue
             if dates and not dates[0]<=item['date']<=dates[1]:continue
@@ -80,13 +83,13 @@ class ProviderDatabase:
             self.erp.repository.audit(self.company,'provider_pdf_result',None,dict(mark=str(mark),environment=self.environment,state=state,sha256=checksum))
 
 
-def run(erp,company,environment,destination,cancel,marks=None,recovery=False,notice=lambda _:None,observer=None,dates=None):
+def run(erp,company,environment,destination,cancel,marks=None,recovery=False,notice=lambda _:None,observer=None,dates=None,*,allow_income=False):
     try:import pypdf
     except ImportError:raise ValueError('Πάτησε πρώτα «Εγκατάσταση browser PDF» στις ρυθμίσεις ΑΑΔΕ για τις βιβλιοθήκες λήψης/προβολής.') from None
     row=erp.db.execute('SELECT * FROM companies WHERE id=?',(company,)).fetchone()
     if row is None:raise ValueError('Δεν βρέθηκε εταιρεία')
     client=Client(str(company),row['name'],row['vat'],'production' if environment=='production' else 'development')
-    adapter=ProviderDatabase(erp,company,environment,marks)
+    adapter=ProviderDatabase(erp,company,environment,marks,allow_income=allow_income)
     backend=RecoveryPDFDownloader(adapter,notice=notice,marks=marks) if recovery else AutomaticPDFDownloader(adapter,notice=notice)
     if observer:backend.observer=observer
     for row in adapter.download_candidates(str(company),dates):adapter.link_cached(row['mark'])

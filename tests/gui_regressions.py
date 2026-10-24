@@ -799,7 +799,7 @@ class DesktopRegressions(unittest.TestCase):
         self.app.state_filter.set(STATES[3]);self.app.refresh()
         self.assertIn('Άντληση ΑΑΔΕ',self.app.result_count.get())
         titles=[self.app.notebook.tab(t,'text') for t in self.app.notebook.tabs()]
-        self.assertEqual(titles[:4],['Μη καταχωρισμένα στο EBS','Έξοδα / Αγορές','Έσοδα','Δελτία Αποστολής'])
+        self.assertEqual(titles[:5],['Μη καταχωρισμένα στο EBS','Έξοδα','Αγορές','Έσοδα','Δελτία Αποστολής'])
         self.assertEqual(titles[titles.index('Έλεγχοι εισαγωγής')+1],'Προμηθευτές')
         for tab in self.app.notebook.tabs():
             self.app.notebook.select(tab);self.root.update()
@@ -821,19 +821,28 @@ class DesktopRegressions(unittest.TestCase):
         from app.infrastructure.aade.client import parsed_page
         from tests.test_workflow import response
         service=MyData(self.app.erp)
-        for mark,code,outgoing in [('80000001','1.1',False),('80000002','10.1',False),('80000003','1.1',True)]:
+        for mark,code,outgoing in [('80000001','1.1',False),('80000002','10.1',False),('80000003','1.1',True),('80000004','14.1',True)]:
             raw=response(mark=mark,number=mark,issuer='000000000' if outgoing else '000000001',receiver='000000002' if outgoing else '000000000')
             raw=raw.replace(b'<invoiceType>1.1</invoiceType>',f'<invoiceType>{code}</invoiceType><isDeliveryNote>true</isDeliveryNote>'.encode())
             service.persist(self.app.company,'production','2026-10-01','2026-10-31',[(raw,parsed_page(raw))],'RequestTransmittedDocs' if outgoing else 'RequestDocs')
             service.import_documents(self.app.company,'production','2026-10-01','2026-10-31',confirmed=True,direction='outgoing' if outgoing else 'incoming')
         self.app.refresh();views=self.app.document_views
-        self.assertEqual(len(views['expenses'].rows),1);self.assertEqual(len(views['income'].rows),1);self.assertEqual(len(views['movement'].rows),3)
+        self.assertEqual(len(views['expenses'].rows),2);self.assertEqual(len(views['income'].rows),1);self.assertEqual(len(views['movement'].rows),4)
         document=next(iter(views['expenses'].rows));self.assertIn(document,views['movement'].rows)
         movement=views['movement'];movement.kind.set('Ποσοτικές παραλαβές');movement.refresh()
         self.assertEqual(len(movement.rows),1);self.assertEqual(next(iter(movement.rows.values()))['invoice_type'],'10.1')
         income=views['income'];self.app.notebook.select(income.parent);self.root.update();income.query.set('80000003');income.refresh();chosen=next(iter(income.rows))
         income.tree.selection_set(str(chosen));income.detail();self.assertIn(chosen,self.app._details)
-        self.assertEqual(self.count('documents'),3);self.assertEqual(self.count('rpa_jobs'),0)
+        self.assertNotIn('account_code',income.tree['columns']);self.assertNotIn('reconciliation',income.tree['columns'])
+        self.assertFalse(any(isinstance(w,ttk.Notebook) for w in widgets(self.app._details[chosen])))
+        self.app.notebook.select(views['expenses'].parent);self.root.update()
+        views['expenses'].tree.selection_set(str(document));views['expenses'].detail()
+        notebooks=[w for w in widgets(self.app._details[document]) if isinstance(w,ttk.Notebook)]
+        self.assertIn('Προετοιμασία EBS',[notebooks[0].tab(t,'text') for t in notebooks[0].tabs()])
+        self_expense=next(r['id'] for r in views['expenses'].rows.values() if r['self_recorded_expense'])
+        self.app.open_detail(self_expense)
+        self.assertTrue(any(isinstance(w,ttk.Notebook) for w in widgets(self.app._details[self_expense])))
+        self.assertEqual(self.count('documents'),4);self.assertEqual(self.count('rpa_jobs'),0)
 
     def test_default_rpa_scope_honors_selection_for_simulation_and_execution(self):
         self.import_fixture('separate.xlsx');ids=list(self.app._documents)
@@ -880,6 +889,8 @@ class DesktopRegressions(unittest.TestCase):
         tab=self.app.reconciliation;self.app.notebook.select(self.app.reconciliation_tab);self.root.update()
         tab.tree.selection_set(str(partial['id']));self.root.update()
         self.assertEqual(tab.confirm_button.cget('text'),'Επιβεβαίωση αντιστοίχισης')
+        comparison=tab.details();changed=[comparison.comparison_tree.item(i,'values')[0] for i in comparison.comparison_tree.get_children() if 'difference' in comparison.comparison_tree.item(i,'tags')]
+        self.assertEqual(changed,['Παραστατικό']);comparison.destroy()
         with patch('app.ui.ebs_reconciliation.messagebox.askyesno') as popup:
             tab.confirm_button.invoke();self.root.update();popup.assert_not_called()
         self.assertEqual(service.results(self.app.company)[partial['id']]['match_kind'],'normalized_confirmed')
@@ -896,6 +907,70 @@ class DesktopRegressions(unittest.TestCase):
         self.assertEqual([i['document_id'] for i in items],[ids[0]])
         self.assertEqual(items[0]['status'],'simulated')
         self.assertIsNone(self.app.erp.preparation(self.app.company,ids[1]))
+
+    def test_purchase_context_menu_counts_all_months_applies_and_undoes_without_popups(self):
+        from types import SimpleNamespace
+        from tests.test_supplier_purchases import synthetic_vat
+        from app.ui.desktop import STATES
+        rows=[]
+        for number,day in [('1','2026-09-21'),('2','2026-10-21')]:
+            row=list(ROW);row[0]=synthetic_vat();row[3]=number;row[4]=day;row[8]=str(70000000+int(number));rows.append(row)
+        workbook(self.folder/'inputs/purchases.xlsx',[HEADERS,*rows]);self.import_fixture('purchases.xlsx')
+        self.app.state_filter.set(STATES[3]);self.app.refresh();self.root.update()
+        item=self.app.tree.get_children()[0];x,y,w,h=self.app.tree.bbox(item,'name')
+        event=SimpleNamespace(x=x+5,y=y+h//2,x_root=x+5,y_root=y+h//2)
+        with patch('tkinter.Menu.tk_popup'),patch('app.ui.desktop.messagebox.askyesno') as popup:
+            self.app.purchase_menu(event,self.app.tree)
+            self.assertIn('2 εκκρεμή',self.app._purchase_menu.entrycget(0,'label'))
+            self.app._purchase_menu.invoke(0);self.root.update();popup.assert_not_called()
+        self.assertFalse(self.app.tree.get_children());self.assertTrue(self.app.purchase_undo_button.winfo_ismapped())
+        purchases=self.app.document_views['purchases'];self.assertEqual(len(purchases.rows),1)
+        self.app.month_filter.set('Όλοι οι μήνες');self.app.refresh();self.assertEqual(len(purchases.rows),2)
+        self.assertFalse(self.app.document_views['expenses'].rows)
+        self.app.notebook.select(purchases.parent);self.root.update();purchases.query.set(synthetic_vat());purchases.refresh()
+        document=next(iter(purchases.rows));purchases.tree.selection_set(str(document))
+        with patch.object(self.app,'open_pdf') as pdf:purchases.pdf();pdf.assert_called_once_with(document)
+        self.app.purchase_undo_button.invoke();self.assertFalse(purchases.rows)
+        self.assertEqual(len(self.app.tree.get_children()),2);self.assertEqual(self.count('document_preparations'),0)
+
+    def test_income_pdf_download_occurs_only_on_explicit_individual_open(self):
+        from tests.test_workspace import synthetic_pdf
+        self.import_fixture('separate.xlsx');document=next(iter(self.app._documents))
+        with self.app.erp.db:self.app.erp.db.execute("UPDATE documents SET direction='outgoing' WHERE id=?",(document,))
+        self.app.refresh()
+        def download(service,company,chosen):
+            service.erp.attach_pdf(company,chosen,'synthetic-income.pdf',data=synthetic_pdf(),confirmed=True)
+            return dict(cached=False)
+        with patch('app.application.sync.Sync.document_pdf',autospec=True,side_effect=download) as fetch,patch('webbrowser.open',return_value=True),patch('os.startfile',create=True):
+            self.app.refresh();fetch.assert_not_called()
+            self.app.open_pdf(document);wait(self.root,lambda:not self.app.busy)
+            fetch.assert_called_once()
+            self.assertEqual(len(self.app.erp.attachments(self.app.company,document)),1)
+            self.app.open_pdf(document);fetch.assert_called_once()
+
+    def test_bulk_name_lookup_runs_in_background_can_stop_and_prevents_duplicate_start(self):
+        from app.application.registry import Registry
+        from app.ui.registry import fill_missing
+        from tests.test_supplier_purchases import synthetic_vat
+        from tests.test_workspace import MemoryVault
+        self.app.erp.credential_store=MemoryVault()
+        with self.app.erp.db:
+            self.app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(self.app.company,))
+            for number in (1,2):self.app.erp.db.execute('INSERT INTO counterparties(company_id,vat,name) VALUES (?,?,?)',(self.app.company,synthetic_vat(number),' '))
+        Registry(self.app.erp).save_credentials(self.app.company,'synthetic','synthetic',confirmed=True)
+        entered=threading.Event();release=threading.Event();self.releases.append(release);calls=[]
+        def lookup(user,key,caller,called):
+            calls.append(called);entered.set();release.wait(5);return dict(afm=called,onomasia='ΣΥΝΘΕΤΙΚΗ ΕΠΩΝΥΜΙΑ')
+        # Default transport is bound at definition, so pass the fake through the batch service.
+        original=Registry.fill_missing
+        def batch(service,company,**kwargs):return original(service,company,transport=lookup,**kwargs)
+        with patch.object(Registry,'fill_missing',batch),patch('app.ui.registry.messagebox.askyesno') as popup:
+            win=fill_missing(self.app);wait(self.root,entered.is_set)
+            self.assertIsNone(fill_missing(self.app));self.assertTrue(self.app.busy)
+            win.cancel_event.set();release.set();wait(self.root,lambda:not self.app.busy)
+            popup.assert_not_called()
+        self.assertEqual(len(calls),1);self.assertIn('Συμπληρώθηκαν: 1',win.status_var.get());self.assertIn('Παραλείφθηκαν: 1',win.status_var.get())
+        self.assertEqual(self.count('provider_attempts'),0)
 
 
 if __name__ == '__main__':

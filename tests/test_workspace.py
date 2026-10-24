@@ -211,7 +211,8 @@ class WorkspaceTests(unittest.TestCase):
     def test_upgrade_from_002_preserves_documents_raw_approvals_and_audit(self):
         old=self.root/'old';old.mkdir();migrations=self.root/'migrations';migrations.mkdir()
         for name in ['001_initial.sql','002_preparation.sql']:(migrations/name).write_bytes((database.MIGRATIONS/name).read_bytes())
-        with patch.object(database,'MIGRATIONS',migrations):
+        # Seed the historical schema before the purchase-classification feature existed.
+        with patch.object(database,'MIGRATIONS',migrations),patch('app.application.supplier_purchases.SupplierPurchases.apply_import'):
             erp=ERP(old)
             try:
                 company=erp.company('000000000','ΣΥΝΘΕΤΙΚΗ')

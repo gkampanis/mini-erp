@@ -15,12 +15,14 @@ class RPA:
         """Partition the same list; purchase cards remain visible but never enter EBS."""
         rows={r['id']:r for r in self.erp.search(company)}
         defaults={r['counterparty_id']:r['preferred_group'] for r in self.db.execute('SELECT counterparty_id,preferred_group FROM counterparty_accounts WHERE company_id=?',(company,))}
+        purchases={r[0] for r in self.db.execute('SELECT document_id FROM document_purchase_tags WHERE company_id=?',(company,))}
         result=dict(expenses=[],purchases=[],needs_review=[],outgoing=[],excluded_types=[])
         from app.domain.invoice_types import classify
         types={r['document_id']:classify(r['invoice_type'],r['is_delivery_note']) for r in self.db.execute("SELECT document_id,invoice_type,is_delivery_note FROM mydata_records WHERE company_id=? AND document_id IS NOT NULL ORDER BY environment='production',id",(company,))}
         for document in documents:
             if document not in rows:raise ValueError('Δεν βρέθηκε παραστατικό στην εταιρεία')
             row=rows[document]
+            if document in purchases:result['purchases'].append(document);continue
             if row['direction']!='incoming':result['outgoing'].append(document);continue
             if row['kind']!='invoice' or (document in types and not types[document]['rpa_allowed']):result['excluded_types'].append(document);continue
             group=row.get('nature_group') or defaults.get(row['counterparty_id'])
@@ -31,6 +33,7 @@ class RPA:
 
     def payload(self,company,document):
         row,_=self.erp.detail(company,document)
+        if self.db.execute('SELECT 1 FROM document_purchase_tags WHERE company_id=? AND document_id=?',(company,document)).fetchone():raise ValueError('Χαρακτηρίστηκε ως αγορά· εκτός RPA και προσομοίωσης')
         if row['direction']!='incoming':raise ValueError('Τα εκδοθέντα δεν ανήκουν στη ροή εξόδων EBS')
         kind=self.db.execute("SELECT invoice_type,is_delivery_note FROM mydata_records WHERE company_id=? AND document_id=? ORDER BY environment='production' DESC,id DESC LIMIT 1",(company,document)).fetchone()
         from app.domain.invoice_types import classify

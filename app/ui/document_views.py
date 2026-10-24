@@ -12,7 +12,8 @@ def belongs(row,view):
     movement=row['family'] in MOVEMENT_FAMILIES
     if view=='movement':return movement or row['is_delivery_note']
     direction='incoming' if row['direction']=='outgoing' and row['self_recorded_expense'] else row['direction']
-    return not movement and direction==('incoming' if view=='expenses' else 'outgoing')
+    if view=='income':return not movement and direction=='outgoing'
+    return not movement and direction=='incoming' and bool(row.get('is_purchase'))==(view=='purchases')
 
 
 class DocumentView:
@@ -35,13 +36,14 @@ class DocumentView:
         ttk.Button(actions,text='Άνοιγμα παραστατικού',command=self.pdf).pack(side='right')
         ttk.Button(actions,text='Στοιχεία',command=self.detail).pack(side='right',padx=6)
         common=('reference','description','name','vat','issue_date','mark')
-        columns=common+('flow','issuer','receiver','correlated','delivery') if view=='movement' else common+('net_minor','tax_minor','gross_minor','account_code','reconciliation','pdf_state')
-        titles=('Παραστατικό','Είδος ΑΑΔΕ','Αντισυμβαλλόμενος','ΑΦΜ','Ημερομηνία','MARK')
-        titles+=('Ροή','Εκδότης / ΑΦΜ','Λήπτης / ΑΦΜ','Συσχετιζόμενα MARK','Κατάσταση διακίνησης') if view=='movement' else ('Καθαρή €','ΦΠΑ €','Σύνολο €','Λογαριασμός EBS','Συμφωνία EBS','PDF')
+        columns=common+('flow','issuer','receiver','correlated','delivery') if view=='movement' else common+('net_minor','tax_minor','gross_minor')+(() if view=='income' else ('account_code','reconciliation'))+('pdf_state',)
+        titles=('Παραστατικό','Είδος ΑΑΔΕ','Συναλλασσόμενος','ΑΦΜ','Ημερομηνία','MARK')
+        titles+=('Ροή','Εκδότης / ΑΦΜ','Λήπτης / ΑΦΜ','Συσχετιζόμενα MARK','Κατάσταση διακίνησης') if view=='movement' else ('Καθαρή €','ΦΠΑ €','Σύνολο €')+(() if view=='income' else ('Λογαριασμός EBS','Συμφωνία EBS'))+('PDF',)
         self.tree=table(parent,columns,titles,{'reference':120,'name':210,'description':230,'issuer':220,'receiver':220,'delivery':240})
         for key in columns:self.tree.heading(key,command=lambda k=key:self.sort_by(k))
         self.tree.bind('<Double-1>',lambda _:self.detail());self.tree.bind('<Return>',lambda _:self.detail())
         self.tree.bind('<ButtonRelease-1>',self.click_pdf)
+        if view in ('expenses','purchases'):self.tree.bind('<Button-3>',lambda event:owner.purchase_menu(event,self.tree))
 
     def clear(self):self.query.set('');self.kind.set('Όλα');self.refresh()
     def sort_by(self,key):self.sort=(key,not self.sort[1] if self.sort[0]==key else False);self.refresh()

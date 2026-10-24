@@ -77,7 +77,8 @@ class Sync:
         service.reconcile_stored(company,environment)
         if download and sync_ids and not cancel.is_set():
             from app.application.provider_pdf import run
-            eligible=[r['mark'] for r in service.records(company,environment) if r['last_sync'] in sync_ids and (marks is None or r['mark'] in {str(m) for m in marks})]
+            from app.domain.invoice_types import income_record
+            eligible=[r['mark'] for r in service.records(company,environment) if not income_record(json.loads(r['record_json'])) and r['last_sync'] in sync_ids and (marks is None or r['mark'] in {str(m) for m in marks})]
             notice('Λήψη και σύνδεση PDF παρόχων…')
             try:result['pdf']=run(self.erp,company,environment,destination or self.erp.directory/'pdf-archive',cancel,marks=eligible,dates=(start,end),notice=notice)
             except (ValueError,RuntimeError,OSError) as exc:result['pdf_error']=str(exc)
@@ -91,13 +92,13 @@ class Sync:
         active=self.db.execute('SELECT environment FROM aade_settings WHERE company_id=?',(company,)).fetchone()
         if active is None:raise ValueError('Σύνδεσε πρώτα τους κωδικούς ΑΑΔΕ από το κουμπί «ΑΑΔΕ / myDATA»')
         environment=active[0];options=self.preferences(company,environment);cancel=cancel or threading.Event()
-        adapter=ProviderDatabase(self.erp,company,environment,[row['mark']])
+        adapter=ProviderDatabase(self.erp,company,environment,[row['mark']],allow_income=True)
         if adapter.link_cached(row['mark']):return dict(cached=True,pdf=dict(saved=0,skipped=1,pending=0))
         record=self.db.execute('SELECT 1 FROM mydata_records WHERE company_id=? AND environment=? AND mark=?',(company,environment,row['mark'])).fetchone()
         if record is None:
-            MyData(self.erp).fetch(company,row['issue_date'],row['issue_date'],environment,represented=bool(options['represented']),cancel=cancel)
+            MyData(self.erp).fetch(company,row['issue_date'],row['issue_date'],environment,represented=bool(options['represented']),cancel=cancel,method='RequestTransmittedDocs' if row['direction']=='outgoing' else 'RequestDocs')
         MyData(self.erp).reconcile_stored(company,environment)
         MyData(self.erp).pdf_url(company,document,environment)
-        result=run(self.erp,company,environment,self.erp.directory/'pdf-archive',cancel,marks=[row['mark']],notice=notice)
+        result=run(self.erp,company,environment,self.erp.directory/'pdf-archive',cancel,marks=[row['mark']],notice=notice,allow_income=True)
         if not self.erp.attachments(company,document):raise ValueError('Το PDF παραμένει εκκρεμές στον πάροχο. Χρησιμοποίησε «Ανάκτηση εκκρεμών» στον ορατό browser της ΑΑΔΕ.')
         return dict(pdf=result,cached=False)

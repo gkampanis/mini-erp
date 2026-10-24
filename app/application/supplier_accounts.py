@@ -12,6 +12,7 @@ class SupplierAccounts:
         for doc in self.erp.search(company):
             if doc['direction']=='incoming':documents.setdefault(doc['counterparty_id'],[]).append(doc)
         accounts={r['counterparty_id']:dict(r) for r in self.db.execute('SELECT * FROM counterparty_accounts WHERE company_id=?',(company,))}
+        purchase_suppliers={r[0] for r in self.db.execute('SELECT vat FROM supplier_purchase_rules WHERE company_id=? AND enabled=1',(company,))}
         for source in self.db.execute('SELECT mark,record_json FROM mydata_records WHERE company_id=?',(company,)):
             item=json.loads(source['record_json'])
             if item.get('direction')=='incoming':api.setdefault(item['vat'],set()).add(source['mark'])
@@ -26,6 +27,7 @@ class SupplierAccounts:
             pending=any(not d.get('prepared_at') or (d.get('nature_group')==group and d.get('account_code')!=account) for d in incoming)
             state='Εκκρεμή προς έγκριση / ενημέρωση' if account and pending else 'Αντιστοιχισμένος' if account else 'Χρειάζεται λογαριασμό'
             if not incoming:state='ΑΑΔΕ: έλεγχος τύπου / στοιχείων'
+            if card['vat'] in purchase_suppliers:state='Προμηθευτής αγορών · χωρίς απαίτηση λογαριασμού'
             count=len({d['mark'] or 'local:'+str(d['id']) for d in incoming}|api.get(card['vat'],set()))
             result.append(dict(card,group=group,account=account,account_state=state,document_count=count))
         return result
@@ -36,7 +38,7 @@ class SupplierAccounts:
         for cp in ids:
             card,_=Counterparties(self.erp).detail(company,cp);values=card['accounts']
             checked.append((cp,defaults_values(account if group=='2' else values['purchases_account'],account if group=='6' else values['expenses_account'],group)))
-        report=dict(updated=0,protected=[],needs_review=[],queues=0)
+        report=dict(updated=0,protected=[],needs_review=[],purchases=[],queues=0)
         from app.application.ebs_reconciliation import EBSReconciliation
         evidence=EBSReconciliation(self.erp).results(company) if apply_pending else {}
         with self.db:
@@ -66,10 +68,12 @@ class SupplierAccounts:
         from app.application.ebs_reconciliation import EBSReconciliation
         from app.domain.invoice_types import classify
         if evidence is None:evidence=EBSReconciliation(self.erp).results(company)
-        report=dict(updated=0,protected=[],needs_review=[],queues=0)
+        report=dict(updated=0,protected=[],needs_review=[],purchases=[],queues=0)
+        purchases={r[0] for r in self.db.execute('SELECT document_id FROM document_purchase_tags WHERE company_id=?',(company,))}
         types={r['document_id']:classify(r['invoice_type']) for r in self.db.execute("SELECT document_id,invoice_type FROM mydata_records WHERE company_id=? AND document_id IS NOT NULL ORDER BY environment='production',id",(company,))}
         for doc in self.db.execute("SELECT id,kind FROM documents WHERE company_id=? AND counterparty_id=? AND direction='incoming'",(company,cp)).fetchall():
             document=doc['id']
+            if document in purchases:report['purchases'].append(document);continue
             if evidence.get(document,{}).get('status')=='registered':report['protected'].append(document);continue
             if doc['kind']!='invoice' or (document in types and not types[document]['rpa_allowed']):report['needs_review'].append(document);continue
             attempts=self.db.execute('SELECT i.*,j.mode,j.status AS job_state FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND i.document_id=?',(company,document)).fetchall()

@@ -95,3 +95,10 @@ def rounding_changes(fields, item):
             if original!=rounded:
                 changes.append(dict(field=key,original=str(original),rounded=f'{rounded:.2f}'))
     return changes
+
+
+def checked_greek_vat(value):
+    if not isinstance(value,str) or not re.fullmatch(r'[0-9]{9}',value) or value=='000000000':raise ValueError('Χρειάζεται έγκυρο ελληνικό ΑΦΜ 9 ψηφίων')
+    check=sum(int(digit)*2**(8-index) for index,digit in enumerate(value[:8]))%11%10
+    if check!=int(value[-1]):raise ValueError('Το ΑΦΜ δεν έχει έγκυρο ψηφίο ελέγχου')
+    return value

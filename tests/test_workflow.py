@@ -160,7 +160,8 @@ class ConnectedWorkflowTests(unittest.TestCase):
         from app.infrastructure import database
         old=self.root/'previous';migrations=self.root/'old-migrations';migrations.mkdir()
         for name in ['001_initial.sql','002_preparation.sql','003_rounding.sql','004_workspace.sql']:(migrations/name).write_bytes((database.MIGRATIONS/name).read_bytes())
-        with patch.object(database,'MIGRATIONS',migrations):
+        # Seed the historical schema before the purchase-classification feature existed.
+        with patch.object(database,'MIGRATIONS',migrations),patch('app.application.supplier_purchases.SupplierPurchases.apply_import'):
             service=ERP(old)
             try:
                 company=service.company('000000008','ΣΥΝΘΕΤΙΚΗ')

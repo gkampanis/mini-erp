@@ -64,6 +64,8 @@ class Repository:
                     related = [reference for reference, issued in reference_history.get(reference_key, []) if issued != d['issue_date']]
                     columns = ','.join(values)
                     document = self.db.execute(f'INSERT INTO documents({columns}) VALUES ({",".join("?" for _ in values)})', tuple(values.values())).lastrowid
+                    from app.application.supplier_purchases import SupplierPurchases
+                    SupplierPurchases.apply_import(self,company,document,d,row['raw'])
                     reference_history.setdefault(reference_key, []).append((document, d['issue_date']))
                     self.audit(company,'document_imported',document,dict(job=job,row=row['row']))
                     if related:

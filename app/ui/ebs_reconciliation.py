@@ -2,6 +2,8 @@
 from collections import Counter
 from datetime import date
 import json
+import re
+from decimal import Decimal
 import tkinter as tk
 from tkinter import ttk,filedialog,messagebox,simpledialog
 from app.application.ebs_reconciliation import EBSReconciliation
@@ -10,11 +12,35 @@ from app.application.periods import MONTHS,month_bounds
 
 COLUMNS={'date':'Ημ/νία','invoice':'Εναλ. παρ/κό','vat':'Α.Φ.Μ.','net':'Αξία','tax':'ΦΠΑ','gross':'Σύνολο'}
 
-STATES={'Όλα':None,'Καταχωρισμένα':'registered','Μερική συμφωνία — Πιθανώς καταχωρισμένο':'partial','Μη καταχωρισμένα':'not_registered','Χρειάζονται έλεγχο':'review','Δεν εντοπίστηκε στο Excel':'not_found','Χωρίς συμφωνία':'unreconciled'}
+STATES={'Όλα':None,'Καταχωρισμένα':'registered','Μερική συμφωνία — Πιθανώς καταχωρισμένο':'partial','Μη καταχωρισμένα':'not_registered','Χρειάζονται έλεγχο':'review','Χρειάζεται έλεγχος στο EBS':'ebs_review','Δεν εντοπίστηκε στο Excel':'not_found','Χωρίς συμφωνία':'unreconciled'}
 TITLES={v:k for k,v in STATES.items() if v}
 SOURCES={'excel_ebs':'Excel EBS','normalization_operator':'Επιβεβαίωση μερικής αντιστοίχισης','rpa_operator':'RPA · οπτικός έλεγχος','rpa_attempt':'Προσπάθεια RPA · εκκρεμεί έλεγχος','manual_operator':'Χειροκίνητη επιβεβαίωση','':'—'}
 
-def display_state(row):return 'partial' if row['status']=='review' and row.get('match_kind')=='normalized' else row['status']
+def display_state(row):
+    if row['status']=='review' and row.get('match_kind')=='attempt':return 'ebs_review'
+    return 'partial' if row['status']=='review' and row.get('match_kind')=='normalized' else row['status']
+
+
+def comparison_fields(row,entry):
+    from app.ui.desktop import amount,reference
+    item=entry['normalized'] if entry else {}
+    values=[('Ημερομηνία',row['issue_date'],item.get('date','—'),row['issue_date']!=item.get('date')),
+            ('ΑΦΜ',row['vat'],item.get('vat','—'),row['vat']!=item.get('vat')),
+            ('Παραστατικό',reference(row),entry['original_reference'] if entry else '—',reference(row)!=(entry['original_reference'] if entry else None))]
+    for label,key in (('Καθαρή €','net_minor'),('ΦΠΑ €','tax_minor'),('Σύνολο €','gross_minor')):
+        exact=item.get(key.removesuffix('_minor')+'_exact')
+        differs=row[key]!=item.get(key) or (exact is not None and Decimal(exact)!=Decimal(row[key])/100)
+        text=exact.replace('.',',') if exact is not None and Decimal(exact)!=Decimal(item.get(key,0))/100 else amount(item[key]) if key in item else '—'
+        values.append((label,amount(row[key]),text,differs))
+    return values
+
+
+def reference_note(left,right):
+    if left.casefold()==right.casefold():return 'διαφορά μόνο σε πεζά / κεφαλαία'
+    if re.sub(r'[\s/-]+','',left.casefold())==re.sub(r'[\s/-]+','',right.casefold()):return 'διαφορά μόνο σε κενά ή διαχωριστικά (/ και -)'
+    from app.domain.ebs_matching import canonical_reference
+    if canonical_reference(left)==canonical_reference(right):return 'διαφορά μορφοποίησης ή αρχικών μηδενικών του αριθμού'
+    return 'διαφορά στην παρουσίαση σειράς / αριθμού — έλεγξε τα δύο αρχικά αναγνωριστικά'
 
 def result_title(row):
     if row.get('match_kind')=='exact' and row['status']=='registered':return 'Καταχωρισμένο — Ακριβής συμφωνία'
@@ -80,12 +106,15 @@ class ReconciliationTab:
         win=tk.Toplevel(self.owner.root);win.title('Σύγκριση ΑΑΔΕ / Mini ERP — Excel EBS');win.geometry('1000x550')
         ttk.Label(win,text=result_title(row)+' · '+row['reason'],wraplength=950,style='Subtitle.TLabel').pack(anchor='w',padx=16,pady=12)
         tree=table(win,('field','local','excel'),('Πεδίο','Mini ERP / ΑΑΔΕ','Excel EBS'),{'field':180,'local':320,'excel':380})
+        from tkinter import font
+        bold=font.nametofont('TkDefaultFont').copy();bold.configure(weight='bold');win.difference_font=bold
+        tree.tag_configure('difference',background='#fff0cc',font=bold)
         for entry in entries or [None]:
-            item=entry['normalized'] if entry else {}
             tree.insert('','end',values=('Γραμμή Excel','',entry['row_number'] if entry else 'Δεν υπάρχει αντιστοίχιση'))
-            values=[('Ημερομηνία',row['issue_date'],item.get('date','—')),('ΑΦΜ',row['vat'],item.get('vat','—')),('Παραστατικό',reference(row),entry['original_reference'] if entry else '—')]
-            values.extend((label,amount(row[key]),amount(item[key]) if key in item else '—') for label,key in (('Καθαρή €','net_minor'),('ΦΠΑ €','tax_minor'),('Σύνολο €','gross_minor')))
-            for values_row in values:tree.insert('','end',values=values_row)
+            values=comparison_fields(row,entry)
+            for *cells,differs in values:tree.insert('','end',values=cells,tags=('difference',) if differs and entry else ())
+            if entry and not any(v[3] for v in values if v[0]!='Παραστατικό') and values[2][3]:
+                ttk.Label(win,text='Ημερομηνία, ΑΦΜ και ποσά συμφωνούν — '+reference_note(values[2][1],values[2][2])+'.',style='Subtitle.TLabel',wraplength=950).pack(anchor='w',padx=16,pady=8,before=tree.master)
         win.comparison_tree=tree;return win
     def pending(self):
         from app.ui.desktop import STATES

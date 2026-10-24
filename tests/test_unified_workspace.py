@@ -63,6 +63,13 @@ class UnifiedWorkspaceTests(unittest.TestCase):
         self.assertEqual(RPA(self.erp).expense_scope(self.company,[row['id']])['expenses'],[])
         supplier=SupplierAccounts(self.erp).rows(self.company)
         self.assertEqual([r['vat'] for r in supplier],['000000002'])
+    def test_revenue_pdf_is_available_only_for_one_explicit_mark(self):
+        from app.application.provider_pdf import ProviderDatabase
+        self.receive('1.1',outgoing=True)
+        self.assertFalse(ProviderDatabase(self.erp,self.company,'production').download_candidates(str(self.company)))
+        self.assertFalse(ProviderDatabase(self.erp,self.company,'production',['10000001']).download_candidates(str(self.company)))
+        self.assertEqual(len(ProviderDatabase(self.erp,self.company,'production',['10000001'],allow_income=True).download_candidates(str(self.company))),1)
+        self.assertFalse(ProviderDatabase(self.erp,self.company,'production',['10000001','99999999'],allow_income=True).download_candidates(str(self.company)))
     def test_supplier_mapping_skips_non_value_records_without_losing_invoice_update(self):
         self.receive();self.receive('9.3','10000002')
         cp=self.erp.search(self.company)[0]['counterparty_id']
