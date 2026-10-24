@@ -1,0 +1,53 @@
+{
+  "source_commit": "d5b9062ca847b64fd9c7e33aa3c756f02b635215",
+  "delivery_gate": "PASSED",
+  "sha256": "c3fffc2b73a390003b48bf7e2a3178a680aae7e7214098d7586e8cb3e416f9d7",
+  "counts": {
+    "source_tests": {
+      "tests": 216,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "source_gui": {
+      "tests": 60,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "package_tests": {
+      "tests": 216,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "package_gui": {
+      "tests": 60,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    }
+  },
+  "windows_desktop": "NOT_RUN",
+  "windows_launcher": "NOT_RUN",
+  "ebs_live": "NOT_RUN",
+  "aade_live": "NOT_RUN",
+  "changed_files": [
+    "app/ui/desktop.py",
+    "app/ui/document_views.py",
+    "app/ui/ebs_reconciliation.py",
+    "tests/gui_regressions.py"
+  ]
+}
