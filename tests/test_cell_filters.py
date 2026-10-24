@@ -26,3 +26,31 @@ class CellFiltersTests(unittest.TestCase):
         self.filters.set('net_minor','>=1,50');self.assertEqual(self.ids(),[2])
         self.filters.cell('vat','012345678');self.assertEqual(self.ids(),[2])
         self.filters.clear(notify=True);self.assertEqual(self.ids(),[1,2,3])
+    def test_empty_heading_value_removes_both_text_and_cell_rules_for_that_column(self):
+        self.filters.cell('name','ONE');self.filters.set('name','ONE')
+        self.filters.cell('vat','012345678')
+        self.assertEqual(self.ids(),[1,2])
+        self.filters.set('name','')
+        self.assertNotIn('name',self.filters.filters);self.assertNotIn('name',self.filters.cell_filters)
+        self.assertIn('vat',self.filters.cell_filters)
+        self.assertEqual(self.ids(),[1,2])
+    def test_include_then_exclude_switches_column_mode_without_contradictory_rules(self):
+        self.filters.cell('name','ONE');self.assertEqual(self.ids(),[1,2])
+        self.filters.cell('name','ONE',True);self.assertEqual(self.ids(),[3])
+        self.filters.cell('name','TWO');self.assertEqual(self.ids(),[3])
+        self.filters.cell('name','ONE');self.assertEqual(self.ids(),[1,2])
+        self.filters.cell('net_minor',100);self.assertEqual(self.ids(),[1])
+        self.filters.remove('name');self.assertEqual(self.ids(),[1,3])
+    def test_exclusions_accumulate_and_other_column_rules_remain_independent(self):
+        self.filters.cell('net_minor',100)
+        self.filters.cell('name','ONE',True);self.assertEqual(self.ids(),[3])
+        self.filters.cell('name','TWO',True);self.assertEqual(self.ids(),[])
+        self.filters.remove('name');self.assertEqual(self.ids(),[1,3])
+
+    def test_heading_and_cell_operations_replace_only_the_same_column_mode(self):
+        self.filters.set('name','=ONE');self.assertEqual(self.ids(),[1,2])
+        self.filters.cell('name','ONE',True);self.assertEqual(self.ids(),[3])
+        self.filters.cell('net_minor',100)
+        self.filters.set('name','=ONE');self.assertEqual(self.ids(),[1])
+        self.assertNotIn('name',self.filters.cell_filters)
+        self.assertIn('net_minor',self.filters.cell_filters)

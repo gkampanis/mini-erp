@@ -15,6 +15,7 @@ class RPAPanel:
         self.owner,self.parent=owner,parent;self.rpa=RPA(owner.erp);self.workspace=Workspace(owner.erp)
         self.rpa.recover(owner.company)
         self._next_after=None;self._preview=None;self.buttons={}
+        self._notice=''
         self.job=None;self.pause_requested=False;self.stop_requested=False;self.running=False
         self.mode=tk.StringVar(value='Προσομοίωση');self.live_ack=tk.BooleanVar(value=False)
         self.mapping=None;self.hotkeys=set();self.tree=owner.tree
@@ -48,7 +49,12 @@ class RPAPanel:
         self.restore_job()
         owner.root.after(170,self.poll_hotkeys)
 
+    def notify(self,message,*,error=False):
+        self._notice=message;self.state.set(message)
+        if error:messagebox.showerror('Καταχώριση EBS',message,parent=self.owner.root)
+
     def restore_job(self):
+        self._notice=''
         self.rpa.recover(self.owner.company)
         row=self.owner.erp.db.execute("SELECT id FROM rpa_jobs WHERE company_id=? AND status IN ('queued','paused') ORDER BY mode='fill_only' DESC,id DESC LIMIT 1",(self.owner.company,)).fetchone()
         self.job=row['id'] if row else None
@@ -83,6 +89,7 @@ class RPAPanel:
             mode='Έλεγχος χωρίς καταχώριση' if meta['mode']=='simulation' else 'Εκτέλεση EBS'
             state={'running':'Σε εξέλιξη','paused':'Σε παύση','stopped':'Διακόπηκε','completed':'Τέλος ουράς','queued':'Έτοιμη ουρά'}.get(meta['status'],meta['status'])
             self.state.set(f"{mode} · {state} · {p['processed']}/{p['total']} · Τρέχον {p['current']} · Επιβεβαιωμένα οπτικά {p['verified_in_ebs']} · Εντολές Save {p['save_requested']} · Αποτυχίες/αβέβαια {p['failed']} · Παραλείψεις {p['skipped']}. "+('Καμία ενέργεια στο EBS.' if meta['mode']=='simulation' else 'Η αποθήκευση ελέγχεται οπτικά στο EBS. ')+(p['reason'] if meta['status'] in ('paused','completed') else ''))
+        if self._notice:self.state.set(self._notice+('\n'+self.state.get() if meta else ''))
         blocked=any(i['status'] in ('started','save_pending','uncertain','filled_no_save') for i in items)
         self.update_selection_actions()
         if meta and meta['status'] in ('running','queued','paused'):self.execution_controls.pack(fill='x',before=self.parent.winfo_children()[-1])
@@ -226,6 +233,7 @@ class RPAPanel:
 
     def make(self,mode,pilot=False):
         if self.owner.busy or self.running:return
+        self._notice=''
         try:
             ids=self.ids()
             if pilot:
@@ -269,10 +277,10 @@ class RPAPanel:
         chosen={int(key) for key in self.owner.tree.selection()}
         documents=visible if selection=='batch' else [key for key in visible if key in chosen]
         if not documents or (selection=='one' and len(documents)!=1):
-            self.state.set('Επίλεξε ακριβώς ένα παραστατικό.' if selection=='one' else 'Επίλεξε γραμμές στον πίνακα· το φίλτρο δεν αποτελεί επιλογή.');return
-        if sys.platform!='win32':self.state.set('Η πραγματική καταχώριση απαιτεί Windows με Entersoft.');return
+            self.notify('Επίλεξε ακριβώς ένα παραστατικό.' if selection=='one' else 'Επίλεξε γραμμές στον πίνακα· το φίλτρο δεν αποτελεί επιλογή.');return
+        if sys.platform!='win32':self.notify('Η πραγματική καταχώριση απαιτεί Windows με Entersoft.',error=True);return
         company=self.owner.company
-        self.state.set('Προετοιμασία παρτίδας · έλεγχος συμφωνίας και αποθηκευμένων λογαριασμών…')
+        self.notify('Προετοιμασία παρτίδας · έλεγχος συμφωνίας και αποθηκευμένων λογαριασμών…')
         def prepare():
             service=ERP(self.owner.directory)
             try:
@@ -281,9 +289,14 @@ class RPAPanel:
             finally:service.close()
         def ready(report):
             if self.owner._closing:return
-            if report.get('error'):self.state.set(report['error']);return
+            if report.get('error'):
+                # Show the existing live queue that prevents a duplicate start;
+                # do not reset/recover it or silently create a replacement.
+                active=self.owner.erp.db.execute("SELECT id FROM rpa_jobs WHERE company_id=? AND mode='fill_only' AND status IN ('queued','paused','running') ORDER BY id DESC LIMIT 1",(company,)).fetchone()
+                if active:self.job=active['id']
+                self.notify(report['error'],error=True);return
             if report['job'] is None:
-                self.state.set(f"Καμία κατάλληλη εγγραφή · {len(report['skipped'])} παραλείψεις. "+(report['skipped'][0]['reason'] if report['skipped'] else ''));return
+                self.notify(f"Καμία κατάλληλη εγγραφή · {len(report['skipped'])} παραλείψεις. "+(report['skipped'][0]['reason'] if report['skipped'] else ''),error=True);return
             self.job=report['job'];self.start()
         self.owner.run_worker(prepare,ready)
 
@@ -300,9 +313,11 @@ class RPAPanel:
     def start(self):
         if self.owner.busy or self.running or self.job is None:return
         meta,items=self.rpa.items(self.owner.company,self.job)
-        if meta['status'] in ('stopped','completed'):return
+        if meta['status'] in ('stopped','completed'):
+            self.notify('Η συγκεκριμένη ουρά έχει κλείσει. Η καταχώριση της τρέχουσας λίστας γίνεται από τα κύρια κουμπιά.');return
         if any(i['status'] in ('started','save_pending','uncertain','filled_no_save') for i in items):
-            self.state.set('Χρειάζεται έλεγχος στο EBS προηγούμενης προσπάθειας από το Ιστορικό. Δεν επαναλαμβάνεται αυτόματα.');return
+            self.notify('Χρειάζεται έλεγχος στο EBS προηγούμενης προσπάθειας από το Ιστορικό. Δεν επαναλαμβάνεται αυτόματα.',error=True);return
+        self._notice=''
         self.pause_requested=False;self.stop_requested=False;self.running=True
         self.refresh();self.next_item(continuing=True)
 
@@ -339,7 +354,7 @@ class RPAPanel:
                 elif self.pause_requested:self.rpa.pause(self.owner.company,job)
                 self.running=False;self.owner.root.deiconify();self.refresh()
                 if result['status']=='blocked' or result.get('item_status')=='uncertain':
-                    messagebox.showerror('Η καταχώριση σταμάτησε',result.get('reason') or 'Έλεγξε το EBS και το ιστορικό πριν συνέχεια.',parent=self.owner.root)
+                    self.notify(result.get('reason') or 'Έλεγξε το EBS και το ιστορικό πριν συνέχεια.',error=True)
         def dispatch():
             self._next_after=None
             if self.running and not self.owner._closing:self.owner.run_worker(execute,done)
@@ -353,11 +368,13 @@ class RPAPanel:
         if self._next_after is not None:self.owner.root.after_cancel(self._next_after);self._next_after=None
 
     def pause(self):
+        self._notice=''
         self.cancel_next();self.pause_requested=True
         if not self.owner.busy and self.job is not None:self.rpa.pause(self.owner.company,self.job);self.running=False;self.owner.root.deiconify()
         self.refresh()
         if self.running:self.state.set(self.state.get()+' · Παύση μετά την τρέχουσα εγγραφή')
     def stop(self):
+        self._notice=''
         self.cancel_next();self.stop_requested=True
         if not self.owner.busy and self.job is not None:self.rpa.stop(self.owner.company,self.job);self.running=False;self.owner.root.deiconify()
         self.refresh()
@@ -369,10 +386,10 @@ class RPAPanel:
         ttk.Label(frame,text='Save / νέο ΤΕΔ δεν αποτελούν αυτόματη επιβεβαίωση αποθήκευσης στη βάση EBS.',style='Subtitle.TLabel').pack(anchor='w',pady=8)
         from app.ui.desktop import table
         tree=table(frame,('job','invoice','vat','account','state','reason'),('Ουρά','Παραστατικό','ΑΦΜ','Λογαριασμός','Ενέργεια / αποτέλεσμα','Αιτία'),{'state':260,'reason':300})
-        rows=self.owner.erp.db.execute('SELECT i.*,j.mode FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? ORDER BY i.id DESC',(self.owner.company,)).fetchall()
+        rows=self.owner.erp.db.execute('SELECT i.*,j.mode,j.status AS job_state FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? ORDER BY i.id DESC',(self.owner.company,)).fetchall()
         import json
         for row in rows:
-            p=json.loads(row['payload']);tree.insert('','end',iid=str(row['id']),values=(row['job_id'],p['invoice'],p['vat'],p.get('account',''),LABELS.get(row['status'],row['status']),row['reason']))
+            p=json.loads(row['payload']);tree.insert('','end',iid=str(row['id']),values=(row['job_id'],p['invoice'],p['vat'],p.get('account',''),'Μη εκτελεσμένο · παλιότερη ουρά' if row['status']=='queued' and row['job_state']=='stopped' else LABELS.get(row['status'],row['status']),row['reason']))
         bottom=ttk.Frame(frame);bottom.pack(fill='x',pady=10)
         def review(pilot=False):
             if self.owner.busy or self.running:

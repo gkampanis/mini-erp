@@ -90,12 +90,15 @@ class PostingActionsTests(unittest.TestCase):
         self.erp.close();self.erp=ERP(self.root/'data');self.rpa=RPA(self.erp);self.rpa.recover(self.company)
         with self.assertRaises(ValueError):self.rpa.posting(self.company,self.ids[1:2])
         self.assertEqual(self.rpa.items(self.company,report['job'])[1][0]['status'],'uncertain')
-    def test_pending_queue_is_restored_without_creating_duplicate_jobs(self):
+    def test_new_filtered_scope_keeps_old_unattempted_items_in_history(self):
         report=self.rpa.posting(self.company,self.ids[:2]);job=report['job']
-        self.rpa.pause(self.company,job)
-        with self.assertRaises(ValueError):self.rpa.posting(self.company,self.ids[2:3])
-        self.assertEqual(self.erp.db.execute('SELECT count(*) FROM rpa_jobs').fetchone()[0],1)
-        self.assertEqual(self.rpa.items(self.company,job)[0]['status'],'paused')
+        self.rpa.pause(self.company,job);before=self.rpa.items(self.company,job)[1]
+        selected=self.rpa.posting(self.company,self.ids[2:3])
+        self.assertNotEqual(selected['job'],job)
+        self.assertEqual(selected['documents'],self.ids[2:3])
+        self.assertEqual(self.rpa.items(self.company,job)[1],before)
+        self.assertEqual(self.rpa.items(self.company,job)[0]['status'],'stopped')
+        self.assertEqual(self.erp.db.execute('SELECT count(*) FROM rpa_jobs').fetchone()[0],2)
 
     def test_fill_failure_keeps_safe_field_reason_and_shareable_stack_without_secrets(self):
         from unittest.mock import Mock
@@ -108,3 +111,55 @@ class PostingActionsTests(unittest.TestCase):
         log=(self.erp.directory/'diagnostics'/'crashlog.jsonl').read_text()
         self.assertIn('app/application/rpa.py',log);self.assertNotIn('AFM_CREDITOR',log)
         self.assertNotIn('POST0',log)
+
+    def test_primary_action_resumes_matching_paused_queue_without_creating_new_job(self):
+        first=self.rpa.posting(self.company,self.ids[:2],limit=40);job=first['job']
+        self.rpa.pause(self.company,job);before=self.rpa.items(self.company,job)
+        resumed=self.rpa.posting(self.company,self.ids,limit=40)
+        self.assertEqual(resumed['job'],job);self.assertTrue(resumed['resumed'])
+        self.assertEqual(self.rpa.items(self.company,job),before)
+        self.assertEqual(self.erp.db.execute('SELECT count(*) FROM rpa_jobs').fetchone()[0],1)
+        fake=FakeEBS();self.run_job(job,fake,resume=True)
+        self.assertEqual([r[1] for r in fake.calls if r[0]=='fill'],self.ids[:2])
+    def test_filtered_subset_and_reordered_view_never_run_hidden_old_queue_items(self):
+        old=self.rpa.posting(self.company,self.ids[:3])['job'];self.rpa.pause(self.company,old)
+        before=self.rpa.items(self.company,old)[1]
+        chosen=[self.ids[2],self.ids[0]]
+        report=self.rpa.posting(self.company,chosen)
+        self.assertEqual(report['documents'],chosen)
+        self.assertEqual(self.rpa.items(self.company,old)[1],before)
+        fake=FakeEBS();self.run_job(report['job'],fake)
+        self.assertEqual([r[1] for r in fake.calls if r[0]=='fill'],chosen)
+        self.assertIsNone(self.erp.preparation(self.company,self.ids[3]))
+        planned=self.rpa.plan(self.company,self.ids[:4])
+        self.assertEqual(planned['documents'],[self.ids[1],self.ids[3]])
+
+    def test_scope_replacement_is_atomic_and_cannot_replace_running_or_uncertain_jobs(self):
+        from unittest.mock import patch
+        old=self.rpa.posting(self.company,self.ids[:2])['job'];self.rpa.pause(self.company,old)
+        before=self.rpa.items(self.company,old);audit=self.erp.repository.audit
+        def failing(company,action,*args,**kwargs):
+            if action=='rpa_queued':raise RuntimeError('Synthetic transaction failure')
+            return audit(company,action,*args,**kwargs)
+        with patch.object(self.erp.repository,'audit',side_effect=failing):
+            with self.assertRaises(RuntimeError):self.rpa.posting(self.company,self.ids[2:3])
+        self.assertEqual(self.rpa.items(self.company,old),before)
+        self.assertEqual(self.erp.db.execute('SELECT count(*) FROM rpa_jobs').fetchone()[0],1)
+        with self.erp.db:self.erp.db.execute("UPDATE rpa_jobs SET status='running' WHERE id=?",(old,))
+        with self.assertRaises(ValueError):self.rpa.posting(self.company,self.ids[2:3])
+        with self.erp.db:
+            self.erp.db.execute("UPDATE rpa_jobs SET status='paused' WHERE id=?",(old,))
+            self.erp.db.execute("UPDATE rpa_items SET status='uncertain' WHERE job_id=? AND document_id=?",(old,self.ids[0]))
+        with self.assertRaises(ValueError):self.rpa.posting(self.company,self.ids[2:3])
+        self.assertEqual(self.erp.db.execute('SELECT count(*) FROM rpa_jobs').fetchone()[0],1)
+
+    def test_stop_during_prepare_prevents_a_stale_worker_from_claiming_the_old_queue(self):
+        job=self.rpa.posting(self.company,self.ids[:1])['job'];fake=FakeEBS();prepare=fake.prepare
+        def stop_before_claim(*args):
+            result=prepare(*args);self.rpa.stop(self.company,job);return result
+        fake.prepare=stop_before_claim
+        with self.assertRaises(ValueError):self.run_job(job,fake)
+        self.assertEqual([r[0] for r in fake.calls],['prepare'])
+        self.assertEqual(self.rpa.items(self.company,job)[1][0]['status'],'queued')
+        self.rpa.blocked(self.company,job,'Late worker returned after stop')
+        self.assertEqual(self.rpa.items(self.company,job)[0]['status'],'stopped')

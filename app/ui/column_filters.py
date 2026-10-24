@@ -27,9 +27,11 @@ class ColumnFilters:
 
     def set(self,column,text):
         text=text.strip()
+        if not text:self.remove(column);return
         if column.endswith('_minor') and re.match(r'^[<>=]',text):
             match=re.fullmatch(r'(<=|>=|=|<|>)\s*(.+)',text)
             if not match or not money(match[2]).is_finite():raise ValueError('Γράψε ποσό, π.χ. >=100,00')
+        self.cell_filters.pop(column,None)
         if text:self.filters[column]=text
         else:self.filters.pop(column,None)
         self.sync_headings();self.on_change()
@@ -48,8 +50,12 @@ class ColumnFilters:
 
     def cell(self,column,value,exclude=False):
         rule=(exclude,self.canonical(column,value))
-        rules=self.cell_filters.setdefault(column,[])
+        # A new operation replaces the previous mode in this column. Other
+        # columns remain AND-combined; repeated exclusions still accumulate.
+        self.filters.pop(column,None)
+        rules=[r for r in self.cell_filters.get(column,[]) if r[0]] if exclude else []
         if rule not in rules:rules.append(rule)
+        self.cell_filters[column]=rules
         self.sync_headings();self.on_change()
 
     def remove(self,column):
@@ -95,9 +101,23 @@ class ColumnFilters:
             title=self.tree.heading(column,'text').removeprefix('● ')
             self.tree.heading(column,text=('● ' if column in self.filters or column in self.cell_filters else '')+title)
 
+    def removal_actions(self,menu):
+        if not (self.filters or self.cell_filters):return
+        menu.add_command(label='Καθαρισμός όλων των φίλτρων',command=lambda:self.clear(notify=True))
+        submenu=tk.Menu(menu,tearoff=False)
+        for active in sorted(set(self.filters)|set(self.cell_filters)):
+            submenu.add_command(label=self.tree.heading(active,'text').removeprefix('● '),command=lambda c=active:self.remove(c))
+        menu.add_cascade(label='Αφαίρεση συγκεκριμένου φίλτρου',menu=submenu)
+
     def popup(self,event):
         region=self.tree.identify_region(event.x,event.y)
-        if region not in ('heading','cell'):return
+        if region not in ('heading','cell'):
+            if not (self.filters or self.cell_filters):return
+            if self.menu is not None:self.menu.destroy()
+            menu=tk.Menu(self.tree,tearoff=False);self.menu=menu;self.removal_actions(menu)
+            try:menu.tk_popup(event.x_root,event.y_root)
+            finally:menu.grab_release()
+            return 'break'
         display=list(self.tree['displaycolumns'])
         if display==['#all']:display=list(self.tree['columns'])
         index=int(self.tree.identify_column(event.x)[1:])-1
@@ -116,12 +136,7 @@ class ColumnFilters:
             menu.add_command(label='Εξαίρεση αυτής της τιμής',command=lambda:self.cell(column,raw,True))
             if column in self.filters or column in self.cell_filters:
                 menu.add_command(label='Αφαίρεση φίλτρου αυτής της στήλης',command=lambda:self.remove(column))
-            if self.filters or self.cell_filters:
-                menu.add_command(label='Καθαρισμός όλων των φίλτρων',command=lambda:self.clear(notify=True))
-                submenu=tk.Menu(menu,tearoff=False)
-                for active in sorted(set(self.filters)|set(self.cell_filters)):
-                    submenu.add_command(label=self.tree.heading(active,'text').removeprefix('● '),command=lambda c=active:self.remove(c))
-                menu.add_cascade(label='Αφαίρεση συγκεκριμένου φίλτρου',menu=submenu)
+            self.removal_actions(menu)
             try:menu.tk_popup(event.x_root,event.y_root)
             finally:menu.grab_release()
             return 'break'
