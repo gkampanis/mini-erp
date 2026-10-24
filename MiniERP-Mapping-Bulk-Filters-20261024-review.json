@@ -1,0 +1,14 @@
+{
+  "source_commit": "5037c48",
+  "delivery_gate": "PASSED",
+  "backend_tests": 209,
+  "gui_tests": 55,
+  "source_and_extracted_zip": true,
+  "skipped": 0,
+  "windows_native_mapping": "NOT_RUN",
+  "windows_launcher": "NOT_RUN",
+  "windows_exe": "NOT_BUILT",
+  "ebs_live": "NOT_RUN",
+  "aade_live": "NOT_RUN",
+  "sha256": "1b4dee21a7385b849add88f7bf1be0958bbcd20ad61e4d833c5a32264bc56003"
+}
