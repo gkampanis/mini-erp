@@ -64,18 +64,40 @@ class WindowsSession(WindowsAdapter):
         raise TEDContextChanged('Δεν είναι ενεργό το νέο ΤΕΔ της ουράς')
 
     def validate_target(self,field,point):
+        self.last_field=field
         point=super().validate_target(field,point)
         if self.expected_ted is None:return point  # Mapping capture, no typing.
         class Point(ctypes.Structure):_fields_=[('x',wintypes.LONG),('y',wintypes.LONG)]
         u=ctypes.windll.user32
         u.WindowFromPoint.argtypes=[Point];u.WindowFromPoint.restype=wintypes.HWND
-        u.GetParent.argtypes=[wintypes.HWND];u.GetParent.restype=wintypes.HWND
         handle=u.WindowFromPoint(Point(*point))
-        for _ in range(32):
-            if not handle:break
-            if handle==self.expected_ted:return point
-            handle=u.GetParent(handle)
+        if self._ted_for_window(handle,self._mdi_forms())==self.expected_ted:return point
         raise RuntimeError('Η θέση του πεδίου '+field+' δεν ανήκει στο ενεργό ΤΕΔ της ουράς. Έλεγξε το mapping πριν καταχώριση.')
+
+    def _ancestors(self,handle):
+        u=ctypes.windll.user32
+        u.GetParent.argtypes=[wintypes.HWND];u.GetParent.restype=wintypes.HWND
+        result=[]
+        for _ in range(32):
+            if not handle or int(handle) in result:break
+            result.append(int(handle));handle=u.GetParent(handle)
+        return result
+
+    def _mdi_child(self,handle):
+        # A TED caption can be on a nested pane, not the document HWND.
+        u=ctypes.windll.user32
+        u.GetClassNameW.argtypes=[wintypes.HWND,wintypes.LPWSTR,ctypes.c_int]
+        chain=self._ancestors(handle)
+        for child,parent in zip(chain,chain[1:]):
+            name=ctypes.create_unicode_buffer(256);u.GetClassNameW(parent,name,256)
+            cls=name.value.casefold()
+            if cls=='mdiclient' or cls.startswith('windowsforms10.mdiclient.'):return child,parent
+        return None
+
+    def _ted_for_window(self,handle,forms):
+        for ancestor in self._ancestors(handle):
+            if ancestor in forms:return ancestor
+        return None
 
     def save(self,point):
         self.health()
@@ -120,10 +142,11 @@ class WindowsSession(WindowsAdapter):
         pid=wintypes.DWORD();u.GetWindowThreadProcessId(handle,ctypes.byref(pid))
         if self.pid is None or pid.value!=self.pid:raise RuntimeError('Το νέο ΤΕΔ δεν ανήκει στην ίδια διεργασία EBS.')
         u.GetParent.argtypes=[wintypes.HWND];u.GetParent.restype=wintypes.HWND
-        parent=u.GetParent(handle)
-        u.GetClassNameW.argtypes=[wintypes.HWND,wintypes.LPWSTR,ctypes.c_int]
-        name=ctypes.create_unicode_buffer(256);u.GetClassNameW(parent,name,256)
-        if not parent or 'mdiclient' not in name.value.casefold():raise RuntimeError('Δεν επαληθεύτηκε ο MDIClient του νέου ΤΕΔ.')
+        mdi=self._mdi_child(handle)
+        # A custom tab host is not a native MDIClient. Let observed focus
+        # establish readiness; never send MDI messages to an arbitrary parent.
+        if mdi is None:return
+        handle,parent=mdi
         send=u.SendMessageTimeoutW
         send.argtypes=[wintypes.HWND,wintypes.UINT,ctypes.c_size_t,ctypes.c_ssize_t,wintypes.UINT,wintypes.UINT,ctypes.POINTER(ctypes.c_size_t)]
         send.restype=ctypes.c_ssize_t;result=ctypes.c_size_t()
@@ -160,6 +183,9 @@ class WindowsSession(WindowsAdapter):
      u.GetParent.argtypes=[wintypes.HWND];u.GetParent.restype=wintypes.HWND
      canonical=set()
      for h in candidates:
+      mdi=self._mdi_child(h)
+      if mdi:
+       canonical.add(mdi[0]);continue
       ancestor=u.GetParent(h)
       nested=False
       for _ in range(32):
@@ -180,6 +206,7 @@ class WindowsSession(WindowsAdapter):
      u.GetWindowTextW.argtypes=[wintypes.HWND,wintypes.LPWSTR,ctypes.c_int]
      class GUITHREADINFO(ctypes.Structure):
       _fields_=[('cbSize',wintypes.DWORD),('flags',wintypes.DWORD),('hwndActive',wintypes.HWND),('hwndFocus',wintypes.HWND),('hwndCapture',wintypes.HWND),('hwndMenuOwner',wintypes.HWND),('hwndMoveSize',wintypes.HWND),('hwndCaret',wintypes.HWND),('rcCaret',wintypes.RECT)]
+     u.GetGUIThreadInfo.argtypes=[wintypes.DWORD,ctypes.POINTER(GUITHREADINFO)];u.GetGUIThreadInfo.restype=wintypes.BOOL
      fg=u.GetForegroundWindow()
      if not fg:return None
      pid=wintypes.DWORD()
@@ -201,16 +228,19 @@ class WindowsSession(WindowsAdapter):
       if not send(parent,0x0229,0,0,0x0002,250,ctypes.byref(result)) or result.value not in forms:return None
       active.add(result.value)
      if active:return next(iter(active)) if len(active)==1 else None
-     info=GUITHREADINFO();info.cbSize=ctypes.sizeof(info)
-     if not u.GetGUIThreadInfo(tid,ctypes.byref(info)):return None
-     for root in (info.hwndFocus, info.hwndActive):
-      h=root
-      for _ in range(32):
-       if not h:break
-       if int(h) in forms:return int(h)
-       h=u.GetParent(h)
-     # An unambiguous single candidate is acceptable; ambiguity is not.
-     return next(iter(forms)) if len(forms)==1 else None
+     threads={tid}
+     for form in forms:
+      owner=wintypes.DWORD();thread=u.GetWindowThreadProcessId(form,ctypes.byref(owner))
+      if owner.value==pid.value:threads.add(thread)
+     focused=set()
+     for thread in threads:
+      info=GUITHREADINFO();info.cbSize=ctypes.sizeof(info)
+      if not u.GetGUIThreadInfo(thread,ctypes.byref(info)):continue
+      for root in (info.hwndFocus,info.hwndActive):
+       found=self._ted_for_window(root,forms)
+       if found is not None:focused.add(found);break
+     if focused:return next(iter(focused)) if len(focused)==1 else None
+     return None
 
     def _has_ebs_modal_dialog(self):
      # Detect standard Win32 popup dialogs owned by the Entersoft process.

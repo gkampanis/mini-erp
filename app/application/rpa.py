@@ -223,7 +223,13 @@ class RPA:
             for pending in items:
                 if pending['status']=='queued':self.live_source(company,pending['document_id'])
         if meta['mode']=='fill_only' and meta['execution']=='save_new':
-            return self._advance_saved(company,job,meta,items,item,live_confirmed,adapter,continue_after_pause)
+            try:return self._advance_saved(company,job,meta,items,item,live_confirmed,adapter,continue_after_pause)
+            except Exception as exc:
+                if not getattr(exc,'diagnostic_report',None):
+                    from app.infrastructure.ebs_adapter.diagnostics import write_report
+                    report=write_report(self.erp,company,job,item['id'],'preflight',exc,adapter,json.loads(meta['profile_json']))
+                    if report is not None:exc.diagnostic_report=report.name
+                raise
         current=self.payload(company,item['document_id'])
         if current['group']!='6':raise ValueError('Η ομάδα 2 είναι εκτός καταχώρισης EBS, ακόμη και σε παλαιότερη ουρά.')
         if current!=item['payload']:raise ValueError('Άλλαξε η εγκεκριμένη προετοιμασία. Δημιούργησε νέα ουρά μετά από έλεγχο.')
@@ -319,33 +325,45 @@ class RPA:
             if vat=='000000000' or any(i['payload']['vat'] in ('000000001','000000002','000000003') for i in items if i['status']=='queued'):
                 raise ValueError('Δεν στέλνονται συνθετικά δείγματα DEMO στο EBS. Όρισε πραγματική εταιρεία και επίλεξε πραγματικά παραστατικά.')
         if current['group']!='6':raise ValueError('Η ομάδα 2 είναι εκτός καταχώρισης EBS')
-        backend=adapter or WindowsSession()
-        def open_empty():
-            # Durable before the New command. No invoice input has been claimed.
-            with self.db:self.db.execute('UPDATE rpa_jobs SET need_new=1,expected_ted=NULL WHERE id=?',(job,))
-            fresh=backend.open_new(profile['new'])
-            with self.db:self.db.execute('UPDATE rpa_jobs SET need_new=0,expected_ted=? WHERE id=?',(fresh,job))
-            meta['expected_ted']=fresh
-        if meta['need_new']:
-            if continue_after_pause is not True:raise ValueError('Παύση: έλεγξε το τελευταίο Save και πάτησε Συνέχεια για νέο ΤΕΔ')
-            open_empty()
-        try:expected=backend.prepare(profile,meta['expected_ted'])
-        except TEDContextChanged:
-            # A previously queued HWND may still exist but refer to an old tab.
-            # Open a NEW form once, instead of typing into that arbitrary tab.
-            open_empty()
-            expected=backend.prepare(profile,meta['expected_ted'])
-            with self.db:self.erp.repository.audit(company,'rpa_native_context_rebound',None,dict(job=job))
-        with self.db:
-            claim=self.db.execute("UPDATE rpa_items SET status='started',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued' AND EXISTS(SELECT 1 FROM rpa_jobs WHERE id=rpa_items.job_id AND status NOT IN ('stopped','completed'))",(item['id'],))
-            if claim.rowcount!=1:raise ValueError('Η προσπάθεια έχει ήδη ξεκινήσει')
-            from app.application.ebs_reconciliation import EBSReconciliation
-            EBSReconciliation(self.erp).assert_rpa(company,[p['document_id'] for p in items if p['status']=='queued'],required=True,ignore_items=(item['id'],))
-            if self.db.execute("SELECT 1 FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.mode='fill_only' AND i.document_id=? AND i.id<>? AND i.status IN ('started','save_pending','filled_no_save','uncertain','save_invoked','ui_saved_review','reviewed_by_operator')",(company,item['document_id'],item['id'])).fetchone():raise ValueError('Υπάρχει άλλη πραγματική προσπάθεια για το ίδιο παραστατικό. Δεν στάλθηκαν εντολές.')
-            for pending in items:
-                if pending['status']=='queued' and self.payload(company,pending['document_id'])!=pending['payload']:raise ValueError('Άλλαξαν λογαριασμοί πριν τη συμπλήρωση. Χρειάζεται έλεγχος ουράς.')
-            self.db.execute("UPDATE rpa_jobs SET status='running',expected_ted=? WHERE id=?",(expected,job))
-            self.erp.repository.audit(company,'rpa_started',item['document_id'],dict(job=job,item=item['id'],mode='save_new'))
+        backend=adapter;phase='preflight'
+        try:
+            backend=adapter or WindowsSession()
+            def open_empty():
+                nonlocal phase
+                phase='new'
+                # Durable before the New command. No invoice input has been claimed.
+                with self.db:self.db.execute('UPDATE rpa_jobs SET need_new=1,expected_ted=NULL WHERE id=?',(job,))
+                fresh=backend.open_new(profile['new'])
+                with self.db:self.db.execute('UPDATE rpa_jobs SET need_new=0,expected_ted=? WHERE id=?',(fresh,job))
+                meta['expected_ted']=fresh
+            if meta['need_new']:
+                if continue_after_pause is not True:raise ValueError('Παύση: έλεγξε το τελευταίο Save και πάτησε Συνέχεια για νέο ΤΕΔ')
+                open_empty()
+            phase='prepare'
+            try:expected=backend.prepare(profile,meta['expected_ted'])
+            except TEDContextChanged:
+                # A previously queued HWND may still exist but refer to an old tab.
+                # Open a NEW form once, instead of typing into that arbitrary tab.
+                open_empty()
+                phase='prepare'
+                expected=backend.prepare(profile,meta['expected_ted'])
+                with self.db:self.erp.repository.audit(company,'rpa_native_context_rebound',None,dict(job=job))
+            phase='claim'
+            with self.db:
+                claim=self.db.execute("UPDATE rpa_items SET status='started',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued' AND EXISTS(SELECT 1 FROM rpa_jobs WHERE id=rpa_items.job_id AND status NOT IN ('stopped','completed'))",(item['id'],))
+                if claim.rowcount!=1:raise ValueError('Η προσπάθεια έχει ήδη ξεκινήσει')
+                from app.application.ebs_reconciliation import EBSReconciliation
+                EBSReconciliation(self.erp).assert_rpa(company,[p['document_id'] for p in items if p['status']=='queued'],required=True,ignore_items=(item['id'],))
+                if self.db.execute("SELECT 1 FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.mode='fill_only' AND i.document_id=? AND i.id<>? AND i.status IN ('started','save_pending','filled_no_save','uncertain','save_invoked','ui_saved_review','reviewed_by_operator')",(company,item['document_id'],item['id'])).fetchone():raise ValueError('Υπάρχει άλλη πραγματική προσπάθεια για το ίδιο παραστατικό. Δεν στάλθηκαν εντολές.')
+                for pending in items:
+                    if pending['status']=='queued' and self.payload(company,pending['document_id'])!=pending['payload']:raise ValueError('Άλλαξαν λογαριασμοί πριν τη συμπλήρωση. Χρειάζεται έλεγχος ουράς.')
+                self.db.execute("UPDATE rpa_jobs SET status='running',expected_ted=? WHERE id=?",(expected,job))
+                self.erp.repository.audit(company,'rpa_started',item['document_id'],dict(job=job,item=item['id'],mode='save_new'))
+        except Exception as exc:
+            from app.infrastructure.ebs_adapter.diagnostics import write_report
+            report=write_report(self.erp,company,job,item['id'],phase,exc,backend,profile)
+            if report is not None:exc.diagnostic_report=report.name
+            raise
         phase='fill';reason=''
         try:
             backend.fill(current,profile['mapping'])
@@ -377,8 +395,13 @@ class RPA:
             safe.update(f'Η θέση του πεδίου {field} δεν ανήκει στο ενεργό ΤΕΔ της ουράς. Έλεγξε το mapping πριν καταχώριση.' for field,_ in FIELDS)
             safe.update(('Άλλαξε η διεργασία EBS. Η συμπλήρωση διακόπηκε.','Άλλαξε το ενεργό ΤΕΔ πριν το Save','Δεν αναγνωρίστηκε νέο ΤΕΔ. Δεν επιτρέπεται επανάληψη παραστατικού.','Δεν αναγνωρίστηκε σταθερό νέο ΤΕΔ. Δεν επιτρέπεται επανάληψη παραστατικού.','Διακόπηκε η εισαγωγή Unicode στο EBS'))
             if str(exc) in safe:reason+=' '+str(exc)
+            from app.infrastructure.ebs_adapter.diagnostics import failure_hint
+            if failure_hint(exc):reason+=' '+failure_hint(exc)
             from app.infrastructure.crashlog import record
             record(self.erp.directory,exc,'worker')
+            from app.infrastructure.ebs_adapter.diagnostics import write_report
+            report=write_report(self.erp,company,job,item['id'],phase,exc,backend,profile)
+            if report is not None:reason+=' Αναφορά: diagnostics/'+report.name
         with self.db:
             self.db.execute('UPDATE rpa_items SET status=?,reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',(status,reason,item['id']))
             self.db.execute('UPDATE rpa_jobs SET status=? WHERE id=?',(state,job))

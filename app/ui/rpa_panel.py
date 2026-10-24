@@ -342,7 +342,17 @@ class RPAPanel:
                         from app.infrastructure.crashlog import record
                         record(self.owner.directory,exc,'rpa_worker')
                         RPA(service).recover(self.owner.company)
+                    if not getattr(exc,'diagnostic_report',None):
+                        from app.infrastructure.ebs_adapter.diagnostics import write_report
+                        import json
+                        item=service.db.execute("SELECT i.id FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.id=? AND i.status IN ('queued','started','save_pending','uncertain') ORDER BY i.id LIMIT 1",(self.owner.company,job)).fetchone()
+                        if item:
+                            report=write_report(service,self.owner.company,job,item['id'],'preflight',exc,profile=json.loads(meta['profile_json']))
+                            if report is not None:exc.diagnostic_report=report.name
                     reason=str(exc) if expected else 'Σφάλμα εκτέλεσης · η πρόοδος διατηρήθηκε. Έλεγξε το EBS και τα διαγνωστικά πριν συνέχεια.'
+                    from app.infrastructure.ebs_adapter.diagnostics import failure_hint
+                    if failure_hint(exc):reason+=' '+failure_hint(exc)
+                    if getattr(exc,'diagnostic_report',None):reason+=' · Αναφορά: '+exc.diagnostic_report+' (Ρυθμίσεις → Υποστήριξη)'
                     RPA(service).blocked(self.owner.company,job,reason)
                     return dict(status='blocked',reason=reason)
             finally:service.close()

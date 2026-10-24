@@ -182,7 +182,7 @@ class Desktop:
         self.tree = table(self.documents_tab,columns,titles,{'name':190,'reference':100,'vat':95,'issue_date':90,'gross_minor':85,'account_code':120,'preparation_state':120,'aade_state':90,'pdf_state':200})
         self.tree.configure(selectmode='extended')
         from app.ui.column_filters import ColumnFilters
-        self.column_filters=ColumnFilters(self.tree,self.filter_documents,rows=lambda:self._documents,extra_menu=lambda event,tree,menu:self.rpa_panel.document_menu(event,tree,menu),show_summary=True)
+        self.column_filters=ColumnFilters(self.tree,self.filter_documents,rows=lambda:self._documents,extra_menu=lambda event,tree,menu:self.rpa_panel.document_menu(event,tree,menu),show_summary=True,reset_parent=search_bar)
         self.tree.configure(displaycolumns=('reference','name','vat','issue_date','net_minor','tax_minor','gross_minor','account_code','preparation_state','pdf_state'))
         for key,width in {'reference':95,'name':180,'vat':90,'issue_date':85,'net_minor':80,'tax_minor':80,'gross_minor':80,'account_code':100,'preparation_state':125,'pdf_state':135}.items():self.tree.column(key,width=width)
         for col in columns:

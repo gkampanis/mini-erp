@@ -35,8 +35,8 @@ def open_settings(owner,section=None):
         ttk.Button(pdf,text=label,command=lambda f=feature:install_feature(f)).pack(fill='x',pady=6)
     ttk.Button(connections,text='Εγκατάσταση RPA adapter',command=lambda:install_feature('rpa')).pack(fill='x',pady=6)
     ttk.Label(pdf,textvariable=state,wraplength=710).pack(anchor='w',pady=12)
-    ttk.Label(support,text='Μικρό διαγνωστικό για υποστήριξη',style='Section.TLabel').pack(anchor='w',pady=10)
-    ttk.Label(support,text='Καταγράφει τύπο σφάλματος, έκδοση Python και θέσεις κώδικα.\nΔεν καταγράφει κωδικούς, μηνύματα σφαλμάτων, URL ή στοιχεία παραστατικών.\nΔεν αποστέλλεται αυτόματα. Το εξάγεις και το στέλνεις εσύ όταν χρειαστεί.',wraplength=710).pack(anchor='w',pady=8)
+    ttk.Label(support,text='Αναφορά σφαλμάτων για υποστήριξη',style='Section.TLabel').pack(anchor='w',pady=10)
+    ttk.Label(support,text='Περιλαμβάνει σφάλματα και αναλυτικές αναφορές διακοπής EBS: στάδιο, ουρά, Save, mapping και δομή παραθύρων.\nΔεν περιλαμβάνει κωδικούς, περιεχόμενο παραθύρων ή στοιχεία τιμολογίων.\nΔεν αποστέλλεται αυτόματα. Το εξάγεις και το στέλνεις εσύ όταν χρειαστεί.',wraplength=710).pack(anchor='w',pady=8)
     def save_log():
         destination=filedialog.asksaveasfilename(parent=win,defaultextension='.txt',initialfile='MiniERP-crashlog.txt',filetypes=[('Διαγνωστικό','*.txt')])
         if destination:

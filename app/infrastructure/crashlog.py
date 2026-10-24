@@ -33,4 +33,9 @@ def export(directory,destination):
     for name in ('crashlog.previous.jsonl','crashlog.jsonl'):
         path=source/name
         if path.is_file():lines.extend(path.read_text(encoding='utf8').splitlines())
-    Path(destination).write_text('\n'.join(lines[-100:])+'\n',encoding='utf8')
+    lines=lines[-100:]
+    # Same existing support export includes the bounded, sanitized RPA reports.
+    for path in sorted(source.glob('ebs-failure-*.json'))[-20:]:
+        try:lines.append(json.dumps(dict(area='ebs_rpa',report=json.loads(path.read_text(encoding='utf8'))),ensure_ascii=False))
+        except (OSError,ValueError):continue
+    Path(destination).write_text('\n'.join(lines)+'\n',encoding='utf8')

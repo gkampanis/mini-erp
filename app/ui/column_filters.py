@@ -12,15 +12,18 @@ def fold_text(value):
 
 
 class ColumnFilters:
-    def __init__(self,tree,on_change,*,value=None,rows=None,extra_menu=None,show_summary=False):
+    def __init__(self,tree,on_change,*,value=None,rows=None,extra_menu=None,show_summary=False,reset_parent=None):
         self.tree,self.on_change,self.value=tree,on_change,value
         self.filters={};self.cell_filters={};self.window=None;self.rows=rows;self.extra_menu=extra_menu;self.menu=None
         self.summary=None;self.reset_button=None
         if show_summary:
             self.summary=tk.StringVar(master=tree)
             footer=ttk.Frame(tree.master);footer.grid(row=2,column=0,columnspan=2,sticky="ew")
-            ttk.Label(footer,textvariable=self.summary,style="Subtitle.TLabel",wraplength=900).pack(side="left",fill="x",expand=True)
-            self.reset_button=ttk.Button(footer,text="Επαναφορά φίλτρων",command=lambda:self.clear(notify=True))
+            label=ttk.Label(footer,textvariable=self.summary,style="Subtitle.TLabel",wraplength=900)
+            label.pack(side="left",fill="x",expand=True)
+            self.reset_button=ttk.Button(reset_parent if reset_parent is not None else footer,text="Επαναφορά φίλτρων",command=lambda:self.clear(notify=True))
+            # Reserve the reset before a long summary can consume the footer.
+            self._reset_pack=dict(side="left",padx=(6,0)) if reset_parent is not None else dict(side="right",padx=6,pady=2,before=label)
         tree.bind('<Button-3>',self.popup,add='+')
 
     def clear(self,notify=False):
@@ -112,7 +115,7 @@ class ColumnFilters:
 
     def sync_headings(self):
         if self.reset_button is not None:
-            if self.filters or self.cell_filters:self.reset_button.pack(side='right',padx=6,pady=2)
+            if self.filters or self.cell_filters:self.reset_button.pack(**self._reset_pack)
             else:self.reset_button.pack_forget()
         for column in self.tree['columns']:
             title=self.tree.heading(column,'text').removeprefix('● ')
@@ -152,12 +155,13 @@ class ColumnFilters:
             raw=self.raw(row,column)
             if self.menu is not None:self.menu.destroy()
             menu=tk.Menu(self.tree,tearoff=False);self.menu=menu
+            self.removal_actions(menu)
+            if self.filters or self.cell_filters:menu.add_separator()
             if self.extra_menu:self.extra_menu(event,self.tree,menu)
             menu.add_command(label='Φίλτρο με αυτή την τιμή',command=lambda:self.cell(column,raw))
             menu.add_command(label='Εξαίρεση αυτής της τιμής',command=lambda:self.cell(column,raw,True))
             if column in self.filters or column in self.cell_filters:
                 menu.add_command(label='Αφαίρεση φίλτρου αυτής της στήλης',command=lambda:self.remove(column))
-            self.removal_actions(menu)
             try:menu.tk_popup(event.x_root,event.y_root)
             finally:menu.grab_release()
             return 'break'

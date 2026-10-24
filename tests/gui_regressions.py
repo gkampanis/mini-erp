@@ -1557,7 +1557,90 @@ class DesktopRegressions(unittest.TestCase):
         self.assertTrue(panel.workspace.profile(app.company)['pilot_at'])
         self.assertTrue(app._evidence[doc]['storage_verified'])
         self.assertEqual([c[0] for c in fake.calls],['prepare','fill','save'])
-        self.assertIn('2026.10.25-P1',self.root.title())
+        from app import __version__
+        self.assertIn(__version__,self.root.title())
+
+
+    def test_context_filters_have_top_reset_and_restore_base_view_through_real_commands(self):
+        from copy import deepcopy
+        self.import_fixture('separate.xlsx');app=self.app;app.refresh()
+        app.state_filter.set('Μη καταχωρισμένα');app.group_filter.set('Όλες οι ομάδες');app.refresh();self.root.update()
+        tree=app.tree;expected=tree.get_children();before=list(app.erp.db.iterdump())
+        item=expected[0];x,y,w,h=tree.bbox(item,'name')
+        with patch('tkinter.Menu.tk_popup'):
+            tree.event_generate('<Button-3>',x=x+4,y=y+4);self.root.update()
+        menu=app.column_filters.menu
+        choose=next(i for i in range(menu.index('end')+1) if menu.type(i)=='command' and menu.entrycget(i,'label')=='Φίλτρο με αυτή την τιμή')
+        menu.invoke(choose);self.root.update()
+        app.column_filters.cell('gross_minor',app._documents[int(item)]['gross_minor'])
+        active=deepcopy(app.column_filters.cell_filters)
+        app.query.set('NO-SUCH-DOCUMENT');app.filter_documents();self.assertFalse(tree.get_children())
+        clear=self.button(app.documents_tab,'Καθαρισμός');clear.invoke();self.root.update()
+        self.assertEqual(app.column_filters.cell_filters,active)
+        reset=self.button(app.documents_tab,'Επαναφορά φίλτρων')
+        self.assertEqual(reset.master,clear.master)
+        self.assertTrue(reset.winfo_ismapped())
+        reset.invoke();self.root.update()
+        self.assertEqual(tree.get_children(),expected)
+        self.assertEqual(app.state_filter.get(),'Μη καταχωρισμένα');self.assertEqual(app.group_filter.get(),'Όλες οι ομάδες')
+        self.assertEqual(list(app.erp.db.iterdump()),before)
+        # Reapply then remove through the actual popup command, not clear().
+        app.column_filters.cell('name',app._documents[int(item)]['name'])
+        x,y,w,h=tree.bbox(item,'name')
+        with patch('tkinter.Menu.tk_popup'):
+            tree.event_generate('<Button-3>',x=x+4,y=y+4);self.root.update()
+        menu=app.column_filters.menu
+        self.assertEqual(menu.entrycget(0,'label'),'Καθαρισμός όλων των φίλτρων')
+        menu.invoke(0);self.root.update()
+        self.assertEqual(tree.get_children(),expected)
+        app.notebook.select(app.document_views['expenses'].parent);self.root.update()
+        app.notebook.select(app.documents_tab);app.refresh();self.root.update()
+        self.assertEqual(tree.get_children(),expected)
+
+    def test_long_filter_summary_cannot_hide_existing_reset_in_narrow_view(self):
+        from app.ui.column_filters import ColumnFilters
+        window=tk.Toplevel(self.root);window.geometry('700x400')
+        frame=ttk.Frame(window);frame.pack(fill='both',expand=True)
+        tree=ttk.Treeview(frame,columns=('name',),show='headings')
+        tree.grid(row=0,column=0,sticky='nsew');frame.columnconfigure(0,weight=1);frame.rowconfigure(0,weight=1)
+        tree.heading('name',text='Συναλλασσόμενος')
+        changes=[];filters=ColumnFilters(tree,lambda:changes.append(True),show_summary=True)
+        filters.cell('name','ΣΥΝΘΕΤΙΚΗ ΕΠΩΝΥΜΙΑ ΜΕ ΜΑΚΡΥ ΚΕΙΜΕΝΟ '*5)
+        filters.apply([{'name':'OTHER'}]);self.root.update()
+        button=filters.reset_button
+        self.assertTrue(button.winfo_ismapped())
+        self.assertGreaterEqual(button.winfo_width(),button.winfo_reqwidth())
+        self.assertLessEqual(button.winfo_x()+button.winfo_width(),button.master.winfo_width())
+        button.invoke();self.root.update()
+        self.assertFalse(filters.cell_filters);self.assertEqual(changes,[True,True])
+        window.destroy()
+
+    def test_posting_target_failure_displays_report_and_exports_details_without_retry(self):
+        from types import SimpleNamespace
+        import json
+        from app.infrastructure.ebs_adapter.adapter import FIELDS
+        from app.infrastructure.crashlog import export
+        from tests.test_workflow import FakeEBS
+        app=self.app
+        with app.erp.db:app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(app.company,))
+        row=list(ROW);row[0]='000000004';row[8]=''
+        workbook(self.folder/'inputs/report-ui.xlsx',[HEADERS,row]);self.import_fixture('report-ui.xlsx');app.refresh()
+        doc=next(iter(app._documents));panel=app.rpa_panel
+        panel.workspace.approve_many(app.company,[dict(document=doc,group='6',account='64.03')],confirmed=True)
+        panel.workspace.save_profile(app.company,dict(mapping={f:[10,20] for f,_ in FIELDS},save=[100,200],new=[300,400]))
+        app.refresh();app.column_filters.cell('name',app._documents[doc]['name'])
+        fake=FakeEBS();cause='Η θέση του πεδίου AFM_CREDITOR δεν ανήκει στο ενεργό ΤΕΔ της ουράς. Έλεγξε το mapping πριν καταχώριση.'
+        def fail(profile,expected):fake.calls.append(('prepare',expected));raise RuntimeError(cause)
+        fake.prepare=fail
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=fake),patch('ctypes.windll',SimpleNamespace(user32=SimpleNamespace(GetAsyncKeyState=lambda _:0)),create=True),patch('app.ui.rpa_panel.messagebox.showerror') as error:
+            panel.post();wait(self.root,lambda:not app.busy and not panel.running)
+        self.assertTrue(error.called);self.assertIn('ebs-failure-',str(error.call_args))
+        self.assertEqual([c[0] for c in fake.calls],['prepare'])
+        files=list((app.directory/'diagnostics').glob('ebs-failure-*.json'));self.assertEqual(len(files),1)
+        report=json.loads(files[0].read_text());self.assertEqual(report['phase'],'prepare')
+        self.assertEqual(report['profile_points']['AFM_CREDITOR'],[10,20]);self.assertFalse(report['save_may_have_been_sent'])
+        destination=self.folder/'support.txt';export(app.directory,destination)
+        self.assertIn(cause,destination.read_text());self.assertTrue(app.column_filters.cell_filters)
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
