@@ -1,0 +1,63 @@
+{
+  "delivery": "MiniERP-P1-Filtered-Posting-20261025",
+  "version": "2026.10.25-P1",
+  "source_commit": "f3839cf57f5e251f1554e6307c9da4a31ad98078",
+  "delivery_gate": "PASSED",
+  "sha256": "f8b9b483a44def930db465416c701f92accd6f26de77460683c7a803307c5009",
+  "bytes": 1142849,
+  "checks": {
+    "static_checks": "PASSED",
+    "desktop_display": "PASSED",
+    "source_launcher_python": "PASSED",
+    "source_tests": {
+      "tests": 240,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "source_gui": {
+      "tests": 73,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "source_gui_smoke": "PASSED",
+    "package_build": "PASSED",
+    "archive_integrity": "PASSED",
+    "package_launcher_python": "PASSED",
+    "package_tests": {
+      "tests": 240,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "package_gui": {
+      "tests": 73,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "package_gui_smoke": "PASSED",
+    "demo_initialization": "PASSED",
+    "demo_readback": "PASSED"
+  },
+  "windows_desktop": "NOT_RUN",
+  "windows_launcher": "NOT_RUN",
+  "ebs_live": "NOT_RUN",
+  "aade_live": "NOT_RUN",
+  "pywinauto": "NOT_RUN: Linux environment; Windows EBS application unavailable",
+  "hypothesis": "Existing development dependency; new filter state machine (35 examples, 35 steps each)",
+  "accounting_persistence": "Only an explicit operator confirmation or existing reconciliation evidence verifies EBS storage. Completed RPA is separately marked submitted, not storage_verified."
+}
