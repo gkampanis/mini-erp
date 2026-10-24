@@ -5,6 +5,10 @@ import time
 from app.infrastructure.ebs_adapter.adapter import WindowsAdapter
 
 
+class TEDContextChanged(RuntimeError):
+    """The queued form is no longer current; no invoice input has started."""
+
+
 class WindowsSession(WindowsAdapter):
     def __init__(self):
         super().__init__()
@@ -52,8 +56,10 @@ class WindowsSession(WindowsAdapter):
                 self.expected_ted=active;return active
             if time.monotonic()>=deadline:break
             time.sleep(.1);self.health()
-        if active is None:raise RuntimeError('Δεν προσδιορίστηκε το ενεργό ΤΕΔ. Άνοιξε κενό ΤΕΔ.')
-        raise RuntimeError('Δεν είναι ενεργό το νέο ΤΕΔ της ουράς')
+        if active is None:
+            if expected is not None:raise TEDContextChanged('Το προηγούμενο ΤΕΔ της ουράς δεν είναι πλέον διαθέσιμο.')
+            raise RuntimeError('Δεν προσδιορίστηκε το ενεργό ΤΕΔ. Άνοιξε κενό ΤΕΔ.')
+        raise TEDContextChanged('Δεν είναι ενεργό το νέο ΤΕΔ της ουράς')
 
     def save(self,point):
         self.health()
@@ -65,13 +71,35 @@ class WindowsSession(WindowsAdapter):
         self.pg.click(*point);deadline=time.monotonic()+12
         while time.monotonic()<deadline:
             self.health();fresh=self._mdi_forms()-existing
-            if len(fresh)==1:self.expected_ted=next(iter(fresh));return self.expected_ted
+            if len(fresh)==1:
+                self.expected_ted=next(iter(fresh));self._activate_fresh_ted(self.expected_ted);return self.expected_ted
             if len(fresh)>1:
                 active=self._active_ted()
-                if active in fresh:self.expected_ted=active;return active
+                if active in fresh:self.expected_ted=active;self._activate_fresh_ted(active);return active
                 raise RuntimeError('Πολλές νέες φόρμες ΤΕΔ, χωρίς ασφαλή ενεργή φόρμα')
             time.sleep(.3)
         raise RuntimeError('Δεν αναγνωρίστηκε νέο ΤΕΔ. Δεν επιτρέπεται επανάληψη παραστατικού.')
+
+    def _activate_fresh_ted(self,handle):
+        """Focus only the child just discovered by open_new, never a cached HWND."""
+        self.health()
+        if handle not in self._mdi_forms():raise RuntimeError('Το νέο ΤΕΔ έκλεισε πριν την ενεργοποίηση.')
+        if self._active_ted()==handle:return
+        u=ctypes.windll.user32
+        u.GetWindowThreadProcessId.argtypes=[wintypes.HWND,ctypes.POINTER(wintypes.DWORD)]
+        pid=wintypes.DWORD();u.GetWindowThreadProcessId(handle,ctypes.byref(pid))
+        if self.pid is None or pid.value!=self.pid:raise RuntimeError('Το νέο ΤΕΔ δεν ανήκει στην ίδια διεργασία EBS.')
+        u.GetParent.argtypes=[wintypes.HWND];u.GetParent.restype=wintypes.HWND
+        parent=u.GetParent(handle)
+        u.GetClassNameW.argtypes=[wintypes.HWND,wintypes.LPWSTR,ctypes.c_int]
+        name=ctypes.create_unicode_buffer(256);u.GetClassNameW(parent,name,256)
+        if not parent or 'mdiclient' not in name.value.casefold():raise RuntimeError('Δεν επαληθεύτηκε ο MDIClient του νέου ΤΕΔ.')
+        send=u.SendMessageTimeoutW
+        send.argtypes=[wintypes.HWND,wintypes.UINT,ctypes.c_size_t,ctypes.c_ssize_t,wintypes.UINT,wintypes.UINT,ctypes.POINTER(ctypes.c_size_t)]
+        send.restype=ctypes.c_ssize_t;result=ctypes.c_size_t()
+        if not send(parent,0x0222,handle,0,0x0002,500,ctypes.byref(result)):
+            raise RuntimeError('Το EBS δεν ανταποκρίθηκε στην ενεργοποίηση του νέου ΤΕΔ.')
+        # prepare still verifies the resulting active HWND before any typing.
 
     def _mdi_forms(self):
      """Enumerate candidate TED child windows (not necessarily only one)."""

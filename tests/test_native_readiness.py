@@ -50,3 +50,26 @@ class NativeReadinessTests(unittest.TestCase):
         with patch.object(ctypes,'windll',SimpleNamespace(user32=user),create=True):
             self.assertIsNone(session._active_ted())
         self.assertEqual(user.SendMessageTimeoutW.call_args.args[4:6],(2,250))
+    def test_new_ted_is_explicitly_activated_before_prepare_can_fill_it(self):
+        user,session=self.make(active=201);session.pg=Mock()
+        state={'active':201}
+        session._mdi_forms.side_effect=lambda:{201,202} if session.pg.click.called else {201}
+        def message(hwnd,msg,wp,lp,flags,ms,result):
+            if msg==0x0222:state['active']=wp;result._obj.value=0
+            elif msg==0x0229:result._obj.value=state['active']
+            return 1
+        user.SendMessageTimeoutW.side_effect=message
+        with patch.object(ctypes,'windll',SimpleNamespace(user32=user),create=True):
+            fresh=session.open_new((30,40))
+            self.assertEqual(fresh,202)
+            self.assertEqual(session.prepare({'save':(10,20),'new':(30,40)},fresh),fresh)
+        activation=[c.args for c in user.SendMessageTimeoutW.call_args_list if c.args[1]==0x0222]
+        self.assertEqual(len(activation),1);self.assertEqual(activation[0][2],202)
+        session.pg.click.assert_called_once_with(30,40)
+    def test_fresh_activation_rejects_unknown_handle_and_another_process(self):
+        user,session=self.make()
+        with patch.object(ctypes,'windll',SimpleNamespace(user32=user),create=True):
+            with self.assertRaises(RuntimeError):session._activate_fresh_ted(999)
+            session.pid=77
+            with self.assertRaises(RuntimeError):session._activate_fresh_ted(202)
+        self.assertFalse(any(c.args[1]==0x0222 for c in user.SendMessageTimeoutW.call_args_list))

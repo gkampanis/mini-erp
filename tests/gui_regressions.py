@@ -1421,5 +1421,28 @@ class DesktopRegressions(unittest.TestCase):
         self.assertEqual(self.count('documents'),3)
         self.assertEqual(panel.rpa.progress(app.company,panel.job)['automatically_verified'],0)
 
+    def test_visible_filter_reset_restores_screenshot_combination_without_database_changes(self):
+        self.import_fixture('separate.xlsx');app=self.app;app.refresh()
+        first=next(iter(app._documents.values()))
+        app.erp.prepare_document(app.company,first['id'],'6','64.03',confirmed=True)
+        app.state_filter.set('Μη καταχωρισμένα');app.refresh();self.root.update()
+        expected=set(app._documents);before=list(app.erp.db.iterdump())
+        app.column_filters.cell('name',first['name'])
+        app.column_filters.cell('preparation_state','Χρειάζεται λογαριασμό',True)
+        self.root.update()
+        button=self.button(app.documents_tab,'Επαναφορά φίλτρων')
+        self.assertTrue(button.winfo_ismapped());self.assertEqual(len(app.tree.get_children()),1)
+        button.invoke();self.root.update()
+        self.assertEqual(set(app._documents),expected)
+        self.assertEqual(app.state_filter.get(),'Μη καταχωρισμένα')
+        self.assertFalse(app.column_filters.cell_filters);self.assertFalse(button.winfo_ismapped())
+        self.assertEqual(list(app.erp.db.iterdump()),before)
+        for name,view in app.document_views.items():
+            app.notebook.select(view.parent);self.root.update()
+            view.column_filters.cell('vat','__NO_ROW__');self.root.update()
+            self.assertTrue(view.column_filters.reset_button.winfo_ismapped())
+            view.column_filters.reset_button.invoke();self.root.update()
+            self.assertFalse(view.column_filters.cell_filters)
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

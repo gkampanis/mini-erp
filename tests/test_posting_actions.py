@@ -163,3 +163,46 @@ class PostingActionsTests(unittest.TestCase):
         self.assertEqual(self.rpa.items(self.company,job)[1][0]['status'],'queued')
         self.rpa.blocked(self.company,job,'Late worker returned after stop')
         self.assertEqual(self.rpa.items(self.company,job)[0]['status'],'stopped')
+    def test_reported_inactive_queued_ted_is_rebound_before_any_invoice_input(self):
+        from app.infrastructure.ebs_adapter.session import TEDContextChanged
+        job=self.rpa.posting(self.company,self.ids[:1])['job']
+        with self.erp.db:self.erp.db.execute('UPDATE rpa_jobs SET expected_ted=777,need_new=0 WHERE id=?',(job,))
+        fake=FakeEBS();prepare=fake.prepare
+        def inactive_old(profile,expected):
+            answer=prepare(profile,expected)
+            if expected==777:raise TEDContextChanged('Δεν είναι ενεργό το νέο ΤΕΔ της ουράς')
+            return answer
+        fake.prepare=inactive_old
+        result=self.run_job(job,fake)
+        self.assertEqual(result['status'],'completed')
+        self.assertEqual([c[0] for c in fake.calls],['prepare','new','prepare','fill','save'])
+        self.assertEqual(fake.calls[0][1],777);self.assertEqual(fake.calls[2][1],101)
+        self.assertEqual(self.rpa.items(self.company,job)[0]['expected_ted'],101)
+    def test_restart_resets_only_native_handle_not_documents_or_attempt_states(self):
+        job=self.rpa.posting(self.company,self.ids[:2])['job']
+        with self.erp.db:self.erp.db.execute('UPDATE rpa_jobs SET expected_ted=777 WHERE id=?',(job,))
+        before=self.rpa.items(self.company,job)[1]
+        self.erp.close();self.erp=ERP(self.root/'data');self.rpa=RPA(self.erp)
+        self.rpa.recover(self.company)
+        meta,items=self.rpa.items(self.company,job)
+        self.assertIsNone(meta['expected_ted']);self.assertEqual(meta['need_new'],1)
+        self.assertEqual(items,before)
+    def test_context_error_after_fill_starts_remains_uncertain_without_automatic_replay(self):
+        from app.infrastructure.ebs_adapter.session import TEDContextChanged
+        from unittest.mock import Mock
+        job=self.rpa.posting(self.company,self.ids[:1])['job'];fake=FakeEBS()
+        fake.fill=Mock(side_effect=TEDContextChanged('Synthetic context failure during typing'))
+        result=self.run_job(job,fake)
+        self.assertEqual(result['item_status'],'uncertain')
+        self.assertEqual([c[0] for c in fake.calls],['prepare'])
+        with self.assertRaises(ValueError):self.run_job(job,fake,resume=True)
+        self.assertEqual(fake.fill.call_count,1)
+    def test_second_context_failure_stops_before_typing_without_opening_forms_in_a_loop(self):
+        from app.infrastructure.ebs_adapter.session import TEDContextChanged
+        from unittest.mock import Mock
+        job=self.rpa.posting(self.company,self.ids[:1])['job'];fake=FakeEBS()
+        fake.prepare=Mock(side_effect=TEDContextChanged('Δεν είναι ενεργό το νέο ΤΕΔ της ουράς'))
+        with self.assertRaises(TEDContextChanged):self.run_job(job,fake)
+        self.assertEqual([c[0] for c in fake.calls],['new'])
+        self.assertEqual(fake.prepare.call_count,2)
+        self.assertEqual(self.rpa.items(self.company,job)[1][0]['status'],'queued')

@@ -198,6 +198,11 @@ class RPA:
             for batch in batches:
                 self.db.execute("UPDATE rpa_jobs SET status='paused' WHERE id=?",(batch['id'],))
                 self.erp.repository.audit(company,'rpa_batch_recovered_paused',None,dict(job=batch['id']))
+            # Native HWNDs are not durable identity across application sessions.
+            stale=self.db.execute("SELECT id FROM rpa_jobs WHERE company_id=? AND mode='fill_only' AND execution='save_new' AND status IN ('queued','paused') AND expected_ted IS NOT NULL AND EXISTS(SELECT 1 FROM rpa_items i WHERE i.job_id=rpa_jobs.id AND i.status='queued')",(company,)).fetchall()
+            for row in stale:
+                self.db.execute('UPDATE rpa_jobs SET expected_ted=NULL,need_new=1 WHERE id=?',(row['id'],))
+                self.erp.repository.audit(company,'rpa_native_context_reset',None,dict(job=row['id']))
         return len(rows)
 
     def advance(self,company,job,mapping=None,live_confirmed=False,adapter=None,continue_after_pause=False):
@@ -287,7 +292,7 @@ class RPA:
 
     def _advance_saved(self,company,job,meta,items,item,confirmed,adapter,continue_after_pause):
         from app.application.workspace import Workspace,signature
-        from app.infrastructure.ebs_adapter.session import WindowsSession
+        from app.infrastructure.ebs_adapter.session import WindowsSession,TEDContextChanged
         if confirmed is not True:raise ValueError('Απαιτείται ρητή έναρξη πραγματικής καταχώρισης')
         saved=Workspace(self.erp).profile(company);profile=json.loads(meta['profile_json'])
         if not saved or signature(profile)!=saved['signature']:raise ValueError('Άλλαξαν οι θέσεις EBS. Χρειάζεται νέα ουρά και πιλοτικός έλεγχος.')
@@ -303,13 +308,22 @@ class RPA:
                 raise ValueError('Δεν στέλνονται συνθετικά δείγματα DEMO στο EBS. Όρισε πραγματική εταιρεία και επίλεξε πραγματικά παραστατικά.')
         if current['group']!='6':raise ValueError('Η ομάδα 2 είναι εκτός καταχώρισης EBS')
         backend=adapter or WindowsSession()
-        if meta['need_new']:
-            if continue_after_pause is not True:raise ValueError('Παύση: έλεγξε το τελευταίο Save και πάτησε Συνέχεια για νέο ΤΕΔ')
-            # Opening a new empty form cannot replay the preceding invoice.
+        def open_empty():
+            # Durable before the New command. No invoice input has been claimed.
+            with self.db:self.db.execute('UPDATE rpa_jobs SET need_new=1,expected_ted=NULL WHERE id=?',(job,))
             fresh=backend.open_new(profile['new'])
             with self.db:self.db.execute('UPDATE rpa_jobs SET need_new=0,expected_ted=? WHERE id=?',(fresh,job))
             meta['expected_ted']=fresh
-        expected=backend.prepare(profile,meta['expected_ted'])
+        if meta['need_new']:
+            if continue_after_pause is not True:raise ValueError('Παύση: έλεγξε το τελευταίο Save και πάτησε Συνέχεια για νέο ΤΕΔ')
+            open_empty()
+        try:expected=backend.prepare(profile,meta['expected_ted'])
+        except TEDContextChanged:
+            # A previously queued HWND may still exist but refer to an old tab.
+            # Open a NEW form once, instead of typing into that arbitrary tab.
+            open_empty()
+            expected=backend.prepare(profile,meta['expected_ted'])
+            with self.db:self.erp.repository.audit(company,'rpa_native_context_rebound',None,dict(job=job))
         with self.db:
             claim=self.db.execute("UPDATE rpa_items SET status='started',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued' AND EXISTS(SELECT 1 FROM rpa_jobs WHERE id=rpa_items.job_id AND status NOT IN ('stopped','completed'))",(item['id'],))
             if claim.rowcount!=1:raise ValueError('Η προσπάθεια έχει ήδη ξεκινήσει')

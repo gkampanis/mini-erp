@@ -15,10 +15,12 @@ class ColumnFilters:
     def __init__(self,tree,on_change,*,value=None,rows=None,extra_menu=None,show_summary=False):
         self.tree,self.on_change,self.value=tree,on_change,value
         self.filters={};self.cell_filters={};self.window=None;self.rows=rows;self.extra_menu=extra_menu;self.menu=None
-        self.summary=None
+        self.summary=None;self.reset_button=None
         if show_summary:
             self.summary=tk.StringVar(master=tree)
-            ttk.Label(tree.master,textvariable=self.summary,style="Subtitle.TLabel",wraplength=1000).grid(row=2,column=0,columnspan=2,sticky="w")
+            footer=ttk.Frame(tree.master);footer.grid(row=2,column=0,columnspan=2,sticky="ew")
+            ttk.Label(footer,textvariable=self.summary,style="Subtitle.TLabel",wraplength=900).pack(side="left",fill="x",expand=True)
+            self.reset_button=ttk.Button(footer,text="Επαναφορά φίλτρων",command=lambda:self.clear(notify=True))
         tree.bind('<Button-3>',self.popup,add='+')
 
     def clear(self,notify=False):
@@ -97,6 +99,9 @@ class ColumnFilters:
         return result
 
     def sync_headings(self):
+        if self.reset_button is not None:
+            if self.filters or self.cell_filters:self.reset_button.pack(side='right',padx=6,pady=2)
+            else:self.reset_button.pack_forget()
         for column in self.tree['columns']:
             title=self.tree.heading(column,'text').removeprefix('● ')
             self.tree.heading(column,text=('● ' if column in self.filters or column in self.cell_filters else '')+title)
