@@ -63,6 +63,11 @@ class RPAPanel:
             return ordered[ordered.index(start):]
         return ordered
 
+    def update_selection_actions(self):
+        has_rows=bool(self.owner._documents)
+        for key in ('accounts','post','simulation'):self.buttons[key].state(['disabled'] if self.owner.busy or self.running or not has_rows else ['!disabled'])
+        self.options_menu.entryconfigure(3,state='disabled' if self.owner.busy or self.running or not has_rows else 'normal')
+
     def refresh(self):
         meta=None;items=[]
         if self.job is not None:
@@ -71,8 +76,7 @@ class RPAPanel:
             state={'running':'Σε εξέλιξη','paused':'Σε παύση','stopped':'Διακόπηκε','completed':'Τέλος ουράς','queued':'Έτοιμη ουρά'}.get(meta['status'],meta['status'])
             self.state.set(f"{mode} · {state} · {p['total']} εγγραφές · Τρέχον {p['current']} · Αποτυχίες/αβέβαια {p['failed']}. "+('Καμία ενέργεια στο EBS.' if meta['mode']=='simulation' else 'Η αποθήκευση ελέγχεται οπτικά στο EBS.'))
         blocked=any(i['status'] in ('started','save_pending','uncertain','filled_no_save') for i in items)
-        has_rows=bool(self.owner._documents)
-        for key in ('accounts','post','simulation'):self.buttons[key].state(['disabled'] if self.owner.busy or self.running or not has_rows else ['!disabled'])
+        self.update_selection_actions()
         if meta:self.execution_controls.pack(fill='x',before=self.parent.winfo_children()[-1])
         else:self.execution_controls.pack_forget()
         self.buttons['pause'].state(['!disabled'] if self.running and not self.pause_requested else ['disabled'])
@@ -80,7 +84,6 @@ class RPAPanel:
         self.buttons['stop'].state(['!disabled'] if meta and meta['status'] not in ('stopped','completed') and not self.stop_requested else ['disabled'])
         self.options_menu.entryconfigure(0,state='disabled' if self.owner.busy or self.running else 'normal')
         self.options_menu.entryconfigure(1,state='normal' if self.job is not None else 'disabled')
-        self.options_menu.entryconfigure(3,state='disabled' if self.owner.busy or self.running or not has_rows else 'normal')
         if self._preview and self._preview.winfo_exists():self.fill_preview()
 
     def preview(self):

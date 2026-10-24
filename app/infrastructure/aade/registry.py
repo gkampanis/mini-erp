@@ -10,6 +10,7 @@ SOAP='http://www.w3.org/2003/05/soap-envelope'
 WSSE='http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd'
 SERVICE='http://rgwspublic2/RgWsPublic2Service'
 TYPES='http://rgwspublic2/RgWsPublic2'
+REQUEST_TIMEOUT=15
 
 class RegistryAccessError(APIError):pass
 class RegistryLimited(APIError):pass
@@ -68,7 +69,7 @@ def lookup(username,password,called_by,called_for,opener=None):
     data=request_body(username,password,called_by,called_for)
     request=urllib.request.Request(ENDPOINT,data=data,headers={'Content-Type':'application/soap+xml; charset=utf-8; action="'+ACTION+'"','Accept':'application/soap+xml'},method='POST')
     try:
-        with (opener or urllib.request.build_opener(NoRedirect())).open(request,timeout=30) as response:result=response.read(2*1024*1024+1)
+        with (opener or urllib.request.build_opener(NoRedirect())).open(request,timeout=REQUEST_TIMEOUT) as response:result=response.read(2*1024*1024+1)
     except urllib.error.HTTPError as exc:
         if exc.code in (401,403):raise RegistryAccessError('Η υπηρεσία απέρριψε τα διαπιστευτήρια ή τα δικαιώματα Μητρώου') from None
         if exc.code in (429,503):raise RegistryLimited('Περιορισμός ή προσωρινή μη διαθεσιμότητα Μητρώου· η εργασία σταμάτησε') from None

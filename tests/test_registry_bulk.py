@@ -4,11 +4,13 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from urllib.error import HTTPError
 from app.application.service import ERP
 from app.application.registry import Registry
 from app.infrastructure.aade.client import APIError
-from app.infrastructure.aade.registry import RegistryAccessError,RegistryLimited,RegistryNotFound,parse,lookup,ENDPOINT
+from app.infrastructure.aade.registry import RegistryAccessError,RegistryLimited,RegistryNotFound,parse,lookup,ENDPOINT,REQUEST_TIMEOUT
+from app.domain.counterparty_names import missing_name
 from tests.test_workspace import MemoryVault
 from tests.test_supplier_purchases import synthetic_vat
 from tests.test_registry import synthetic_response
@@ -39,7 +41,10 @@ class RegistryBulkTests(unittest.TestCase):
             return dict(afm=called,onomasia='ΣΥΝΘΕΤΙΚΗ ΕΠΩΝΥΜΙΑ')
         result=self.registry.fill_missing(self.company,transport=response,notice=progress.append)
         self.assertEqual((result['filled'],result['skipped'],result['not_found'],result['failed']),(2,1,1,2))
-        self.assertEqual(len(calls),5);self.assertEqual(len(set(calls)),5);self.assertEqual(len(progress),6)
+        self.assertEqual(len(calls),5);self.assertEqual(len(set(calls)),5)
+        self.assertEqual(sum(item['phase']=='completed' for item in progress),6)
+        self.assertEqual(sum(item['phase']=='request' for item in progress),5)
+        self.assertEqual(progress[0],dict(done=0,total=6,phase='starting',current=0))
         self.assertEqual([tuple(r) for r in self.erp.db.execute('SELECT id,vat,code FROM counterparties')],before)
         self.assertEqual(self.erp.db.execute('SELECT name FROM counterparties WHERE id=?',(named,)).fetchone()[0],'ΥΠΑΡΧΟΥΣΑ')
         self.assertEqual(self.erp.db.execute('SELECT name FROM counterparties WHERE company_id=?',(self.other,)).fetchone()[0],'')
@@ -93,3 +98,45 @@ class RegistryBulkTests(unittest.TestCase):
                 def open(self,*args,**kwargs):raise HTTPError(ENDPOINT,status,'synthetic-reg-key',{},None)
             with self.assertRaises(error) as caught:lookup('synthetic-reg-user','synthetic-reg-key','000000008',synthetic_vat(),opener=Unavailable())
             self.assertNotIn('synthetic-reg-key',str(caught.exception))
+    def test_exact_missing_name_placeholders_are_filled_without_overwriting_real_names(self):
+        for number,name in [(1,synthetic_vat(1)),(2,'Χωρίς επωνυμία'),(3,'  ΧΩΡΙΣ  ΕΠΩΝΥΜΙΑ  '),(4,'Χωρίς επωνυμία ΑΕ'),(5,'ΥΠΑΡΧΟΥΣΑ ΕΠΩΝΥΜΙΑ')]:self.card(number,name)
+        calls=[]
+        def response(*args):
+            calls.append(args[-1]);return dict(afm=args[-1],onomasia='ΣΥΝΘΕΤΙΚΗ ΕΠΩΝΥΜΙΑ '+str(len(calls)))
+        result=self.registry.fill_missing(self.company,transport=response)
+        self.assertEqual((result['filled'],result['total']),(3,3));self.assertEqual(calls,[synthetic_vat(i) for i in (1,2,3)])
+        names={r['vat']:r['name'] for r in self.erp.db.execute('SELECT vat,name FROM counterparties WHERE company_id=?',(self.company,))}
+        self.assertEqual(names[synthetic_vat(4)],'Χωρίς επωνυμία ΑΕ');self.assertEqual(names[synthetic_vat(5)],'ΥΠΑΡΧΟΥΣΑ ΕΠΩΝΥΜΙΑ')
+        self.assertTrue(missing_name(' \t\u2003 ',synthetic_vat()))
+        self.assertFalse(missing_name('ΑΦΜ: '+synthetic_vat(),synthetic_vat()))
+    def test_progress_is_emitted_before_lookup_and_cancel_can_prevent_next_request(self):
+        self.card(1,'Χωρίς επωνυμία');self.card(2,synthetic_vat(2));progress=[];calls=[];cancel=threading.Event()
+        def notice(item):
+            progress.append(item)
+            if item['phase']=='request' and item['current']==2:cancel.set()
+        def response(*args):
+            self.assertEqual(progress[-1],dict(done=0,total=2,phase='request',current=1))
+            calls.append(args[-1]);return dict(afm=args[-1],onomasia='ΕΠΙΤΥΧΙΑ')
+        report=self.registry.fill_missing(self.company,transport=response,notice=notice,cancel=cancel)
+        self.assertEqual(len(calls),1);self.assertEqual((report['filled'],report['skipped']),(1,1));self.assertTrue(report['cancelled'])
+    def test_batch_does_not_load_document_lists_for_each_counterparty(self):
+        for number in range(1,201):self.card(number,synthetic_vat(number))
+        statements=[];self.erp.db.set_trace_callback(statements.append)
+        try:
+            with patch('app.application.counterparties.Counterparties.detail',side_effect=AssertionError('Batch must not load documents')):
+                result=self.registry.fill_missing(self.company,transport=lambda *args:dict(afm=args[-1],onomasia='ΣΥΝΘΕΤΙΚΗ ΕΠΩΝΥΜΙΑ'))
+        finally:self.erp.db.set_trace_callback(None)
+        self.assertEqual(result['filled'],200)
+        self.assertFalse(any('from documents' in query.casefold() or 'join documents' in query.casefold() for query in statements))
+    def test_placeholder_response_is_not_accepted_as_a_real_company_name(self):
+        self.card(1,'Χωρίς επωνυμία')
+        for name in ('Χωρίς επωνυμία',' ΧΩΡΙΣ ΕΠΩΝΥΜΙΑ ',synthetic_vat()):
+            result=self.registry.fill_missing(self.company,transport=lambda *args:dict(afm=args[-1],onomasia=name))
+            self.assertEqual(result['filled'],0);self.assertEqual(result['failed'],1)
+    def test_network_timeout_is_short_and_has_no_retry_loop(self):
+        calls=[]
+        class Unavailable:
+            def open(self,request,timeout):calls.append(timeout);raise TimeoutError('synthetic-reg-key')
+        with self.assertRaises(APIError) as caught:lookup('synthetic-reg-user','synthetic-reg-key','000000008',synthetic_vat(),opener=Unavailable())
+        self.assertEqual(calls,[REQUEST_TIMEOUT]);self.assertLessEqual(REQUEST_TIMEOUT,15)
+        self.assertNotIn('synthetic-reg-key',str(caught.exception))

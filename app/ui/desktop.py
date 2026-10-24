@@ -151,8 +151,8 @@ class Desktop:
         self.query = tk.StringVar()
         entry = ttk.Entry(search_bar,textvariable=self.query)
         entry.pack(side='left',fill='x',expand=True,padx=(0,8))
-        entry.bind('<Return>',lambda _:self.refresh())
-        ttk.Button(search_bar,text='Αναζήτηση',command=self.refresh).pack(side='left',padx=(0,6))
+        entry.bind('<Return>',lambda _:self.filter_documents())
+        ttk.Button(search_bar,text='Αναζήτηση',command=self.filter_documents).pack(side='left',padx=(0,6))
         ttk.Button(search_bar,text='Καθαρισμός',command=self.reset_filters).pack(side='left')
         filter_bar = ttk.Frame(filters)
         filter_bar.pack(fill='x',pady=(8,0))
@@ -170,21 +170,24 @@ class Desktop:
         for var,options in ((self.state_filter,STATES),(self.group_filter,tuple(GROUPS))):
             box = ttk.Combobox(filter_bar,textvariable=var,values=options,state='readonly',width=25)
             box.pack(side='left',padx=(0,8))
-            box.bind('<<ComboboxSelected>>',lambda _:self.refresh())
+            box.bind('<<ComboboxSelected>>',lambda _:self.filter_documents())
         self.ebs_import_button=ttk.Button(filter_bar,text='Εισαγωγή Excel EBS',command=lambda:self.reconciliation.choose())
         self.ebs_import_button.pack(side='right')
         self.result_count = tk.StringVar()
         ttk.Label(self.documents_tab,textvariable=self.result_count,style='Subtitle.TLabel').pack(anchor='w',pady=(0,8))
+        ttk.Label(self.documents_tab,text='Τίτλοι στηλών: κλικ για ταξινόμηση ↑↓ · δεξί κλικ για φίλτρο',style='Subtitle.TLabel').pack(anchor='w',pady=(0,4))
         columns = ('reference','description','name','vat','issue_date','net_minor','tax_minor','gross_minor','account_code','preparation_state','aade_state','pdf_state')
         titles = ('Παραστατικό','Είδος ΑΑΔΕ','Συναλλασσόμενος','ΑΦΜ','Ημερομηνία','Καθαρή €','ΦΠΑ €','Σύνολο €','Λογαριασμός','Έλεγχος','ΑΑΔΕ','PDF · κλικ για άνοιγμα')
         self.tree = table(self.documents_tab,columns,titles,{'name':190,'reference':100,'vat':95,'issue_date':90,'gross_minor':85,'account_code':120,'preparation_state':120,'aade_state':90,'pdf_state':200})
         self.tree.configure(selectmode='extended')
+        from app.ui.column_filters import ColumnFilters
+        self.column_filters=ColumnFilters(self.tree,self.filter_documents)
         self.tree.configure(displaycolumns=('reference','name','vat','issue_date','net_minor','tax_minor','gross_minor','account_code','preparation_state','pdf_state'))
         for key,width in {'reference':95,'name':180,'vat':90,'issue_date':85,'net_minor':80,'tax_minor':80,'gross_minor':80,'account_code':100,'preparation_state':125,'pdf_state':135}.items():self.tree.column(key,width=width)
         for col in columns:
             self.tree.heading(col,command=lambda key=col:self.sort_documents(key))
         self.tree.bind('<ButtonRelease-1>',self.pdf_click)
-        self.tree.bind('<Button-3>',lambda event:self.purchase_menu(event,self.tree))
+        self.tree.bind('<Button-3>',lambda event:self.purchase_menu(event,self.tree),add='+')
         self.tree.bind('<Double-1>',self.document_double_click)
         self.tree.bind('<Return>',lambda _:self.open_detail())
         actions = ttk.Frame(self.documents_tab)
@@ -300,11 +303,14 @@ class Desktop:
         self.query.set('')
         self.state_filter.set(STATES[0])
         self.group_filter.set('Όλες οι ομάδες')
-        self.refresh()
+        self.column_filters.clear()
+        self.filter_documents()
 
     def sort_documents(self, key):
         self._sort = (key,not self._sort[1] if key==self._sort[0] else False)
-        self.refresh()
+        from app.ui.table_actions import sort_tree
+        sort_tree(self.tree,self._documents,*self._sort)
+        self.column_filters.sync_headings()
 
     def tab_changed(self,event=None):
         if self.notebook.select()==str(self.suppliers_tab):self.suppliers.refresh()
@@ -325,6 +331,9 @@ class Desktop:
             self.status.set('Κλείσε πρώτα τις ανοικτές καρτέλες ή ολοκλήρωσε την εργασία πριν αλλάξεις επιχείρηση.')
             return
         self.company=chosen;self.rpa_panel.job=None;self.rpa_panel.mapping=None
+        self.column_filters.clear()
+        for view in self.document_views.values():view.column_filters.clear()
+        self.reconciliation.column_filters.clear()
         self._purchase_undo=None;self._purchase_exceptions=[];self.purchase_undo_button.pack_forget();self.purchase_exceptions_button.pack_forget()
         self.rpa_panel.scope.set('Εκκρεμή προς EBS')
         self.rpa_panel.state.set('Έλεγχος χωρίς καταχώριση: ελέγχει την επιλογή χωρίς ενέργεια στο EBS.')
@@ -395,6 +404,7 @@ class Desktop:
         if row:self.tree.selection_set(row);self.open_pdf(int(row))
 
     def document_double_click(self,event):
+        if self.tree.identify_region(event.x,event.y)!='cell' or not self.tree.identify_row(event.y):return 'break'
         if self.tree.identify_column(event.x)=='#'+str(list(self.tree['displaycolumns']).index('pdf_state')+1):return 'break'
         self.open_detail()
 
@@ -408,7 +418,6 @@ class Desktop:
         for window in list(self._details.values()):
             if window.winfo_exists() and hasattr(window,'refresh_identity'):window.refresh_identity()
             if window.winfo_exists() and hasattr(window,'pdf_pane'):window.pdf_pane.refresh_if_changed()
-        selected = self.tree.selection()
         months=[r[0] for r in self.erp.db.execute('SELECT DISTINCT substr(issue_date,1,7) FROM documents WHERE company_id=? ORDER BY 1 DESC',(self.company,))]
         from app.application.periods import MONTHS
         available=set(months)|set(self._month_values.values())|{f'{year}-{month:02d}' for year in (date.today().year-1,date.today().year) for month in range(1,13)}
@@ -420,13 +429,34 @@ class Desktop:
         total=self.erp.db.execute('SELECT count(*) FROM documents WHERE company_id=?',(self.company,)).fetchone()[0]
         jobs = self.erp.import_reviews(self.company)
         from app.application.workspace import Workspace
-        from app.ui.rpa_panel import LABELS as EBS_LABELS
         month_rows=Workspace(self.erp).rows(self.company,month=month)
         from app.application.ebs_reconciliation import EBSReconciliation
         evidence=EBSReconciliation(self.erp).results(self.company)
         self._month_rows=month_rows;self._evidence=evidence
+        self.filter_documents(fit_columns=True)
+        self.metrics['total'].set(str(total))
+        self.metrics['pending'].set(str(sum(r['direction']=='incoming' and not r['is_purchase'] and not r.get('prepared_at') for r in month_rows)))
+        self.metrics['issues'].set(str(sum(len(j['report'].get('rejected',[]))+len(j['report'].get('warnings',[])) for j in jobs)))
+        self._jobs = {j['id']:j for j in jobs}
+        self.review_tree.delete(*self.review_tree.get_children())
+        for job in jobs:
+            report = job['report']
+            self.review_tree.insert('','end',iid=str(job['id']),values=(job['created_at'],job['filename'],report.get('inserted',0),report.get('duplicates',0),len(report.get('rejected',[])),len(report.get('warnings',[]))))
+        for view in self.document_views.values():view.refresh(render=self.notebook.select()==str(view.parent))
+        self.reconciliation.refresh(evidence,render=self.notebook.select()==str(self.reconciliation_tab))
+        if self.notebook.select()==str(self.suppliers_tab):self.suppliers.refresh()
+        self.rpa_panel.refresh()
+        if not self.busy:
+            self.status.set('Τα παραστατικά και οι αναφορές έχουν φορτωθεί από τη βάση.')
+
+
+    def filter_documents(self,*,fit_columns=False):
+        if not hasattr(self,'_month_rows'):return
+        from app.ui.rpa_panel import LABELS as EBS_LABELS
+        month_rows=self._month_rows;evidence=self._evidence
+        selected=self.tree.selection();focused=self.tree.focus();x=self.tree.xview();y=self.tree.yview()
         query=self.query.get().strip().casefold()
-        rows=[r for r in month_rows if not query or any(query in str(r[k] or '').casefold() for k in ('vat','name','number','series','mark','issue_date'))]
+        rows=[dict(r) for r in month_rows if not query or query in reference(r).casefold() or any(query in str(r[k] or '').casefold() for k in ('vat','name','number','series','mark','issue_date'))]
         wanted_group = GROUPS.get(self.group_filter.get())
         rows = [r for r in rows if (wanted_group is None or (r.get('nature_group') or r.get('suggested_group'))==wanted_group)
                 and (self.state_filter.get()!=STATES[1] or not r.get('prepared_at'))
@@ -450,40 +480,34 @@ class Desktop:
             if evidence[row['id']]['status']=='review' and evidence[row['id']].get('match_kind')=='attempt':row['preparation_state']='Χρειάζεται έλεγχος στο EBS'
             if not row.get('prepared_at') and row.get('suggested_account'):
                 row['nature_group']=row['suggested_group'];row['account_code']=row['suggested_account']
+        rows=self.column_filters.apply(rows)
         key,reverse = self._sort
-        rows.sort(key=lambda r:r.get(key) or (0 if key.endswith('_minor') else ''),reverse=reverse)
+        rows.sort(key=lambda r:(r.get(key) is None,r.get(key) or 0) if key.endswith('_minor') or key=='source_record_id' else str(r.get(key) or '').casefold(),reverse=reverse)
         self._documents = {r['id']:r for r in rows}
         self.tree.delete(*self.tree.get_children())
         for i,row in enumerate(rows):
             self.tree.insert('','end',iid=str(row['id']),values=[amount(row[k]) if k.endswith('_minor') else when(row[k]) if k=='issue_date' else row.get(k) or '—' for k in self.tree['columns']],tags=('alternate',) if i%2 else ())
         self.tree.selection_set([key for key in selected if self.tree.exists(key)])
-        from tkinter import font
-        body_font=font.nametofont('TkDefaultFont')
-        self.tree.column('vat',width=max(90,body_font.measure('000000000')+18))
-        self.tree.column('issue_date',width=max(85,body_font.measure('00/00/0000')+18))
-        for key in ('net_minor','tax_minor','gross_minor'):
-            longest=max((amount(r[key]) for r in rows),key=len,default='0,00')
-            self.tree.column(key,width=max(80,body_font.measure(longest)+18))
+        if focused and self.tree.exists(focused):self.tree.focus(focused)
+        if x:self.tree.xview_moveto(x[0])
+        if y:self.tree.yview_moveto(y[0])
+        self.column_filters.sync_headings()
+        if fit_columns:
+            from tkinter import font
+            body_font=font.nametofont('TkDefaultFont')
+            self.tree.column('vat',width=max(90,body_font.measure('000000000')+18))
+            self.tree.column('issue_date',width=max(85,body_font.measure('00/00/0000')+18))
+            for key in ('net_minor','tax_minor','gross_minor'):
+                longest=max((amount(r[key]) for r in rows),key=len,default='0,00')
+                self.tree.column(key,width=max(80,body_font.measure(longest)+18))
         caption=f'{len(rows)} παραστατικά · {self.month_filter.get()}'
         if self.state_filter.get()==STATES[3] and not rows:
             statuses={evidence[r['id']]['status'] for r in month_rows if r['direction']=='incoming'}
             if statuses & {'unreconciled','not_found','review'}:caption+=' · Χρειάζεται πλήρης συμφωνία Excel EBS ή έλεγχος εκκρεμοτήτων.'
             elif not month_rows:caption+=' · Ξεκίνα με «Άντληση ΑΑΔΕ & PDF».'
+        if self.column_filters.filters:caption+=f' · Φίλτρα στηλών: {len(self.column_filters.filters)}'
         self.result_count.set(caption)
-        self.metrics['total'].set(str(total))
-        self.metrics['pending'].set(str(sum(r['direction']=='incoming' and (r.get('nature_group') or r.get('suggested_group'))!='2' and not r.get('prepared_at') for r in month_rows)))
-        self.metrics['issues'].set(str(sum(len(j['report'].get('rejected',[]))+len(j['report'].get('warnings',[])) for j in jobs)))
-        self._jobs = {j['id']:j for j in jobs}
-        self.review_tree.delete(*self.review_tree.get_children())
-        for job in jobs:
-            report = job['report']
-            self.review_tree.insert('','end',iid=str(job['id']),values=(job['created_at'],job['filename'],report.get('inserted',0),report.get('duplicates',0),len(report.get('rejected',[])),len(report.get('warnings',[]))))
-        for view in self.document_views.values():view.refresh(render=self.notebook.select()==str(view.parent))
-        self.reconciliation.refresh(evidence,render=self.notebook.select()==str(self.reconciliation_tab))
-        if self.notebook.select()==str(self.suppliers_tab):self.suppliers.refresh()
-        self.rpa_panel.refresh()
-        if not self.busy:
-            self.status.set('Τα παραστατικά και οι αναφορές έχουν φορτωθεί από τη βάση.')
+        self.rpa_panel.update_selection_actions()
 
     def choose_excel(self):
         if self._has_preview():

@@ -55,10 +55,13 @@ class ReconciliationTab:
         ttk.Label(parent,text='Ίδιος μήνας με τη βασική λίστα. Η εισαγωγή δεν εκτελεί καταχώριση. Μόνο πλήρης, ελεγμένη εξαγωγή επιτρέπει χαρακτηρισμό «Μη καταχωρισμένα».',style='Subtitle.TLabel',wraplength=1000).pack(anchor='w',pady=6)
         controls=ttk.Frame(parent);controls.pack(fill='x',pady=8)
         ttk.Button(controls,text='Εισαγωγή Excel / ODS EBS',style='Primary.TButton',command=self.choose).pack(side='left')
-        self.query=tk.StringVar();ttk.Entry(controls,textvariable=self.query,width=20).pack(side='left',fill='x',expand=True,padx=8)
-        self.filter=tk.StringVar(value='Όλα');box=ttk.Combobox(controls,textvariable=self.filter,values=tuple(STATES),state='readonly',width=26);box.pack(side='left',padx=8);box.bind('<<ComboboxSelected>>',lambda _:self.refresh())
-        ttk.Button(controls,text='Αναζήτηση',command=self.refresh).pack(side='left')
+        self.query=tk.StringVar();entry=ttk.Entry(controls,textvariable=self.query,width=20);entry.pack(side='left',fill='x',expand=True,padx=8)
+        entry.bind('<Return>',lambda _:self.refresh(self.rows))
+        self.filter=tk.StringVar(value='Όλα');box=ttk.Combobox(controls,textvariable=self.filter,values=tuple(STATES),state='readonly',width=26);box.pack(side='left',padx=8);box.bind('<<ComboboxSelected>>',lambda _:self.refresh(self.rows))
+        ttk.Button(controls,text='Αναζήτηση',command=lambda:self.refresh(self.rows)).pack(side='left')
+        ttk.Button(controls,text='Καθαρισμός',command=self.clear).pack(side='left',padx=(6,0))
         self.counts=tk.StringVar();ttk.Label(parent,textvariable=self.counts,style='Subtitle.TLabel').pack(anchor='w',pady=6)
+        ttk.Label(parent,text='Τίτλοι στηλών: κλικ για ταξινόμηση ↑↓ · δεξί κλικ για φίλτρο',style='Subtitle.TLabel').pack(anchor='w',pady=(0,4))
         bottom=ttk.Frame(parent);bottom.pack(side='bottom',fill='x',pady=8)
         ttk.Button(bottom,text='Άνοιγμα παραστατικού',command=self.open).pack(side='left')
         ttk.Button(bottom,text='Άνοιγμα PDF',command=self.pdf).pack(side='left',padx=6)
@@ -68,26 +71,42 @@ class ReconciliationTab:
         ttk.Button(checks,text='Ιστορικό συμφωνιών',command=self.history).pack(side='left',padx=6)
         ttk.Button(checks,text='Μη καταχωρισμένα → κύρια λίστα',command=self.pending).pack(side='right')
         self.tree=table(parent,('status','invoice','name','vat','issue_date','net_minor','tax_minor','gross_minor','reason','source','filename','when'),('Κατάσταση','Παραστατικό','Επωνυμία','ΑΦΜ','Ημερομηνία','Καθαρή €','ΦΠΑ €','Σύνολο €','Αιτιολόγηση','Πηγή','Αρχείο','Χρόνος'),{'reason':420,'status':200,'source':180,'name':240})
-        self.tree.bind('<Double-1>',lambda _:self.open())
+        self.tree.bind('<Double-1>',self.double_click)
         self.tree.bind('<Return>',lambda _:self.open())
         self.tree.bind('<<TreeviewSelect>>',self.selection_changed)
         for key in self.tree['columns']:self.tree.heading(key,command=lambda k=key:self.sort_by(k))
-    def sort_by(self,key):self.sort=(key,not self.sort[1] if self.sort[0]==key else False);self.refresh()
+        from app.ui.column_filters import ColumnFilters
+        self.column_filters=ColumnFilters(self.tree,lambda:self.refresh(self.rows),value=lambda row,key:result_title(row) if key=='status' else SOURCES[row['source']] if key=='source' else row.get(key))
+    def clear(self):
+        self.query.set('');self.filter.set('Όλα');self.column_filters.clear(notify=False);self.refresh(self.rows)
+    def sort_by(self,key):
+        from app.ui.table_actions import sort_tree
+        self.sort=(key,not self.sort[1] if self.sort[0]==key else False)
+        translated={'status':result_title,'source':lambda row:SOURCES[row['source']]}
+        sort_tree(self.tree,self.rows,*self.sort,value=translated.get(key))
+        self.column_filters.sync_headings()
     def refresh(self,results=None,*,render=True):
         from app.ui.desktop import amount,when,reference
-        selected=self.tree.selection();self.rows=self.service.results(self.owner.company) if results is None else results
+        selected=self.tree.selection();focused=self.tree.focus();x=self.tree.xview();y=self.tree.yview()
+        self.rows=self.service.results(self.owner.company) if results is None else results
         month=self.owner._month_values.get(self.owner.month_filter.get());query=self.query.get().strip().casefold()
         rows=[r for r in self.rows.values() if r['direction']=='incoming' and (not month or r['issue_date'].startswith(month))]
         counts=Counter(display_state(r) for r in rows)
         self.counts.set(' · '.join(f'{label}: {counts[state]}' for state,label in TITLES.items()))
         wanted=STATES[self.filter.get()]
-        rows=[r for r in rows if (not wanted or display_state(r)==wanted) and (not query or any(query in str(r[k] or '').casefold() for k in ('name','vat','series','number','mark','reason')))]
+        rows=[r for r in rows if (not wanted or display_state(r)==wanted) and (not query or query in reference(r).casefold() or any(query in str(r[k] or '').casefold() for k in ('name','vat','series','number','mark','reason')))]
         for r in rows:r['invoice']=reference(r)
-        key,reverse=self.sort;rows.sort(key=lambda r:r.get(key) or (0 if key.endswith('_minor') else ''),reverse=reverse)
+        rows=self.column_filters.apply(rows)
+        key,reverse=self.sort
+        rows.sort(key=lambda r:(r.get(key) or 0) if key.endswith('_minor') else str(result_title(r) if key=='status' else SOURCES[r['source']] if key=='source' else r.get(key) or '').casefold(),reverse=reverse)
         if not render:return
         self.tree.delete(*self.tree.get_children())
         for r in rows:self.tree.insert('','end',iid=str(r['id']),values=(result_title(r),reference(r),r['name'],r['vat'],when(r['issue_date']),amount(r['net_minor']),amount(r['tax_minor']),amount(r['gross_minor']),r['reason'],SOURCES[r['source']],r['filename'],r['when']))
         self.tree.selection_set([s for s in selected if self.tree.exists(s)])
+        if focused and self.tree.exists(focused):self.tree.focus(focused)
+        if x:self.tree.xview_moveto(x[0])
+        if y:self.tree.yview_moveto(y[0])
+        self.column_filters.sync_headings()
     def chosen(self):return int(self.tree.selection()[0]) if self.tree.selection() else None
     def selection_changed(self,event=None):
         row=self.rows.get(self.chosen(),{})
@@ -95,6 +114,10 @@ class ReconciliationTab:
     def open(self):
         document=self.chosen()
         if document is not None:self.owner.open_detail(document)
+    def double_click(self,event):
+        if self.tree.identify_region(event.x,event.y)!='cell':return
+        row=self.tree.identify_row(event.y)
+        if row:self.tree.selection_set(row);return self.open()
     def pdf(self):
         document=self.chosen()
         if document is not None:self.owner.open_pdf(document)

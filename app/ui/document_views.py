@@ -32,6 +32,7 @@ class DocumentView:
         box=ttk.Combobox(bar,textvariable=self.kind,values=choices,state='readonly',width=25)
         box.pack(side='left',padx=6);box.bind('<<ComboboxSelected>>',lambda _:self.refresh())
         self.count=tk.StringVar();ttk.Label(parent,textvariable=self.count,style='Subtitle.TLabel').pack(anchor='w',pady=(0,6))
+        ttk.Label(parent,text='Τίτλοι στηλών: κλικ για ταξινόμηση ↑↓ · δεξί κλικ για φίλτρο',style='Subtitle.TLabel').pack(anchor='w',pady=(0,4))
         actions=ttk.Frame(parent);actions.pack(side='bottom',fill='x',pady=(8,0))
         ttk.Button(actions,text='Άνοιγμα παραστατικού',command=self.pdf).pack(side='right')
         ttk.Button(actions,text='Στοιχεία',command=self.detail).pack(side='right',padx=6)
@@ -41,16 +42,27 @@ class DocumentView:
         titles+=('Ροή','Εκδότης / ΑΦΜ','Λήπτης / ΑΦΜ','Συσχετιζόμενα MARK','Κατάσταση διακίνησης') if view=='movement' else ('Καθαρή €','ΦΠΑ €','Σύνολο €')+(() if view=='income' else ('Λογαριασμός EBS','Συμφωνία EBS'))+('PDF',)
         self.tree=table(parent,columns,titles,{'reference':120,'name':210,'description':230,'issuer':220,'receiver':220,'delivery':240})
         for key in columns:self.tree.heading(key,command=lambda k=key:self.sort_by(k))
-        self.tree.bind('<Double-1>',lambda _:self.detail());self.tree.bind('<Return>',lambda _:self.detail())
+        self.tree.bind('<Double-1>',self.double_click);self.tree.bind('<Return>',lambda _:self.detail())
         self.tree.bind('<ButtonRelease-1>',self.click_pdf)
         if view in ('expenses','purchases'):self.tree.bind('<Button-3>',lambda event:owner.purchase_menu(event,self.tree))
+        from app.ui.column_filters import ColumnFilters
+        self.column_filters=ColumnFilters(self.tree,self.refresh)
 
-    def clear(self):self.query.set('');self.kind.set('Όλα');self.refresh()
-    def sort_by(self,key):self.sort=(key,not self.sort[1] if self.sort[0]==key else False);self.refresh()
+    def clear(self):self.query.set('');self.kind.set('Όλα');self.column_filters.clear(notify=False);self.refresh()
+    def sort_by(self,key):
+        from app.ui.table_actions import sort_tree
+        self.sort=(key,not self.sort[1] if self.sort[0]==key else False)
+        sort_tree(self.tree,self.rows,*self.sort)
+        self.column_filters.sync_headings()
     def chosen(self):return int(self.tree.selection()[0]) if self.tree.selection() else None
     def detail(self):
         document=self.chosen()
         if document is not None:self.owner.open_detail(document)
+    def double_click(self,event):
+        if self.tree.identify_region(event.x,event.y)!='cell':return
+        if 'pdf_state' in self.tree['columns'] and self.tree.identify_column(event.x)=='#'+str(list(self.tree['columns']).index('pdf_state')+1):return 'break'
+        row=self.tree.identify_row(event.y)
+        if row:self.tree.selection_set(row);return self.detail()
     def pdf(self):
         document=self.chosen()
         if document is not None:self.owner.open_pdf(document)
@@ -66,7 +78,7 @@ class DocumentView:
         query=self.query.get().strip().casefold();wanted=self.kind.get();rows=[]
         for source in getattr(self.owner,'_month_rows',[]):
             if not belongs(source,self.view):continue
-            if query and not any(query in str(source.get(k) or '').casefold() for k in ('vat','name','series','number','mark','issuer_vat','receiver_vat')):continue
+            if query and query not in reference(source).casefold() and not any(query in str(source.get(k) or '').casefold() for k in ('vat','name','series','number','mark','issuer_vat','receiver_vat')):continue
             family=source['family']
             if wanted=='Δελτία αποστολής' and family!='delivery_note':continue
             if wanted=='Ποσοτικές παραλαβές' and family!='quantity_receipt':continue
@@ -81,11 +93,17 @@ class DocumentView:
                      delivery=DELIVERY_STATUS.get(source['delivery_status'],'Δεν δόθηκε' if not source['delivery_status'] else 'Κωδικός ΑΑΔΕ '+source['delivery_status']),
                      reconciliation=result_title(self.owner._evidence[source['id']]) if source['id'] in getattr(self.owner,'_evidence',{}) else '—')
             rows.append(row)
-        key,reverse=self.sort;rows.sort(key=lambda r:r.get(key) or (0 if key.endswith('_minor') else ''),reverse=reverse)
+        rows=self.column_filters.apply(rows)
+        key,reverse=self.sort;rows.sort(key=lambda r:(r.get(key) or 0) if key.endswith('_minor') else str(r.get(key) or '').casefold(),reverse=reverse)
         self.rows={r['id']:r for r in rows}
         self.count.set(f'{len(rows)} παραστατικά · {self.owner.month_filter.get()}')
         if not render:return
-        selected=self.tree.selection();self.tree.delete(*self.tree.get_children())
+        selected=self.tree.selection();focused=self.tree.focus();x=self.tree.xview();y=self.tree.yview()
+        self.tree.delete(*self.tree.get_children())
         for index,row in enumerate(rows):
             self.tree.insert('','end',iid=str(row['id']),values=[amount(row[k]) if k.endswith('_minor') else when(row[k]) if k=='issue_date' else row.get(k) or '—' for k in self.tree['columns']],tags=('alternate',) if index%2 else ())
         self.tree.selection_set([s for s in selected if self.tree.exists(s)])
+        if focused and self.tree.exists(focused):self.tree.focus(focused)
+        if x:self.tree.xview_moveto(x[0])
+        if y:self.tree.yview_moveto(y[0])
+        self.column_filters.sync_headings()

@@ -5,6 +5,7 @@ from app.infrastructure.aade.credentials import WindowsCredentialStore,target_fo
 from app.infrastructure.aade.registry import credentials,lookup,RegistryAccessError,RegistryLimited,RegistryNotFound
 from app.application.counterparties import Counterparties
 from app.domain.validation import checked_greek_vat
+from app.domain.counterparty_names import missing_name
 
 
 class Registry:
@@ -33,15 +34,18 @@ class Registry:
         return transport(value['username'],value['key'],called_by,card['vat'])
     def apply(self,company,counterparty,values,confirmed=False,*,only_if_blank=False):
         if confirmed is not True:raise ValueError('Απαιτείται έλεγχος στοιχείων Μητρώου')
-        card,_=Counterparties(self.erp).detail(company,counterparty)
+        card=self.db.execute('SELECT id,vat,name FROM counterparties WHERE company_id=? AND id=?',(company,counterparty)).fetchone()
+        if card is None:raise ValueError('Δεν βρέθηκε καρτέλα σε αυτή την εταιρεία')
         name=values.get('onomasia')
-        if values.get('afm')!=card['vat'] or not isinstance(name,str) or not name.strip() or len(name)>256 or name.strip()==card['vat'] or any(ord(c)<32 for c in name):raise ValueError('Τα στοιχεία δεν αντιστοιχούν στην καρτέλα ή δεν έχουν έγκυρη επωνυμία')
+        if values.get('afm')!=card['vat'] or not isinstance(name,str) or missing_name(name,card['vat']) or len(name)>256 or any(ord(c)<32 for c in name):raise ValueError('Τα στοιχεία δεν αντιστοιχούν στην καρτέλα ή δεν έχουν έγκυρη επωνυμία')
         allowed=('afm','onomasia','commer_title','doy','doy_descr','postal_address','postal_address_no','postal_zip_code','postal_area_description','deactivation_flag_descr','firm_flag_descr')
         safe={k:str(values.get(k,''))[:512] for k in allowed}
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
-            card,_=Counterparties(self.erp).detail(company,counterparty)
-            if only_if_blank and card['name'].strip():return False
+            card=self.db.execute('SELECT id,vat,name FROM counterparties WHERE company_id=? AND id=?',(company,counterparty)).fetchone()
+            if card is None:raise ValueError('Δεν βρέθηκε καρτέλα σε αυτή την εταιρεία')
+            if values['afm']!=card['vat']:raise ValueError('Το ΑΦΜ της καρτέλας άλλαξε κατά την αναζήτηση')
+            if only_if_blank and not missing_name(card['name'],card['vat']):return False
             self.db.execute('UPDATE counterparties SET name=? WHERE company_id=? AND id=?',(values['onomasia'].strip(),company,counterparty))
             self.db.execute('INSERT INTO counterparty_registry(counterparty_id,company_id,data_json) VALUES (?,?,?) ON CONFLICT(counterparty_id) DO UPDATE SET data_json=excluded.data_json,updated_at=CURRENT_TIMESTAMP',(counterparty,company,json.dumps(safe,ensure_ascii=False)))
             self.erp.repository.audit(company,'registry_details_applied',None,dict(counterparty_id=counterparty,before=card['name'],after=values['onomasia'].strip(),vat=card['vat'],source='AADE RgWsPublic2',blank_only=only_if_blank))
@@ -53,16 +57,19 @@ class Registry:
         if called_by=='000000000':raise ValueError('Όρισε πρώτα το πραγματικό ΑΦΜ εταιρείας στις ρυθμίσεις ΑΑΔΕ')
         keys=self.read_credentials(company)
         if keys is None:raise ValueError('Λείπουν ειδικοί κωδικοί Μητρώου. Άνοιξε Ρυθμίσεις → Συνδέσεις → Μητρώο ΑΑΔΕ.')
-        pending=[dict(r) for r in self.db.execute('SELECT id,vat,name FROM counterparties WHERE company_id=? ORDER BY id',(company,)) if not r['name'].strip()]
+        pending=[dict(r) for r in self.db.execute('SELECT id,vat,name FROM counterparties WHERE company_id=? ORDER BY id',(company,)) if missing_name(r['name'],r['vat'])]
         report=dict(filled=0,skipped=0,not_found=0,failed=0,total=len(pending),cancelled=False,stopped='');seen=set()
+        notice(dict(done=0,total=len(pending),phase='starting',current=0))
         for index,card in enumerate(pending):
             if cancel.is_set():report.update(cancelled=True);report['skipped']+=len(pending)-index;break
             current=self.db.execute('SELECT name FROM counterparties WHERE company_id=? AND id=?',(company,card['id'])).fetchone()
             try:checked_greek_vat(card['vat'])
-            except ValueError:report['skipped']+=1;notice(dict(done=index+1,total=len(pending)));continue
-            if current is None or current['name'].strip() or card['vat']=='000000000' or card['vat'] in seen:
-                report['skipped']+=1;notice(dict(done=index+1,total=len(pending)));continue
+            except ValueError:report['skipped']+=1;notice(dict(done=index+1,total=len(pending),phase='completed',current=index+1));continue
+            if current is None or not missing_name(current['name'],card['vat']) or card['vat']=='000000000' or card['vat'] in seen:
+                report['skipped']+=1;notice(dict(done=index+1,total=len(pending),phase='completed',current=index+1));continue
             seen.add(card['vat'])
+            notice(dict(done=index,total=len(pending),phase='request',current=index+1))
+            if cancel.is_set():report.update(cancelled=True);report['skipped']+=len(pending)-index;break
             try:
                 values=transport(keys['username'],keys['key'],called_by,card['vat'])
                 changed=self.apply(company,card['id'],values,confirmed=True,only_if_blank=True)
@@ -71,10 +78,10 @@ class Registry:
             except (RegistryAccessError,RegistryLimited) as exc:
                 report['failed']+=1;report['skipped']+=len(pending)-index-1
                 report['stopped']='Έλεγξε κωδικούς και δικαιώματα Μητρώου' if isinstance(exc,RegistryAccessError) else 'Περιορισμός ή προσωρινή μη διαθεσιμότητα υπηρεσίας'
-                notice(dict(done=index+1,total=len(pending)));break
+                notice(dict(done=index+1,total=len(pending),phase='completed',current=index+1));break
             except Exception:
                 # Do not retain transport exception text or credential-bearing URLs.
                 report['failed']+=1
-            notice(dict(done=index+1,total=len(pending)))
+            notice(dict(done=index+1,total=len(pending),phase='completed',current=index+1))
         with self.db:self.erp.repository.audit(company,'registry_blank_names_batch',None,dict(report,source='AADE RgWsPublic2'))
         return report

@@ -14,7 +14,7 @@ class Suppliers:
         filters=ttk.Frame(header);filters.pack(fill='x')
         self.query=tk.StringVar();entry=ttk.Entry(filters,textvariable=self.query);entry.pack(side='left',fill='x',expand=True)
         entry.bind('<Return>',lambda _:self.refresh());self.filter=tk.StringVar(value='Όλοι')
-        box=ttk.Combobox(filters,textvariable=self.filter,values=('Όλοι','Χωρίς λογαριασμό','Με λογαριασμό'),state='readonly',width=24);box.pack(side='left',padx=8);box.bind('<<ComboboxSelected>>',lambda _:self.refresh())
+        box=ttk.Combobox(filters,textvariable=self.filter,values=('Όλοι','Χωρίς λογαριασμό','Με λογαριασμό','Χωρίς επωνυμία'),state='readonly',width=24);box.pack(side='left',padx=8);box.bind('<<ComboboxSelected>>',lambda _:self.refresh())
         ttk.Button(filters,text='Αναζήτηση',command=self.refresh).pack(side='left')
         self.names_button=ttk.Button(header,text='Συμπλήρωση κενών επωνυμιών από ΑΦΜ',command=self.fill_missing_names)
         self.names_button.pack(anchor='w',pady=(8,0))
@@ -32,6 +32,8 @@ class Suppliers:
         for row in self.service.rows(self.owner.company,self.query.get().strip()):
             if self.filter.get()=='Χωρίς λογαριασμό' and row['account']:continue
             if self.filter.get()=='Με λογαριασμό' and not row['account']:continue
+            from app.domain.counterparty_names import missing_name
+            if self.filter.get()=='Χωρίς επωνυμία' and not missing_name(row['name'],row['vat']):continue
             self.rows[row['id']]=row;self.tree.insert('','end',iid=str(row['id']),values=(row['name'],row['vat'],row['group'] or '—',row['account'] or '—',row['account_state'],row['document_count']))
         self.tree.selection_set([key for key in selected if self.tree.exists(key)])
     def fill_missing_names(self):

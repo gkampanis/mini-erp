@@ -972,6 +972,94 @@ class DesktopRegressions(unittest.TestCase):
         self.assertEqual(len(calls),1);self.assertIn('Συμπληρώθηκαν: 1',win.status_var.get());self.assertIn('Παραλείφθηκαν: 1',win.status_var.get())
         self.assertEqual(self.count('provider_attempts'),0)
 
+    def test_main_column_sort_and_filters_do_not_reload_data_or_lose_selection(self):
+        self.import_fixture('separate.xlsx');self.app.refresh();tree=self.app.tree
+        selected=tree.get_children()[0];tree.selection_set(selected);tree.focus(selected)
+        tree.column('vat',width=180);self.root.update_idletasks();vat_width=tree.column('vat','width')
+        before={key:self.app._documents[key]['gross_minor'] for key in self.app._documents};calls=[]
+        self.app.erp.db.set_trace_callback(calls.append)
+        try:
+            with patch.object(self.app,'refresh') as reload,patch.object(self.app.rpa_panel,'refresh') as rpa:
+                self.app.sort_documents('gross_minor');self.root.update()
+                self.assertEqual(tree.selection(),(selected,));self.assertEqual(tree.focus(),selected)
+                self.app.column_filters.set('gross_minor','<=0,12')
+                self.assertEqual(len(tree.get_children()),1)
+                self.assertEqual(tree.column('vat','width'),vat_width)
+                self.app.column_filters.set('reference','=does-not-exist')
+                self.assertFalse(tree.get_children());self.assertTrue(self.app.rpa_panel.buttons['post'].instate(['disabled']))
+                self.app.reset_filters();self.assertEqual(len(tree.get_children()),2)
+                self.app.query.set('ΔΟΚ/1');self.app.filter_documents();self.assertEqual(len(tree.get_children()),1)
+                reload.assert_not_called();rpa.assert_not_called()
+        finally:self.app.erp.db.set_trace_callback(None)
+        self.assertEqual(calls,[]);self.app.reset_filters()
+        self.assertEqual(before,{key:self.app._documents[key]['gross_minor'] for key in self.app._documents})
+
+    def test_other_views_filter_and_sort_cached_rows_without_database_queries(self):
+        self.import_fixture('separate.xlsx');self.app.refresh()
+        for view,parent in [(self.app.document_views['expenses'],self.app.document_views['expenses'].parent),(self.app.reconciliation,self.app.reconciliation_tab)]:
+            self.app.notebook.select(parent);self.root.update();calls=[];self.app.erp.db.set_trace_callback(calls.append)
+            try:
+                view.sort_by('gross_minor');view.column_filters.set('gross_minor','<=0,12')
+                self.assertEqual(len(view.tree.get_children()),1)
+                view.clear();view.query.set('ΔΟΚ/1')
+                view.refresh(view.rows) if view is self.app.reconciliation else view.refresh()
+                self.assertEqual(len(view.tree.get_children()),1)
+            finally:self.app.erp.db.set_trace_callback(None)
+            self.assertEqual(calls,[])
+
+    def test_heading_double_click_never_opens_a_previously_selected_document(self):
+        from types import SimpleNamespace
+        self.import_fixture('separate.xlsx');self.app.refresh()
+        event=SimpleNamespace(x=10,y=5)
+        with patch.object(self.app,'open_detail') as opened:
+            self.app.document_double_click(event)
+            for name in ('expenses','purchases','income','movement'):
+                view=self.app.document_views[name];self.app.notebook.select(view.parent);self.root.update();view.double_click(event)
+            self.app.notebook.select(self.app.reconciliation_tab);self.root.update();self.app.reconciliation.double_click(event)
+            opened.assert_not_called()
+
+    def test_registry_placeholder_batch_shows_request_progress_before_slow_response(self):
+        from app.application.registry import Registry
+        from app.ui.registry import fill_missing
+        from tests.test_supplier_purchases import synthetic_vat
+        from tests.test_workspace import MemoryVault
+        self.app.erp.credential_store=MemoryVault()
+        with self.app.erp.db:
+            self.app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(self.app.company,))
+            for number,name in [(1,'Χωρίς επωνυμία'),(2,synthetic_vat(2))]:self.app.erp.db.execute('INSERT INTO counterparties(company_id,vat,name) VALUES (?,?,?)',(self.app.company,synthetic_vat(number),name))
+        Registry(self.app.erp).save_credentials(self.app.company,'synthetic','synthetic',confirmed=True)
+        entered=threading.Event();release=threading.Event();self.releases.append(release);calls=[]
+        def lookup(*args):
+            calls.append(args[-1]);entered.set();release.wait(5);return dict(afm=args[-1],onomasia='ΣΥΝΘΕΤΙΚΗ ΕΠΩΝΥΜΙΑ')
+        original=Registry.fill_missing
+        def batch(service,company,**kwargs):return original(service,company,transport=lookup,**kwargs)
+        with patch.object(Registry,'fill_missing',batch):
+            win=fill_missing(self.app);wait(self.root,entered.is_set)
+            wait(self.root,lambda:'Αναζήτηση 1 από 2' in win.status_var.get())
+            self.assertTrue(win.winfo_exists());release.set();wait(self.root,lambda:not self.app.busy)
+        self.assertEqual(len(calls),2);self.assertIn('Συμπληρώθηκαν: 2',win.status_var.get())
+        self.assertEqual(self.count('provider_attempts'),0)
+
+    def test_registry_missing_credentials_finishes_dialog_with_clear_action(self):
+        from app.ui.registry import fill_missing
+        from tests.test_workspace import MemoryVault
+        self.app.erp.credential_store=MemoryVault()
+        with self.app.erp.db:self.app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(self.app.company,))
+        with patch('app.ui.desktop.messagebox.showerror') as popup:
+            win=fill_missing(self.app);wait(self.root,lambda:not self.app.busy);popup.assert_not_called()
+        self.assertIn('Λείπουν ειδικοί κωδικοί Μητρώου',win.status_var.get())
+        self.assertTrue(self.button(win,'Κλείσιμο').instate(['!disabled']))
+
+    def test_right_click_heading_opens_column_filter_alongside_supplier_menu(self):
+        self.import_fixture('separate.xlsx');self.app.refresh();self.root.update()
+        tree=self.app.tree;row=tree.get_children()[0];x,y,width,height=tree.bbox(row,'gross_minor')
+        tree.event_generate('<Button-3>',x=x+5,y=5);self.root.update()
+        win=self.app.column_filters.window;self.assertIsNotNone(win);self.assertTrue(win.winfo_exists())
+        entry=next(w for w in widgets(win) if isinstance(w,ttk.Entry));entry.insert(0,'<=0,12')
+        self.button(win,'Εφαρμογή').invoke();self.root.update()
+        self.assertEqual(len(tree.get_children()),1);self.assertTrue(tree.heading('gross_minor','text').startswith('● '))
+        self.assertEqual(self.count('rpa_jobs'),0)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

@@ -2,6 +2,7 @@
 import tkinter as tk
 import queue
 import threading
+import time
 from tkinter import ttk,messagebox
 from app.application.service import ERP
 from app.application.registry import Registry
@@ -48,37 +49,54 @@ def find(owner,counterparty,parent,on_saved=lambda:None):
 
 def fill_missing(owner):
     if owner.busy or owner.rpa_panel.running:return
-    win=tk.Toplevel(owner.root);win.title('Συμπλήρωση κενών επωνυμιών από ΑΦΜ');win.geometry('690x250')
+    win=tk.Toplevel(owner.root);win.title('Συμπλήρωση κενών επωνυμιών από ΑΦΜ');win.geometry('720x320')
     panel=ttk.Frame(win,padding=20);panel.pack(fill='both',expand=True)
     ttk.Label(panel,text='Μητρώο ΑΑΔΕ · όλοι οι μήνες της ενεργής εταιρείας',style='Section.TLabel').pack(anchor='w')
-    status=tk.StringVar(value='Προετοιμασία αναζήτησης κενών επωνυμιών…')
+    status=tk.StringVar(value='Αναζητούνται κενά ονόματα, σκέτο ΑΦΜ και «Χωρίς επωνυμία»…')
     ttk.Label(panel,textvariable=status,wraplength=640).pack(anchor='w',pady=14)
     progress=ttk.Progressbar(panel,mode='determinate');progress.pack(fill='x')
     cancel=threading.Event();updates=queue.Queue();company=owner.company;vault=owner.erp.credential_store
-    stop=ttk.Button(panel,text='Διακοπή μετά το τρέχον αίτημα',command=cancel.set);stop.pack(anchor='e',pady=12)
+    current={'phase':'starting','done':0,'total':0,'current':0,'since':time.monotonic()}
+    def request_stop():
+        cancel.set();stop.state(['disabled'])
+        status.set('Ζητήθηκε διακοπή. Το τρέχον αίτημα ολοκληρώνεται, χωρίς νέο αίτημα. Οι επιτυχίες διατηρούνται.')
+    stop=ttk.Button(panel,text='Διακοπή μετά το τρέχον αίτημα',command=request_stop);stop.pack(anchor='e',pady=12)
     finished={'value':False}
     def execute():
         erp=ERP(owner.directory,credential_store=vault)
         try:return Registry(erp).fill_missing(company,cancel=cancel,notice=updates.put)
+        except (ValueError,VaultUnavailable) as exc:return dict(error=str(exc))
         finally:erp.close()
     def done(report):
-        finished['value']=True;owner.refresh()
+        finished['value']=True
+        if 'error' not in report:owner.refresh()
         if not win.winfo_exists():return
+        stop.state(['!disabled']);stop.configure(text='Κλείσιμο',command=win.destroy)
+        if 'error' in report:
+            status.set(report['error']);owner.status.set(report['error']);return
         text=f"Συμπληρώθηκαν: {report['filled']} · Παραλείφθηκαν: {report['skipped']} · Δεν βρέθηκαν: {report['not_found']} · Απέτυχαν: {report['failed']}"
         if report['cancelled']:text+='\nΗ διακοπή ολοκληρώθηκε. Οι επιτυχείς αλλαγές διατηρήθηκαν.'
         if report['stopped']:text+='\n'+report['stopped']
         status.set(text);owner.status.set(text);stop.configure(text='Κλείσιμο',command=win.destroy)
-        progress.configure(value=report['total'],maximum=max(1,report['total']))
+        complete=not report['cancelled'] and not report['stopped']
+        progress.configure(value=report['total'] if complete else report['filled']+report['not_found']+report['failed'],maximum=max(1,report['total']))
     def poll():
         if not win.winfo_exists():return
         if finished['value']:return
         try:
-            while True:
-                item=updates.get_nowait();progress.configure(maximum=max(1,item['total']),value=item['done'])
-                status.set(f"Ελέγχθηκαν {item['done']} από {item['total']} κενές επωνυμίες. Οι επιτυχείς συμπληρώσεις αποθηκεύονται.")
+            for _ in range(64):
+                item=updates.get_nowait();current.update(item,since=time.monotonic())
+                progress.configure(maximum=max(1,item['total']),value=item['done'])
         except queue.Empty:pass
-        if not finished['value'] and owner.busy:win.after(100,poll)
-        elif not finished['value']:stop.configure(text='Κλείσιμο',command=win.destroy)
-    win.protocol('WM_DELETE_WINDOW',lambda:win.destroy() if finished['value'] or not owner.busy else cancel.set())
+        if not cancel.is_set():
+            if current['phase']=='request':
+                elapsed=int(time.monotonic()-current['since'])
+                status.set(f"Αναζήτηση {current['current']} από {current['total']} · αναμονή απάντησης {elapsed} δευτ.\nΕλέγχθηκαν {current['done']}. Η εφαρμογή συνεχίζει στο παρασκήνιο.")
+            else:status.set(f"Ελέγχθηκαν {current['done']} από {current['total']} επωνυμίες. Οι επιτυχείς συμπληρώσεις αποθηκεύονται.")
+        if owner.busy:win.after(100,poll)
+        else:
+            finished['value']=True;status.set('Η εργασία σταμάτησε. Δες το μήνυμα στο κύριο παράθυρο.')
+            stop.state(['!disabled']);stop.configure(text='Κλείσιμο',command=win.destroy)
+    win.protocol('WM_DELETE_WINDOW',lambda:win.destroy() if finished['value'] or not owner.busy else request_stop())
     owner.run_worker(execute,done);win.after(100,poll)
     win.cancel_event=cancel;win.status_var=status;return win
