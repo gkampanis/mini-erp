@@ -1,0 +1,49 @@
+{
+  "source_commit": "2fed7a8060a4c09524b56e1716e66d36dda2dbd8",
+  "delivery_gate": "PASSED",
+  "sha256": "e8fe44e4dcb8fc91fd6dc47632cbda3e688deda2519d91c7b617386f249fbdee",
+  "counts": {
+    "source_tests": {
+      "tests": 221,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "source_gui": {
+      "tests": 62,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "package_tests": {
+      "tests": 221,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "package_gui": {
+      "tests": 62,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    }
+  },
+  "windows_desktop": "NOT_RUN",
+  "windows_launcher": "NOT_RUN",
+  "ebs_live": "NOT_RUN",
+  "aade_live": "NOT_RUN",
+  "reproduction": "Synthetic Win32 MDI cross-thread activation; full GUI worker using real posting/advance with FakeEBS OS boundary",
+  "customer_failure_confirmed_in_native_ebs": false
+}
