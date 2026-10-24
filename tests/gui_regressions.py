@@ -318,7 +318,7 @@ class DesktopRegressions(unittest.TestCase):
         self.assertGreater(action.winfo_height(),1)
         self.assertLessEqual(action.winfo_rooty()+action.winfo_height(),self.root.winfo_rooty()+self.root.winfo_height())
         for key,button in self.app.rpa_panel.buttons.items():
-            if key in ('pause','resume','stop'):
+            if key in ('pause','resume','stop','accounts','simulation'):
                 self.assertFalse(button.winfo_ismapped());continue
             self.assertTrue(button.winfo_ismapped())
             self.assertGreaterEqual(button.winfo_width(),button.winfo_reqwidth())
@@ -854,7 +854,7 @@ class DesktopRegressions(unittest.TestCase):
         _,items=panel.rpa.items(self.app.company,panel.job)
         self.assertEqual([i['document_id'] for i in items],[ids[0]])
         self.assertEqual(panel.ids(),[ids[0]])
-        self.assertTrue(panel.execution_controls.winfo_ismapped())
+        self.assertFalse(panel.execution_controls.winfo_ismapped())
 
     def test_company_switch_is_scoped_and_waits_for_open_document_windows(self):
         self.import_fixture('combined.xlsx');company=self.app.company
@@ -1142,6 +1142,33 @@ class DesktopRegressions(unittest.TestCase):
         review.cell('filename',job['filename'],True)
         self.assertLess(len(self.app.review_tree.get_children()),before)
         review.clear(notify=True);self.assertEqual(len(self.app.review_tree.get_children()),before)
+
+    def test_posting_actions_use_visible_order_and_never_promote_filter_to_selection(self):
+        from types import SimpleNamespace
+        self.import_fixture('separate.xlsx');self.app.refresh();panel=self.app.rpa_panel
+        visible=[int(k) for k in self.app.tree.get_children()]
+        self.app.tree.move(str(visible[1]),'',0);order=[visible[1],visible[0]]
+        self.app.tree.selection_set(str(visible[0]))
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.ui.rpa_panel.RPA.posting',return_value=dict(job=123,documents=order,skipped=[],pilot=False)) as create,patch.object(panel,'start') as start,patch.object(self.app,'run_worker',side_effect=lambda f,done:done(f())),patch('app.ui.rpa_panel.messagebox.askyesno') as confirm:
+            panel.post();create.assert_called_with(self.app.company,order,limit=40)
+            panel.post_selected();create.assert_called_with(self.app.company,[visible[0]],limit=None)
+            panel.post_one();create.assert_called_with(self.app.company,[visible[0]],limit=None)
+            self.assertEqual(start.call_count,3);confirm.assert_not_called()
+            create.reset_mock();self.app.tree.selection_remove(*self.app.tree.selection())
+            panel.post_selected();panel.post_one();create.assert_not_called()
+        panel.job=None
+        self.assertEqual(panel.buttons['post'].cget('text'),'Καταχώριση έως 40')
+        self.assertFalse(panel.buttons['accounts'].winfo_ismapped());self.assertFalse(panel.buttons['simulation'].winfo_ismapped())
+
+    def test_posting_restores_paused_queue_and_shows_processed_progress(self):
+        self.import_fixture('separate.xlsx');panel=self.app.rpa_panel
+        ids=list(self.app._documents)
+        panel.workspace.approve_many(self.app.company,[dict(document=d,group='6',account='64.03') for d in ids],confirmed=True)
+        self.app.tree.selection_set([str(d) for d in ids]);panel.queue_selected();job=panel.job
+        panel.rpa.pause(self.app.company,job);panel.job=None
+        panel.restore_job();panel.refresh();self.root.update()
+        self.assertEqual(panel.job,job);self.assertIn('0/2',panel.state.get())
+        self.assertTrue(panel.buttons['resume'].winfo_ismapped());self.assertFalse(panel.buttons['pause'].winfo_ismapped())
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

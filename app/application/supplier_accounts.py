@@ -63,7 +63,7 @@ class SupplierAccounts:
         else:self.db.execute('DELETE FROM account_mappings WHERE company_id=? AND counterparty_id=?',(company,cp))
         self.erp.repository.audit(company,'account_rule_approved',None,dict(counterparty_id=cp,before=dict(before) if before else None,after=values))
 
-    def apply_pending(self,company,cp,values,groups=('2','6'),*,evidence=None):
+    def apply_pending(self,company,cp,values,groups=('2','6'),*,evidence=None,documents=None):
         from app.application.rpa import RPA,encoded
         from app.application.ebs_reconciliation import EBSReconciliation
         from app.domain.invoice_types import classify
@@ -73,6 +73,7 @@ class SupplierAccounts:
         types={r['document_id']:classify(r['invoice_type']) for r in self.db.execute("SELECT document_id,invoice_type FROM mydata_records WHERE company_id=? AND document_id IS NOT NULL ORDER BY environment='production',id",(company,))}
         for doc in self.db.execute("SELECT id,kind FROM documents WHERE company_id=? AND counterparty_id=? AND direction='incoming'",(company,cp)).fetchall():
             document=doc['id']
+            if documents is not None and document not in documents:continue
             if document in purchases:report['purchases'].append(document);continue
             if evidence.get(document,{}).get('status')=='registered':report['protected'].append(document);continue
             if doc['kind']!='invoice' or (document in types and not types[document]['rpa_allowed']):report['needs_review'].append(document);continue

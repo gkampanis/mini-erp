@@ -337,7 +337,7 @@ class Desktop:
         self._purchase_undo=None;self._purchase_exceptions=[];self.purchase_undo_button.pack_forget();self.purchase_exceptions_button.pack_forget()
         self.rpa_panel.scope.set('Εκκρεμή προς EBS')
         self.rpa_panel.state.set('Έλεγχος χωρίς καταχώριση: ελέγχει την επιλογή χωρίς ενέργεια στο EBS.')
-        self.rpa_panel.rpa.recover(chosen);self.query.set('');self.state_filter.set(STATES[3])
+        self.rpa_panel.restore_job();self.query.set('');self.state_filter.set(STATES[3])
         self.reconciliation.query.set('');self._period_initialized=True;self.refresh()
 
     def open_pdf(self,document=None):

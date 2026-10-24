@@ -53,6 +53,65 @@ class RPA:
             snapshot=self.db.execute('SELECT environment FROM mydata_syncs WHERE id=? AND company_id=?',(source,company)).fetchone()
             if snapshot is None or snapshot[0]!='production':raise ValueError('Παραστατικό δοκιμαστικής ή μη επαληθευμένης πηγής ΑΑΔΕ: επιτρέπεται μόνο προσομοίωση, όχι πραγματική καταχώριση EBS.')
 
+    def plan(self,company,documents,*,limit=None):
+        """Plan in caller's table order, reusing only explicitly saved supplier rules.
+
+        This is not a new execution engine: create/advance still enforce every gate.
+        """
+        from app.application.ebs_reconciliation import EBSReconciliation
+        from app.application.supplier_accounts import SupplierAccounts
+        if len(set(documents))!=len(documents):raise ValueError('Διπλή επιλογή παραστατικών')
+        unresolved=self.db.execute("SELECT 1 FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.mode='fill_only' AND i.status IN ('started','save_pending','uncertain','filled_no_save') LIMIT 1",(company,)).fetchone()
+        if unresolved:raise ValueError('Χρειάζεται έλεγχος στο EBS προηγούμενης προσπάθειας από το Ιστορικό. Δεν γίνεται αυτόματη επανάληψη.')
+        rows={r['id']:r for r in self.erp.search(company)}
+        if any(d not in rows for d in documents):raise ValueError('Δεν βρέθηκε παραστατικό στην ενεργή εταιρεία')
+        evidence=EBSReconciliation(self.erp).results(company)
+        reserved={r[0] for r in self.db.execute("SELECT i.document_id FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.mode='fill_only' AND (i.status IN ('started','save_pending','uncertain','filled_no_save','save_invoked','ui_saved_review','reviewed_by_operator') OR (i.status='queued' AND j.status IN ('queued','paused','running')))",(company,))}
+        defaults={r['counterparty_id']:dict(r) for r in self.db.execute('SELECT * FROM counterparty_accounts WHERE company_id=?',(company,))}
+        eligible=[];skipped=[];accounts=SupplierAccounts(self.erp)
+        scope=self.expense_scope(company,documents)
+        excluded=set(scope['purchases']+scope['outgoing']+scope['excluded_types'])
+        with self.db:
+            for document in documents:
+                if limit is not None and len(eligible)>=limit:break
+                row=rows[document];reason=None
+                if document in reserved:reason='Προηγούμενη προσπάθεια ή εκκρεμής ουρά EBS'
+                elif document in excluded:reason='Αγορές, έσοδα ή μη υποστηριζόμενο είδος · εκτός RPA'
+                elif evidence[document]['status']!='not_registered':reason=evidence[document]['reason']
+                if reason is None:
+                    try:
+                        self.live_source(company,document)
+                        values=defaults.get(row['counterparty_id'])
+                        if values and values['expenses_account'] and values['preferred_group']=='6':
+                            accounts.apply_pending(company,row['counterparty_id'],values,{'6'},evidence=evidence,documents={document})
+                        payload=self.payload(company,document)
+                        if payload['group']!='6':raise ValueError('Δεν υπάρχει λογαριασμός εξόδων ομάδας 6')
+                        if payload['rounding_minor']:raise ValueError('Χρειάζεται έλεγχος στρογγυλοποίησης EBS')
+                    except ValueError as exc:reason=str(exc)
+                if reason is not None:skipped.append(dict(document=document,reason=reason));continue
+                eligible.append(document)
+            self.erp.repository.audit(company,'rpa_selection_planned',None,dict(documents=eligible,skipped=skipped,limit=limit))
+        return dict(documents=eligible,skipped=skipped)
+
+    def posting(self,company,documents,*,limit=None):
+        from app.application.workspace import Workspace
+        active=self.db.execute("SELECT 1 FROM rpa_jobs j WHERE company_id=? AND mode='fill_only' AND status IN ('queued','running','paused') AND EXISTS(SELECT 1 FROM rpa_items i WHERE i.job_id=j.id AND i.status='queued') LIMIT 1",(company,)).fetchone()
+        if active:raise ValueError('Υπάρχει εκκρεμής παρτίδα EBS. Χρησιμοποίησε Συνέχεια ή Διακοπή από το ιστορικό.')
+        saved=Workspace(self.erp).profile(company)
+        if saved is None:raise ValueError('Όρισε πρώτα τις θέσεις στις Ρυθμίσεις EBS.')
+        pilot=not saved['pilot_at']
+        report=self.plan(company,documents,limit=1 if pilot else limit)
+        if not report['documents']:return dict(report,job=None,pilot=pilot)
+        job=self.create(company,report['documents'],mode='fill_only',execution='save_new',confirmed=True,pilot=pilot)
+        # A completed batch leaves its last saved form open. Never type the next
+        # batch over it: reuse the existing durable need_new/resume mechanism.
+        previous=self.db.execute("SELECT i.status,j.profile_json FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.mode='fill_only' AND j.execution='save_new' AND j.id<>? AND i.status IN ('save_invoked','ui_saved_review','reviewed_by_operator') ORDER BY i.id DESC LIMIT 1",(company,job)).fetchone()
+        with self.db:
+            if previous and previous['status'] in ('save_invoked','reviewed_by_operator') and json.loads(previous['profile_json'])==saved['profile']:
+                self.db.execute('UPDATE rpa_jobs SET need_new=1 WHERE id=?',(job,))
+            self.erp.repository.audit(company,'rpa_posting_scope',None,dict(job=job,skipped=report['skipped'],pilot=pilot))
+        return dict(report,job=job,pilot=pilot)
+
     def create(self,company,documents,mode='simulation',confirmed=False,execution='fill_only',pilot=False,reconciled_only=False):
         if confirmed is not True:raise ValueError('Απαιτείται επιβεβαίωση ουράς RPA')
         if mode not in ('simulation','fill_only'):raise ValueError('Άγνωστη λειτουργία RPA')
@@ -94,14 +153,16 @@ class RPA:
     def progress(self,company,job):
         meta,items=self.items(company,job)
         counts={state:sum(i['status']==state for i in items) for state in {i['status'] for i in items}}
-        current=next((i for i in items if i['status'] in ('started','save_pending')),next((i for i in items if i['status']=='queued'),None))
+        current=next((i for i in items if i['status'] in ('started','save_pending')),next((i for i in items if i['status']=='queued'),items[-1] if items else None))
         receipts=set();save_commands=set();item_ids={i['id'] for i in items};documents={i['document_id'] for i in items}
         for event in self.db.execute("SELECT action,entity_id,payload FROM audit_events WHERE company_id=? AND action IN ('ebs_storage_operator_confirmed','ebs_pilot_operator_confirmed','rpa_save_invoked')",(company,)):
             payload=json.loads(event['payload'])
             if event['action']=='rpa_save_invoked':
                 if payload.get('job')==job and event['entity_id'] in documents:save_commands.add(event['entity_id'])
             elif payload.get('item') in item_ids:receipts.add(payload['item'])
-        return dict(total=len(items),queued=counts.get('queued',0),simulated=counts.get('simulated',0),save_requested=len(save_commands),operator_reviewed=counts.get('reviewed_by_operator',0),verified_in_ebs=len(receipts),automatically_verified=0,failed=sum(counts.get(s,0) for s in ('failed','uncertain')),current=current['payload']['invoice'] if current else '—',mode=meta['mode'],state=meta['status'])
+        preflight=self.db.execute("SELECT payload FROM audit_events WHERE company_id=? AND action='rpa_posting_scope' AND json_extract(payload,'$.job')=? ORDER BY id DESC LIMIT 1",(company,job)).fetchone()
+        excluded=len(json.loads(preflight[0])['skipped']) if preflight else 0
+        return dict(processed=sum(i['status'] not in ('queued','started','save_pending') for i in items),skipped=excluded+sum(i['status']=='excluded_purchase' for i in items),reason=next((i['reason'] for i in items if i['status']=='queued' and i['reason'].startswith('Αποκλείστηκε')),next((i['reason'] for i in reversed(items) if i['reason']),'')),total=len(items),queued=counts.get('queued',0),simulated=counts.get('simulated',0),save_requested=len(save_commands),operator_reviewed=counts.get('reviewed_by_operator',0),verified_in_ebs=len(receipts),automatically_verified=0,failed=sum(counts.get(s,0) for s in ('failed','uncertain')),current=current['payload']['invoice'] if current else '—',mode=meta['mode'],state=meta['status'])
 
     def recover(self,company):
         with self.db:
