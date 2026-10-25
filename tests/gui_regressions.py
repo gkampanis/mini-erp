@@ -1723,5 +1723,69 @@ class DesktopRegressions(unittest.TestCase):
             for row in rows:self.assertEqual(app.document_views[view].tree.set(str(row['id']),'display_account_code'),'64.09')
         self.assertEqual([tuple(r) for r in app.erp.db.execute('SELECT * FROM source_records')],before)
 
+    def continuous_batch_fixture(self,pilot=False):
+        from app.application.supplier_accounts import SupplierAccounts
+        from app.infrastructure.ebs_adapter.adapter import FIELDS
+        app=self.app
+        with app.erp.db:app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(app.company,))
+        rows=[]
+        for number in range(13):
+            row=list(ROW);row[0]='000000004';row[3]='CONT-'+str(number);row[8]='';rows.append(row)
+        workbook(self.folder/'inputs/continuous.xlsx',[HEADERS,*rows]);self.import_fixture('continuous.xlsx')
+        docs=app.erp.search(app.company);cp=docs[0]['counterparty_id']
+        SupplierAccounts(app.erp).save(app.company,[cp],'6','64.09',confirmed=True,apply_pending=False)
+        panel=app.rpa_panel
+        panel.workspace.approve_many(app.company,[dict(document=docs[0]['id'],group='6',account='64.09')],confirmed=True)
+        panel.workspace.save_profile(app.company,dict(mapping={f:[10,20] for f,_ in FIELDS},save=[100,200],new=[300,400]))
+        with app.erp.db:
+            app.erp.db.execute('UPDATE counterparty_accounts SET preferred_group=NULL WHERE company_id=?',(app.company,))
+            if not pilot:app.erp.db.execute('UPDATE ebs_profiles SET pilot_at=CURRENT_TIMESTAMP WHERE company_id=?',(app.company,))
+        app.state_filter.set('Μη καταχωρισμένα');app.refresh()
+        app.column_filters.cell('display_account_code','64.09');app.sort_documents('reference')
+        ids=list(map(int,app.tree.get_children()));self.assertEqual(len(ids),13)
+        return ids
+
+    def run_continuous_filtered_action(self,selected=False,pilot=False):
+        from types import SimpleNamespace
+        from tests.test_workflow import FakeEBS
+        ids=self.continuous_batch_fixture(pilot);app=self.app;panel=app.rpa_panel;fake=FakeEBS()
+        if selected:app.tree.selection_set([str(d) for d in ids])
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=fake),patch('ctypes.windll',SimpleNamespace(user32=SimpleNamespace(GetAsyncKeyState=lambda _:0)),create=True),patch('app.ui.rpa_panel.messagebox.showerror') as error:
+            import time
+            (panel.post_selected if selected else panel.post)()
+            # 13 records include the real 850ms focus and 350ms scheduling delays.
+            deadline=time.monotonic()+40
+            while app.busy or panel.running:
+                self.root.update();time.sleep(.01)
+                if time.monotonic()>deadline:raise AssertionError('Continuous 13-record GUI timeout')
+            self.root.update()
+            error.assert_not_called()
+        return ids,fake
+
+    def test_batch_thirteen_filtered_current_accounts_continues_after_first_save(self):
+        ids,fake=self.run_continuous_filtered_action()
+        self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],ids)
+        self.assertEqual(sum(c[0]=='save' for c in fake.calls),13)
+        self.assertEqual(sum(c[0]=='new' for c in fake.calls),12)
+        self.assertFalse(self.app.tree.get_children())
+        self.assertIn('13 από 13',self.app.rpa_panel.state.get())
+        self.app.state_filter.set('Καταχωρισμένα');self.app.filter_documents()
+        self.assertEqual(set(map(int,self.app.tree.get_children())),set(ids))
+
+    def test_selected_thirteen_filtered_current_accounts_use_same_continuous_flow(self):
+        ids,fake=self.run_continuous_filtered_action(selected=True)
+        self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],ids)
+        self.assertEqual(sum(c[0]=='save' for c in fake.calls),13)
+        self.assertEqual(sum(c[0]=='new' for c in fake.calls),12)
+
+    def test_unverified_pilot_limit_is_explained_instead_of_silent_single_completion(self):
+        ids,fake=self.run_continuous_filtered_action(pilot=True)
+        self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],ids[:1])
+        self.assertEqual(sum(c[0]=='save' for c in fake.calls),1)
+        self.assertIn('1 από 13',self.app.rpa_panel.state.get())
+        self.assertIn('πιλοτική',self.app.rpa_panel.state.get())
+        self.assertIn('Επιλογές EBS',self.app.rpa_panel.state.get())
+        self.assertIsNone(self.app.rpa_panel.workspace.profile(self.app.company)['pilot_at'])
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

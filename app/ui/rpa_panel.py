@@ -92,6 +92,8 @@ class RPAPanel:
             mode='Έλεγχος χωρίς καταχώριση' if meta['mode']=='simulation' else 'Εκτέλεση EBS'
             state={'running':'Σε εξέλιξη','paused':'Σε παύση','stopped':'Διακόπηκε','completed':'Τέλος ουράς','queued':'Έτοιμη ουρά'}.get(meta['status'],meta['status'])
             self.state.set(f"{mode} · {state} · {p['processed']}/{p['total']} · {p['current']}"+(f" · Παραλείψεις {p['skipped']}" if p['skipped'] else '')+(' · Καμία ενέργεια στο EBS.' if meta['mode']=='simulation' else '')+(' · '+p['reason'] if meta['status']=='paused' else ''))
+        scope=getattr(self,'_posting_scope',None)
+        if scope and scope[0]==self.job:self.state.set(scope[1]+('\n'+self.state.get() if meta else ''))
         if self._notice:self.state.set(self._notice+('\n'+self.state.get() if meta else ''))
         blocked=any(i['status'] in ('started','save_pending','uncertain','filled_no_save') for i in items)
         self.update_selection_actions()
@@ -299,6 +301,13 @@ class RPAPanel:
                 self.notify(report['error'],error=True);return
             if report['job'] is None:
                 self.notify(f"Καμία κατάλληλη εγγραφή · {len(report['skipped'])} παραλείψεις. "+(report['skipped'][0]['reason'] if report['skipped'] else ''),error=True);return
+            summary=f"Παρτίδα: {len(report['documents'])} από {len(documents)} εγγραφές στην ουρά."
+            if report['skipped']:
+                reasons=list(dict.fromkeys(row['reason'] for row in report['skipped']))
+                summary+=f" Παραλείφθηκαν {len(report['skipped'])}: "+' · '.join(reasons[:3])
+            if report['pilot']:
+                summary+=' Πρώτη πιλοτική εγγραφή: μετά τον οπτικό έλεγχο στο EBS, επιβεβαίωσέ την από τα Καταχωρισμένα → Επιλογές EBS για να ενεργοποιηθεί η παρτίδα.'
+            self._posting_scope=(report['job'],summary)
             self.job=report['job'];self.start()
         self.owner.run_worker(prepare,ready)
 
@@ -411,7 +420,7 @@ class RPAPanel:
             if saved and not saved['pilot_at'] and signature(json.loads(row['profile_json']))==saved['signature'] and self.owner.erp.db.execute("SELECT 1 FROM audit_events WHERE company_id=? AND action='rpa_save_invoked' AND entity_id=? AND json_extract(payload,'$.job')=?",(self.owner.company,document,row['job_id'])).fetchone():
                 self.workspace.confirm_pilot(self.owner.company,row['id'],note,confirmed=True)
         except ValueError as exc:self.notify(str(exc),error=True);return
-        self._notice='';self.owner.refresh();self.notify('Η επιλεγμένη καταχώριση επιβεβαιώθηκε οπτικά στο EBS.')
+        self._notice='';self._posting_scope=None;self.owner.refresh();self.notify('Η επιλεγμένη καταχώριση επιβεβαιώθηκε οπτικά στο EBS.')
 
     def return_pending(self,document):
         if self.owner.busy or self.running:return

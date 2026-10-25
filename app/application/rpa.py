@@ -59,7 +59,7 @@ class RPA:
         This is not a new execution engine: create/advance still enforce every gate.
         """
         from app.application.ebs_reconciliation import EBSReconciliation
-        from app.application.supplier_accounts import SupplierAccounts
+        from app.application.supplier_accounts import SupplierAccounts,account_group
         if len(set(documents))!=len(documents):raise ValueError('Διπλή επιλογή παραστατικών')
         unresolved=self.db.execute("SELECT 1 FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND j.mode='fill_only' AND i.status IN ('started','save_pending') LIMIT 1",(company,)).fetchone()
         if unresolved:raise ValueError('Χρειάζεται έλεγχος στο EBS προηγούμενης προσπάθειας από το Ιστορικό. Δεν γίνεται αυτόματη επανάληψη.')
@@ -82,7 +82,7 @@ class RPA:
                     try:
                         self.live_source(company,document)
                         values=defaults.get(row['counterparty_id'])
-                        if values and values['expenses_account'] and values['preferred_group']=='6':
+                        if values and values['expenses_account'] and account_group(values)=='6':
                             accounts.apply_pending(company,row['counterparty_id'],values,{'6'},evidence=evidence,documents={document})
                         payload=self.payload(company,document)
                         if payload['group']!='6':raise ValueError('Δεν υπάρχει λογαριασμός εξόδων ομάδας 6')

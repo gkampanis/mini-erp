@@ -224,3 +224,17 @@ class PostingActionsTests(unittest.TestCase):
         item=self.rpa.items(self.company,retry['job'])[1][0]
         self.rpa.reviewed(self.company,retry['job'],item['id'],'Synthetic visual check',confirmed=True,stored_in_ebs=True)
         with self.assertRaises(ValueError):self.rpa.confirm_not_saved(self.company,self.ids[0])
+
+    def test_thirteen_visible_current_accounts_prepare_all_when_single_expense_rule_has_no_preferred_group(self):
+        # P4 displays the current VAT mapping on all 13 rows, but only one
+        # document may already have a local preparation from an earlier run.
+        with self.erp.db:self.erp.db.execute('UPDATE counterparty_accounts SET preferred_group=NULL WHERE company_id=?',(self.company,))
+        self.workspace.approve_many(self.company,[dict(document=self.ids[0],group='6',account='64.09')],confirmed=True)
+        report=self.rpa.posting(self.company,self.ids[:13],limit=40)
+        self.assertEqual(report['documents'],self.ids[:13])
+        self.assertFalse(report['skipped'])
+        fake=FakeEBS();result=self.run_job(report['job'],fake)
+        self.assertEqual(result['status'],'completed')
+        self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],self.ids[:13])
+        self.assertEqual(sum(c[0]=='save' for c in fake.calls),13)
+        self.assertEqual(sum(c[0]=='new' for c in fake.calls),12)
