@@ -13,8 +13,12 @@ def account_group(values):
 class SupplierAccounts:
     def __init__(self,erp):self.erp=erp;self.db=erp.db
 
+    def display_accounts(self,company):
+        """Read-only current mapping, indexed by company-scoped VAT identity."""
+        return {r['vat']:r['account'] for r in self.db.execute('SELECT c.vat,m.account FROM account_mappings m JOIN counterparties c ON c.id=m.counterparty_id AND c.company_id=m.company_id WHERE m.company_id=?',(company,))}
+
     def rows(self,company,query=''):
-        cards=Counterparties(self.erp);result=[];api={}
+        cards=Counterparties(self.erp);result=[];api={};display=self.display_accounts(company)
         documents={}
         for doc in self.erp.search(company):
             if doc['direction']=='incoming':documents.setdefault(doc['counterparty_id'],[]).append(doc)
@@ -31,7 +35,7 @@ class SupplierAccounts:
             if not incoming and card['vat'] not in api and card['id'] not in accounts and card['vat'] not in purchase_suppliers:continue
             values=accounts.get(card['id'],dict(purchases_account='',expenses_account='',preferred_group=None));group=account_group(values)
             group='2' if card['vat'] in purchase_suppliers else group
-            account=values['purchases_account' if group=='2' else 'expenses_account'] if group else ''
+            account=display.get(card['vat'],'')
             pending=any(not d.get('prepared_at') or (d.get('nature_group')==group and d.get('account_code')!=account) for d in incoming)
             state='Εκκρεμή προς έγκριση / ενημέρωση' if account and pending else 'Αντιστοιχισμένος' if account else 'Χρειάζεται λογαριασμό'
             if not incoming:state='ΑΑΔΕ: έλεγχος τύπου / στοιχείων' if card['vat'] in api else 'Χωρίς παραστατικά'

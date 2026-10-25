@@ -179,14 +179,14 @@ class Desktop:
         self.result_count = tk.StringVar()
         ttk.Label(self.documents_tab,textvariable=self.result_count,style='Subtitle.TLabel').pack(anchor='w',pady=(0,8))
         ttk.Label(self.documents_tab,text='Τίτλοι στηλών: κλικ για ταξινόμηση ↑↓ · δεξί κλικ για φίλτρο',style='Subtitle.TLabel').pack(anchor='w',pady=(0,4))
-        columns = ('reference','description','name','vat','issue_date','net_minor','tax_minor','gross_minor','account_code','preparation_state','aade_state','pdf_state')
-        titles = ('Παραστατικό','Είδος ΑΑΔΕ','Συναλλασσόμενος','ΑΦΜ','Ημερομηνία','Καθαρή €','ΦΠΑ €','Σύνολο €','Λογαριασμός','Έλεγχος','ΑΑΔΕ','PDF · κλικ για άνοιγμα')
-        self.tree = table(self.documents_tab,columns,titles,{'name':190,'reference':100,'vat':95,'issue_date':90,'gross_minor':85,'account_code':120,'preparation_state':120,'aade_state':90,'pdf_state':200})
+        columns = ('reference','description','name','vat','issue_date','net_minor','tax_minor','gross_minor','display_account_code','preparation_state','aade_state','pdf_state')
+        titles = ('Παραστατικό','Είδος ΑΑΔΕ','Συναλλασσόμενος','ΑΦΜ','Ημερομηνία','Καθαρή €','ΦΠΑ €','Σύνολο €','Λογαριασμός καρτέλας','Έλεγχος','ΑΑΔΕ','PDF · κλικ για άνοιγμα')
+        self.tree = table(self.documents_tab,columns,titles,{'name':190,'reference':100,'vat':95,'issue_date':90,'gross_minor':85,'display_account_code':170,'preparation_state':120,'aade_state':90,'pdf_state':200})
         self.tree.configure(selectmode='extended')
         from app.ui.column_filters import ColumnFilters
         self.column_filters=ColumnFilters(self.tree,self.filter_documents,rows=lambda:self._documents,extra_menu=lambda event,tree,menu:self.rpa_panel.document_menu(event,tree,menu),show_summary=True,reset_parent=search_bar)
-        self.tree.configure(displaycolumns=('reference','name','vat','issue_date','net_minor','tax_minor','gross_minor','account_code','preparation_state','pdf_state'))
-        for key,width in {'reference':95,'name':180,'vat':90,'issue_date':85,'net_minor':80,'tax_minor':80,'gross_minor':80,'account_code':100,'preparation_state':125,'pdf_state':135}.items():self.tree.column(key,width=width)
+        self.tree.configure(displaycolumns=('reference','name','vat','issue_date','net_minor','tax_minor','gross_minor','display_account_code','preparation_state','pdf_state'))
+        for key,width in {'reference':95,'name':180,'vat':90,'issue_date':85,'net_minor':80,'tax_minor':80,'gross_minor':80,'display_account_code':170,'preparation_state':125,'pdf_state':135}.items():self.tree.column(key,width=width)
         for col in columns:
             self.tree.heading(col,command=lambda key=col:self.sort_documents(key))
         self.tree.bind('<ButtonRelease-1>',self.pdf_click)
@@ -216,7 +216,7 @@ class Desktop:
         self.rpa_panel=RPAPanel(self,self.rpa_tab,table)
         from app.ui.suppliers import Suppliers
         self.suppliers=Suppliers(self,self.suppliers_tab,group='2')
-        self.creditors=Suppliers(self,self.creditors_tab,group='6')
+        self.creditors=Suppliers(self,self.creditors_tab,group=('2','6'))
         from app.ui.ebs_reconciliation import ReconciliationTab
         self.reconciliation=ReconciliationTab(self,self.reconciliation_tab)
         self.notebook.bind('<<NotebookTabChanged>>',self.tab_changed)
@@ -434,6 +434,11 @@ class Desktop:
         self.company_filter.set(next(k for k,v in self.company_choices.items() if v==self.company))
         active=self.erp.db.execute('SELECT environment FROM aade_settings WHERE company_id=?',(self.company,)).fetchone()
         self.company_caption.set(identity['name']+' · ΑΦΜ '+identity['vat']+' · '+('Δοκιμαστική ΑΑΔΕ' if active and active[0]=='test' else 'Παραγωγική ΑΑΔΕ'))
+        from app.application.supplier_accounts import SupplierAccounts
+        display_accounts=SupplierAccounts(self.erp).display_accounts(self.company)
+        accounts_changed=self.company!=getattr(self,'_display_company',None) or display_accounts!=getattr(self,'_display_accounts',None)
+        self._display_company=self.company
+        self._display_accounts=display_accounts
         for window in list(self._details.values()):
             if window.winfo_exists() and hasattr(window,'refresh_identity'):window.refresh_identity()
             if window.winfo_exists() and hasattr(window,'pdf_pane'):window.pdf_pane.refresh_if_changed()
@@ -446,11 +451,17 @@ class Desktop:
         if months and not self._period_initialized:self.month_filter.set(MONTHS[int(months[0][5:])-1]+' '+months[0][:4]);self._period_initialized=True
         month=periods.get(self.month_filter.get()) if self.month_filter.get()!='Όλοι οι μήνες' else None
         total=self.erp.db.execute('SELECT count(*) FROM documents WHERE company_id=?',(self.company,)).fetchone()[0]
+        revision=(self.company,total)
+        if accounts_changed or revision!=getattr(self,'_account_document_revision',None):
+            for window in self.root.winfo_children():
+                if window.winfo_exists() and hasattr(window,'refresh_accounts'):window.refresh_accounts(display_accounts)
+        self._account_document_revision=revision
         jobs = self.erp.import_reviews(self.company)
         from app.application.workspace import Workspace
         month_rows=Workspace(self.erp).rows(self.company,month=month)
         from app.application.ebs_reconciliation import EBSReconciliation
         evidence=EBSReconciliation(self.erp).results(self.company)
+        for row in month_rows:row['display_account_code']=display_accounts.get(row['vat'],'')
         self._month_rows=month_rows;self._evidence=evidence
         self.filter_documents(fit_columns=True)
         self.metrics['total'].set(str(total))
@@ -459,10 +470,10 @@ class Desktop:
         self._jobs = {j['id']:j for j in jobs}
         self._review_rows={j['id']:dict(id=j['id'],created_at=j['created_at'],filename=j['filename'],inserted=j['report'].get('inserted',0),duplicates=j['report'].get('duplicates',0),rejected=len(j['report'].get('rejected',[])),warnings=len(j['report'].get('warnings',[]))) for j in jobs}
         self.filter_reviews()
-        for view in self.document_views.values():view.refresh(render=self.notebook.select()==str(view.parent))
+        for view in self.document_views.values():view.refresh(render=accounts_changed or self.notebook.select()==str(view.parent))
         self.reconciliation.refresh(evidence,render=self.notebook.select()==str(self.reconciliation_tab))
-        if self.notebook.select()==str(self.suppliers_tab):self.suppliers.refresh()
-        elif self.notebook.select()==str(self.creditors_tab):self.creditors.refresh()
+        if accounts_changed or self.notebook.select()==str(self.suppliers_tab):self.suppliers.refresh()
+        if accounts_changed or self.notebook.select()==str(self.creditors_tab):self.creditors.refresh()
         self.rpa_panel.refresh()
         if not self.busy:
             self.status.set('Τα παραστατικά και οι αναφορές έχουν φορτωθεί από τη βάση.')
@@ -703,6 +714,17 @@ class Desktop:
         def refresh_identity():
             current,_=self.erp.detail(self.company,document_id);name_caption.set(current['name']);identity_caption.set(f"{current['name']}  ·  ΑΦΜ {current['vat']}  ·  {when(current['issue_date'])}")
         win.refresh_identity=refresh_identity
+        display_company=self.company
+        current_account=tk.StringVar()
+        def refresh_accounts(mapping=None):
+            if display_company!=self.company:return
+            if mapping is None:
+                from app.application.supplier_accounts import SupplierAccounts
+                mapping=SupplierAccounts(self.erp).display_accounts(display_company)
+            current_account.set('Τρέχων λογαριασμός καρτέλας: '+(mapping.get(row['vat']) or 'Δεν έχει οριστεί'))
+        win.refresh_accounts=refresh_accounts;win.current_account_var=current_account
+        refresh_accounts()
+        ttk.Label(header,textvariable=current_account,style='Subtitle.TLabel').pack(anchor='w',pady=4)
         ttk.Label(header,textvariable=identity_caption,style='Subtitle.TLabel').pack(anchor='w',pady=4)
         ttk.Label(header,text=f"Καθαρή {amount(row['net_minor'])} €    +    ΦΠΑ {amount(row['tax_minor'])} €    +    Στρογγ. {amount(row['rounding_minor'])} €    =    Σύνολο {amount(row['gross_minor'])} €",style='Section.TLabel').pack(anchor='w',pady=(8,0))
         split=ttk.Panedwindow(win,orient='horizontal')
@@ -755,7 +777,7 @@ class Desktop:
         group_box=ttk.Combobox(fields,textvariable=group,values=tuple(choices),state='readonly',width=28)
         group_box.grid(row=0,column=1,sticky='ew',padx=16)
         group_box.bind('<<ComboboxSelected>>',lambda _:account.set(cp_defaults['purchases_account'] if choices.get(group.get())=='2' else cp_defaults['expenses_account']))
-        ttk.Label(fields,text='Λογαριασμός').grid(row=1,column=0,sticky='w',pady=8)
+        ttk.Label(fields,text='Λογαριασμός προετοιμασίας').grid(row=1,column=0,sticky='w',pady=8)
         ttk.Entry(fields,textvariable=account,width=30).grid(row=1,column=1,sticky='ew',padx=16)
         ttk.Label(fields,text='Σημείωση ελέγχου').grid(row=2,column=0,sticky='w',pady=8)
         ttk.Entry(fields,textvariable=note,width=28).grid(row=2,column=1,sticky='ew',padx=16)

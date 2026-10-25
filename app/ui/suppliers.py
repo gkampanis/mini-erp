@@ -10,8 +10,8 @@ class Suppliers:
         self.group=group
         self.owner=owner;self.service=SupplierAccounts(owner.erp)
         header=ttk.Frame(parent);header.pack(fill='x',pady=(0,12))
-        ttk.Label(header,text='Πιστωτές · Ομάδα 6' if group=='6' else 'Προμηθευτές · Ομάδα 2',style='Section.TLabel').pack(anchor='w')
-        ttk.Label(header,text='Αποθήκευσε λογαριασμό ανά προμηθευτή για τα εκκρεμή και επόμενα παραστατικά του. Οι αγορές ομάδας 2 δεν καταχωρούνται στο EBS.',style='Subtitle.TLabel',wraplength=1000).pack(anchor='w',pady=6)
+        ttk.Label(header,text='Πιστωτές · Ομάδες 2 και 6' if isinstance(group,tuple) else 'Προμηθευτές · Ομάδα 2',style='Section.TLabel').pack(anchor='w')
+        ttk.Label(header,text='Αποθήκευσε λογαριασμό ανά προμηθευτή για εμφάνιση σε όλα τα παραστατικά του. Η προετοιμασία εκκρεμών ενημερώνεται χωριστά. Οι αγορές ομάδας 2 δεν καταχωρούνται στο EBS.',style='Subtitle.TLabel',wraplength=1000).pack(anchor='w',pady=6)
         filters=ttk.Frame(header);filters.pack(fill='x')
         self.query=tk.StringVar();entry=ttk.Entry(filters,textvariable=self.query);entry.pack(side='left',fill='x',expand=True)
         entry.bind('<Return>',lambda _:self.refresh());self.filter=tk.StringVar(value='Όλοι')
@@ -34,7 +34,7 @@ class Suppliers:
     def refresh(self):
         self.names_button.state(['disabled'] if self.owner.busy or self.owner.rpa_panel.running else ['!disabled'])
         self.source_rows=self.service.rows(self.owner.company,self.query.get().strip())
-        if self.group:self.source_rows=[r for r in self.source_rows if r['group']==self.group or (self.group=='2' and r['group'] is None)]
+        if self.group:self.source_rows=[r for r in self.source_rows if (r['group'] in self.group if isinstance(self.group,tuple) else r['group']==self.group or (self.group=='2' and r['group'] is None))]
         self.filter_rows()
     def filter_rows(self):
         selected=self.tree.selection();self.tree.delete(*self.tree.get_children());self.rows={}

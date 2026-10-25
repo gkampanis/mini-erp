@@ -1657,11 +1657,71 @@ class DesktopRegressions(unittest.TestCase):
         self.assertEqual(list(app.erp.db.iterdump()),before);self.assertIn(row[0],confirm.call_args.args[1])
         with patch('app.ui.desktop.messagebox.askyesno',return_value=True):app.set_purchase(row[0],True)
         app.suppliers.refresh();app.creditors.refresh()
-        self.assertTrue(app.suppliers.tree.exists(str(cp)));self.assertFalse(app.creditors.tree.exists(str(cp)))
+        self.assertTrue(app.suppliers.tree.exists(str(cp)));self.assertTrue(app.creditors.tree.exists(str(cp)))
         self.assertEqual(SupplierPurchases(app.erp).inspect(app.company,row[0])['previous_group'],'6')
         app.restore_purchase_group(row[0]);app.creditors.refresh();app.suppliers.refresh()
         self.assertTrue(app.creditors.tree.exists(str(cp)));self.assertFalse(app.suppliers.tree.exists(str(cp)))
         self.assertEqual(app.erp.preparation(app.company,doc)['account_code'],'64.03')
+
+    def test_current_account_display_updates_registered_pending_and_open_windows_without_rewriting_history(self):
+        from app.application.supplier_accounts import SupplierAccounts
+        from app.application.ebs_reconciliation import EBSReconciliation
+        from app.ui.counterparties import open_detail as card_detail
+        app=self.app
+        rows=[]
+        for number,day in [('1','2026-09-21'),('2','2026-10-21')]:
+            row=list(ROW);row[3]=number;row[4]=day;row[8]='';rows.append(row)
+        workbook(self.folder/'inputs/display-account.xlsx',[HEADERS,*rows]);self.import_fixture('display-account.xlsx')
+        ids=[r['id'] for r in app.erp.search(app.company)];cp=app.erp.search(app.company)[0]['counterparty_id']
+        service=SupplierAccounts(app.erp);service.save(app.company,[cp],'6','64.03',confirmed=True)
+        EBSReconciliation(app.erp).confirm_manual(app.company,ids[0],'Synthetic check',confirmed=True)
+        historic=app.erp.preparation(app.company,ids[0]);evidence=list(app.erp.db.execute('SELECT * FROM ebs_matches'))
+        app.month_filter.set('Όλοι οι μήνες');app.refresh();app.open_detail(ids[0]);detail=app._details[ids[0]];other_card=card_detail(app,cp);card=card_detail(app,cp)
+        app.column_filters.cell('name',app._documents[ids[0]]['name'])
+        original_filters=dict(app.column_filters.cell_filters)
+        card.account_fields[1].set('64.09');self.button(card,'Αποθήκευση καρτέλας').invoke();self.root.update()
+        self.assertEqual(app.erp.preparation(app.company,ids[0]),historic)
+        self.assertEqual(list(app.erp.db.execute('SELECT * FROM ebs_matches')),evidence)
+        self.assertEqual(app.erp.preparation(app.company,ids[1])['account_code'],'64.09')
+        self.assertIn('64.09',detail.current_account_var.get())
+        self.assertTrue(all(other_card.document_tree.set(key,'account')=='64.09' for key in other_card.document_tree.get_children()))
+        self.assertTrue(any(isinstance(w,ttk.Entry) and w.get()=='64.03' for w in widgets(detail)))
+        self.assertEqual(app.column_filters.cell_filters,original_filters)
+        for document in ids:
+            self.assertEqual(app.tree.set(str(document),'display_account_code'),'64.09')
+            self.assertEqual(app.document_views['expenses'].tree.set(str(document),'display_account_code'),'64.09')
+        self.assertEqual(app.creditors.tree.set(str(cp),'account'),'64.09')
+        app.column_filters.cell('display_account_code','64.09');app.sort_documents('display_account_code')
+        self.assertEqual(set(map(int,app.tree.get_children())),set(ids))
+        self.assertEqual(app._documents[ids[0]]['account_code'],'64.03')
+        app.column_filters.remove('display_account_code')
+        self.assertEqual(app.column_filters.cell_filters,original_filters)
+        # Even a newly imported unprepared document reads the same VAT mapping.
+        row=list(ROW);row[3]='3';row[8]='';workbook(self.folder/'inputs/display-new.xlsx',[HEADERS,row]);self.import_fixture('display-new.xlsx');app.refresh()
+        self.assertTrue(all(r['display_account_code']=='64.09' for r in app._documents.values()))
+        self.assertEqual(app.erp.preparation(app.company,ids[0]),historic)
+
+    def test_current_account_covers_excel_api_income_and_movement_without_source_changes(self):
+        from app.application.mydata import MyData
+        from app.application.supplier_accounts import SupplierAccounts
+        from app.infrastructure.aade.client import parsed_page
+        from tests.test_workflow import response
+        app=self.app;self.import_fixture('separate.xlsx')
+        doc=next(r for r in app.erp.search(app.company) if r['vat']=='000000001');cp=doc['counterparty_id']
+        with app.erp.db:app.erp.db.execute("UPDATE documents SET direction='outgoing' WHERE id=?",(doc['id'],))
+        api=MyData(app.erp)
+        for code,mark,number in [('1.1','99110001','API-DISPLAY'),('9.3','99110002','MOVEMENT-DISPLAY')]:
+            xml=response(mark=mark,number=number).replace(b'<invoiceType>1.1</invoiceType>',f'<invoiceType>{code}</invoiceType>'.encode())
+            api.persist(app.company,'production','2026-10-01','2026-10-31',[(xml,parsed_page(xml))],'RequestDocs')
+        api.import_documents(app.company,'production','2026-10-01','2026-10-31',confirmed=True)
+        before=[tuple(r) for r in app.erp.db.execute('SELECT * FROM source_records')]
+        SupplierAccounts(app.erp).save(app.company,[cp],'6','64.09',confirmed=True);app.refresh()
+        for view in ('income','expenses','movement'):
+            rows=[r for r in app.document_views[view].rows.values() if r['vat']=='000000001']
+            self.assertTrue(rows,view)
+            self.assertTrue(all(r['display_account_code']=='64.09' for r in rows))
+            for row in rows:self.assertEqual(app.document_views[view].tree.set(str(row['id']),'display_account_code'),'64.09')
+        self.assertEqual([tuple(r) for r in app.erp.db.execute('SELECT * FROM source_records')],before)
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

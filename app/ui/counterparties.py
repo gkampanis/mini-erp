@@ -57,8 +57,19 @@ def open_detail(owner,counterparty,on_saved=lambda:None):
     notebook=ttk.Notebook(body);notebook.pack(fill='both',expand=True,pady=14)
     docs=ttk.Frame(notebook,padding=8);history=ttk.Frame(notebook,padding=8)
     notebook.add(docs,text='Συνδεδεμένα παραστατικά');notebook.add(history,text='Ιστορικό καρτέλας')
-    tree=table(docs,('date','invoice','group','account','net','gross'),('Ημερομηνία','Παραστατικό','Ομάδα','Λογαριασμός','Καθαρή €','Σύνολο €'))
-    for row in documents:tree.insert('','end',iid=str(row['id']),values=(when(row['issue_date']),reference(row),row.get('nature_group') or '—',row.get('account_code') or '—',amount(row['net_minor']),amount(row['gross_minor'])))
+    tree=table(docs,('date','invoice','group','account','net','gross'),('Ημερομηνία','Παραστατικό','Ομάδα','Λογαριασμός καρτέλας','Καθαρή €','Σύνολο €'))
+    display_company=owner.company
+    def refresh_accounts(mapping=None):
+        if display_company!=owner.company:return
+        from app.application.supplier_accounts import SupplierAccounts
+        if mapping is None:mapping=SupplierAccounts(owner.erp).display_accounts(display_company)
+        _,current_documents=service.detail(display_company,counterparty)
+        selected=tree.selection();position=tree.yview()
+        tree.delete(*tree.get_children())
+        for row in current_documents:tree.insert('','end',iid=str(row['id']),values=(when(row['issue_date']),reference(row),row.get('nature_group') or '—',mapping.get(row['vat']) or '—',amount(row['net_minor']),amount(row['gross_minor'])))
+        tree.selection_set([key for key in selected if tree.exists(key)])
+        if position:tree.yview_moveto(position[0])
+    win.refresh_accounts=refresh_accounts;refresh_accounts()
     def invoice():
         chosen=tree.selection()
         if not chosen:return
