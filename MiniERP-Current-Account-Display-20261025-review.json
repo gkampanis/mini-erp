@@ -1,0 +1,59 @@
+{
+  "version": "2026.10.25-P4",
+  "source_commit": "6ba84fc05ffc8a3a12d73d36ac20c320ceb2fd3c",
+  "restore_point": "checkpoint-2026.10.25-P3-before-display-account",
+  "gate": "PASSED",
+  "sha256": "a81d6141beb0ff1f62c621aac3c3003f10e558e80cbcf775bcc38ee6a0ba377c",
+  "counts": {
+    "source_tests": {
+      "tests": 260,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "source_gui": {
+      "tests": 79,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "package_tests": {
+      "tests": 260,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "package_gui": {
+      "tests": 79,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    }
+  },
+  "unchanged_paths": [
+    "app/infrastructure/ebs_adapter",
+    "app/application/rpa.py",
+    "app/ui/rpa_panel.py",
+    "app/application/workspace.py",
+    "app/infrastructure/repository.py",
+    "app/application/ebs_reconciliation.py",
+    "app/domain/ebs_matching.py",
+    "app/application/supplier_purchases.py"
+  ],
+  "windows_desktop": "NOT_RUN",
+  "windows_launcher": "NOT_RUN",
+  "ebs_live": "NOT_RUN",
+  "aade_live": "NOT_RUN"
+}
