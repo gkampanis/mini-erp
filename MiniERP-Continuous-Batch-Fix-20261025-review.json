@@ -1,0 +1,70 @@
+{
+  "version": "2026.10.25-P5",
+  "source_commit": "dab6b4a00eea1219a60b3ed80c652cea77d76a84",
+  "checkpoint": "checkpoint-2026.10.25-P4-before-batch-fix",
+  "gate": "PASSED",
+  "sha256": "c85d0022fd33ce68c282ff9c8693754e127ed9e8c38872b5f4164e9b5eb64abe",
+  "counts": {
+    "source_tests": {
+      "tests": 261,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "source_gui": {
+      "tests": 82,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "package_tests": {
+      "tests": 261,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "package_gui": {
+      "tests": 82,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    }
+  },
+  "unchanged_execution_methods": {
+    "app/application/rpa.py": [
+      "advance",
+      "_advance_saved",
+      "create",
+      "posting",
+      "payload",
+      "expense_scope"
+    ],
+    "app/ui/rpa_panel.py": [
+      "next_item",
+      "start",
+      "pause",
+      "stop"
+    ]
+  },
+  "native_adapter_unchanged": true,
+  "reconciliation_unchanged": true,
+  "windows_desktop": "NOT_RUN",
+  "windows_launcher": "NOT_RUN",
+  "ebs_live": "NOT_RUN",
+  "aade_live": "NOT_RUN",
+  "reproduction_before": "13 displayed / 1 queued",
+  "reproduction_after": "13 queued / 13 Save / 12 New",
+  "pilot_safety": "Preserved; explicit inline explanation when first pilot is not verified"
+}
