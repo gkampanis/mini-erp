@@ -5,11 +5,12 @@ from tkinter import ttk,messagebox
 from app.application.supplier_accounts import SupplierAccounts
 
 class Suppliers:
-    def __init__(self,owner,parent):
+    def __init__(self,owner,parent,group=None):
         from app.ui.desktop import table
+        self.group=group
         self.owner=owner;self.service=SupplierAccounts(owner.erp)
         header=ttk.Frame(parent);header.pack(fill='x',pady=(0,12))
-        ttk.Label(header,text='Προμηθευτές και λογαριασμοί EBS',style='Section.TLabel').pack(anchor='w')
+        ttk.Label(header,text='Πιστωτές · Ομάδα 6' if group=='6' else 'Προμηθευτές · Ομάδα 2',style='Section.TLabel').pack(anchor='w')
         ttk.Label(header,text='Αποθήκευσε λογαριασμό ανά προμηθευτή για τα εκκρεμή και επόμενα παραστατικά του. Οι αγορές ομάδας 2 δεν καταχωρούνται στο EBS.',style='Subtitle.TLabel',wraplength=1000).pack(anchor='w',pady=6)
         filters=ttk.Frame(header);filters.pack(fill='x')
         self.query=tk.StringVar();entry=ttk.Entry(filters,textvariable=self.query);entry.pack(side='left',fill='x',expand=True)
@@ -33,6 +34,7 @@ class Suppliers:
     def refresh(self):
         self.names_button.state(['disabled'] if self.owner.busy or self.owner.rpa_panel.running else ['!disabled'])
         self.source_rows=self.service.rows(self.owner.company,self.query.get().strip())
+        if self.group:self.source_rows=[r for r in self.source_rows if r['group']==self.group or (self.group=='2' and r['group'] is None)]
         self.filter_rows()
     def filter_rows(self):
         selected=self.tree.selection();self.tree.delete(*self.tree.get_children());self.rows={}
@@ -69,7 +71,7 @@ class Suppliers:
         win=tk.Toplevel(self.owner.root);win.title('Μαζική αντιστοίχιση λογαριασμού');win.geometry('700x350')
         body=ttk.Frame(win,padding=20);body.pack(fill='both',expand=True)
         ttk.Label(body,text=f'{len(ids)} προμηθευτές · έγκριση λογαριασμού',style='Section.TLabel').pack(anchor='w',pady=10)
-        group=tk.StringVar(value='6 · Έξοδα');account=tk.StringVar()
+        group=tk.StringVar(value='2 · Αγορές' if self.group=='2' else '6 · Έξοδα');account=tk.StringVar()
         ttk.Combobox(body,textvariable=group,values=('6 · Έξοδα','2 · Αγορές'),state='readonly').pack(fill='x',pady=6)
         ttk.Label(body,text='Λογιστικός λογαριασμός EBS').pack(anchor='w');ttk.Entry(body,textvariable=account).pack(fill='x',pady=6)
         ttk.Label(body,text='Ενημερώνονται οι εκκρεμείς εγγραφές της ίδιας ομάδας και οι μη εκτελεσμένες ουρές. Ήδη επιχειρημένες καταχωρίσεις εξαιρούνται. Δεν αλλάζει αυτόματα τίποτα μέσα στο EBS.',wraplength=640,style='Subtitle.TLabel').pack(anchor='w',pady=8)

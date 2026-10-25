@@ -55,3 +55,10 @@ group 6 expenses enter EBS RPA or its simulation. Mixed-list queue preparation
 must explicitly report excluded purchases, preserve their records/cards and
 require review for unknown/unapproved classifications. Do not add a purchase
 EBS connector or ask again which purchase form to automate.
+
+## User-confirmed stable posting baseline
+
+The native EBS adapter, field sequence and fill → Save → New workflow must not
+be changed unless the user explicitly requests that specific change. Stable
+baseline: tag `stable-2026.10.25-P2`. Supplier/account/view upgrades must reuse
+the existing mapping and queue preparation, without editing this posting engine.

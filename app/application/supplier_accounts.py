@@ -3,6 +3,13 @@ import json
 from app.application.account_defaults import defaults_values
 from app.application.counterparties import Counterparties
 
+def account_group(values):
+    if values['preferred_group']:return values['preferred_group']
+    if bool(values['expenses_account']) != bool(values['purchases_account']):
+        return '6' if values['expenses_account'] else '2'
+    return None
+
+
 class SupplierAccounts:
     def __init__(self,erp):self.erp=erp;self.db=erp.db
 
@@ -21,12 +28,13 @@ class SupplierAccounts:
                 if classify(item.get('kind',''))['self_recorded_expense']:api.setdefault(item.get('receiver',''),set()).add(source['mark'])
         for card in cards.list(company,query):
             incoming=documents.get(card['id'],[])
-            if not incoming and card['vat'] not in api:continue
-            values=accounts.get(card['id'],dict(purchases_account='',expenses_account='',preferred_group=None));group=values['preferred_group']
+            if not incoming and card['vat'] not in api and card['id'] not in accounts and card['vat'] not in purchase_suppliers:continue
+            values=accounts.get(card['id'],dict(purchases_account='',expenses_account='',preferred_group=None));group=account_group(values)
+            group='2' if card['vat'] in purchase_suppliers else group
             account=values['purchases_account' if group=='2' else 'expenses_account'] if group else ''
             pending=any(not d.get('prepared_at') or (d.get('nature_group')==group and d.get('account_code')!=account) for d in incoming)
             state='Εκκρεμή προς έγκριση / ενημέρωση' if account and pending else 'Αντιστοιχισμένος' if account else 'Χρειάζεται λογαριασμό'
-            if not incoming:state='ΑΑΔΕ: έλεγχος τύπου / στοιχείων'
+            if not incoming:state='ΑΑΔΕ: έλεγχος τύπου / στοιχείων' if card['vat'] in api else 'Χωρίς παραστατικά'
             if card['vat'] in purchase_suppliers:state='Προμηθευτής αγορών · χωρίς απαίτηση λογαριασμού'
             count=len({d['mark'] or 'local:'+str(d['id']) for d in incoming}|api.get(card['vat'],set()))
             result.append(dict(card,group=group,account=account,account_state=state,document_count=count))
@@ -56,7 +64,7 @@ class SupplierAccounts:
         if not self.db.execute('SELECT 1 FROM counterparties WHERE id=? AND company_id=?',(cp,company)).fetchone():raise ValueError('Δεν βρέθηκε προμηθευτής στην εταιρεία')
         before=self.db.execute('SELECT * FROM counterparty_accounts WHERE company_id=? AND counterparty_id=?',(company,cp)).fetchone()
         self.db.execute("INSERT INTO counterparty_accounts(counterparty_id,company_id,purchases_account,expenses_account,preferred_group,approved_by) VALUES (?,?,?,?,?,'local_operator') ON CONFLICT(counterparty_id) DO UPDATE SET purchases_account=excluded.purchases_account,expenses_account=excluded.expenses_account,preferred_group=excluded.preferred_group,approved_by=excluded.approved_by,approved_at=CURRENT_TIMESTAMP,version=counterparty_accounts.version+1",(cp,company,values['purchases_account'],values['expenses_account'],values['preferred_group']))
-        group=values['preferred_group']
+        group=account_group(values)
         if group:
             account=values['purchases_account' if group=='2' else 'expenses_account']
             self.db.execute("INSERT INTO account_mappings(company_id,counterparty_id,account,approved_by) VALUES (?,?,?,'local_operator') ON CONFLICT(company_id,counterparty_id) DO UPDATE SET account=excluded.account,approved_by=excluded.approved_by",(company,cp,account))
@@ -80,7 +88,7 @@ class SupplierAccounts:
             attempts=self.db.execute('SELECT i.*,j.mode,j.status AS job_state FROM rpa_items i JOIN rpa_jobs j ON j.id=i.job_id WHERE j.company_id=? AND i.document_id=?',(company,document)).fetchall()
             if any(a['job_state']=='running' and a['status']=='queued' for a in attempts):raise ValueError('Παύσε πρώτα την ενεργή ουρά RPA πριν αλλάξεις λογαριασμούς')
             if any(a['mode']=='fill_only' and a['status'] not in ('queued','not_saved_confirmed') for a in attempts):report['protected'].append(document);continue
-            approval=self.erp.preparation(company,document);group=approval['nature_group'] if approval else values['preferred_group']
+            approval=self.erp.preparation(company,document);group=approval['nature_group'] if approval else account_group(values)
             if group not in groups:continue
             account=values['purchases_account' if group=='2' else 'expenses_account']
             if not account:report['needs_review'].append(document);continue

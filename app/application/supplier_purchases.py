@@ -32,16 +32,28 @@ class SupplierPurchases:
             else:eligible.append(row['id'])
         rule=self.db.execute('SELECT * FROM supplier_purchase_rules WHERE company_id=? AND vat=?',(company,supplier)).fetchone()
         tagged={r[0] for r in self.db.execute('SELECT document_id FROM document_purchase_tags WHERE company_id=?',(company,))}
-        return dict(eligible=eligible,exceptions=exceptions,enabled=bool(rule and rule['enabled']),tagged=tagged,version=rule['version'] if rule else 0)
+        return dict(eligible=eligible,exceptions=exceptions,enabled=bool(rule and rule['enabled']),tagged=tagged,version=rule['version'] if rule else 0,previous_group=rule['previous_group'] if rule else None)
 
-    def set(self,company,supplier,enabled,*,expected_version=None):
+    def set(self,company,supplier,enabled,*,expected_version=None,restore_previous=False):
         if type(enabled) is not bool:raise ValueError('Μη έγκυρος χαρακτηρισμός')
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
             scope=self.inspect(company,supplier)
             if expected_version is not None and scope['version']!=expected_version:raise ValueError('Ο χαρακτηρισμός άλλαξε· ανανέωσε τη λίστα πριν αναίρεση')
+            if restore_previous:
+                if enabled or not scope['enabled'] or scope['previous_group'] is None:raise ValueError('Δεν υπάρχει καταγεγραμμένη προηγούμενη ομάδα.')
+                from app.application.supplier_accounts import account_group
+                account=self.db.execute('SELECT a.* FROM counterparty_accounts a JOIN counterparties c ON c.id=a.counterparty_id WHERE c.company_id=? AND c.vat=?',(company,supplier)).fetchone()
+                if not account or account_group(dict(account))!=scope['previous_group']:raise ValueError('Η ομάδα της καρτέλας άλλαξε μετά τη μεταφορά. Χρειάζεται έλεγχος πριν επαναφορά.')
             version=scope['version']+1
+            previous_group=scope['previous_group']
+            if enabled and not scope['enabled']:
+                from app.application.supplier_accounts import account_group
+                account=self.db.execute('SELECT a.* FROM counterparty_accounts a JOIN counterparties c ON c.id=a.counterparty_id WHERE c.company_id=? AND c.vat=?',(company,supplier)).fetchone()
+                previous_group=account_group(dict(account)) if account else None
+            if not enabled:previous_group=None
             self.db.execute('INSERT INTO supplier_purchase_rules(company_id,vat,enabled,version) VALUES (?,?,?,?) ON CONFLICT(company_id,vat) DO UPDATE SET enabled=excluded.enabled,version=excluded.version',(company,supplier,int(enabled),version))
+            self.db.execute('UPDATE supplier_purchase_rules SET previous_group=? WHERE company_id=? AND vat=?',(previous_group,company,supplier))
             changed=[];queues=0
             for document in scope['eligible']:
                 modified=False
@@ -56,6 +68,9 @@ class SupplierPurchases:
                 if modified:self.erp.repository.audit(company,'purchase_classification_changed',document,dict(vat=supplier,purchase=enabled,rule_version=version))
             self.erp.repository.audit(company,'supplier_purchase_rule_changed',None,dict(vat=supplier,before=scope['enabled'],after=enabled,version=version,changed=changed,exceptions=scope['exceptions']))
         return dict(changed=len(changed),queues=queues,exceptions=scope['exceptions'],version=version,previous=scope['enabled'])
+
+    def restore(self,company,supplier):
+        return self.set(company,supplier,False,restore_previous=True)
 
     @staticmethod
     def apply_import(repository,company,document,values,raw):

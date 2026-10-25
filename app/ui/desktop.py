@@ -143,6 +143,8 @@ class Desktop:
         self.notebook.add(self.reviews_tab,text='Έλεγχοι εισαγωγής')
         self.suppliers_tab=ttk.Frame(self.notebook,padding=14)
         self.notebook.add(self.suppliers_tab,text='Προμηθευτές')
+        self.creditors_tab=ttk.Frame(self.notebook,padding=14)
+        self.notebook.add(self.creditors_tab,text='Πιστωτές')
         self.reconciliation_tab=ttk.Frame(self.notebook,padding=14)
         self.notebook.add(self.reconciliation_tab,text='Συμφωνία')
         filters = ttk.Frame(self.documents_tab)
@@ -213,7 +215,8 @@ class Desktop:
         from app.ui.rpa_panel import RPAPanel
         self.rpa_panel=RPAPanel(self,self.rpa_tab,table)
         from app.ui.suppliers import Suppliers
-        self.suppliers=Suppliers(self,self.suppliers_tab)
+        self.suppliers=Suppliers(self,self.suppliers_tab,group='2')
+        self.creditors=Suppliers(self,self.creditors_tab,group='6')
         from app.ui.ebs_reconciliation import ReconciliationTab
         self.reconciliation=ReconciliationTab(self,self.reconciliation_tab)
         self.notebook.bind('<<NotebookTabChanged>>',self.tab_changed)
@@ -313,6 +316,7 @@ class Desktop:
 
     def tab_changed(self,event=None):
         if self.notebook.select()==str(self.suppliers_tab):self.suppliers.refresh()
+        elif self.notebook.select()==str(self.creditors_tab):self.creditors.refresh()
         elif self.notebook.select()==str(self.reconciliation_tab):self.reconciliation.refresh()
         else:
             for view in self.document_views.values():
@@ -367,13 +371,27 @@ class Desktop:
         menu=menu if supplied else tk.Menu(tree,tearoff=False);self._purchase_menu=menu
         label='Ορισμός ως προμηθευτής αγορών' if enabled else 'Άρση χαρακτηρισμού προμηθευτή αγορών'
         menu.add_command(label=f'{label} — αφορά {count} εκκρεμή παραστατικά',command=lambda:self.set_purchase(row['vat'],enabled))
+        if scope['enabled'] and scope['previous_group'] is not None:
+            menu.add_command(label='Επαναφορά προηγούμενης ομάδας',command=lambda:self.restore_purchase_group(row['vat']))
         if supplied:menu.add_separator();return
         try:menu.tk_popup(event.x_root,event.y_root)
         finally:menu.grab_release()
 
+    def restore_purchase_group(self,supplier):
+        if self.busy or self.rpa_panel.running:return
+        from app.application.supplier_purchases import SupplierPurchases
+        try:SupplierPurchases(self.erp).restore(self.company,supplier)
+        except (ValueError,sqlite3.Error) as exc:self.status.set(str(exc));return
+        self._purchase_undo=None;self.purchase_undo_button.pack_forget();self.refresh()
+        self.status.set('Επαναφέρθηκε η προηγούμενη ομάδα. Οι λογαριασμοί διατηρήθηκαν.')
+
     def set_purchase(self,supplier,enabled,expected_version=None):
         if self.busy or self.rpa_panel.running:return
         from app.application.supplier_purchases import SupplierPurchases
+        if enabled:
+            card=self.erp.db.execute('SELECT name FROM counterparties WHERE company_id=? AND vat=?',(self.company,supplier)).fetchone()
+            if card is None:return
+            if not messagebox.askyesno('Μεταφορά στην Ομάδα 2',f"Θέλετε να μεταφέρετε τον προμηθευτή {card['name']} (ΑΦΜ: {supplier}) στην Ομάδα 2;",parent=self.root):return
         try:report=SupplierPurchases(self.erp).set(self.company,supplier,enabled,expected_version=expected_version)
         except (ValueError,sqlite3.Error) as exc:self.status.set(str(exc));return
         self._purchase_undo=(self.company,supplier,report['previous'],report['version'])
@@ -444,6 +462,7 @@ class Desktop:
         for view in self.document_views.values():view.refresh(render=self.notebook.select()==str(view.parent))
         self.reconciliation.refresh(evidence,render=self.notebook.select()==str(self.reconciliation_tab))
         if self.notebook.select()==str(self.suppliers_tab):self.suppliers.refresh()
+        elif self.notebook.select()==str(self.creditors_tab):self.creditors.refresh()
         self.rpa_panel.refresh()
         if not self.busy:
             self.status.set('Τα παραστατικά και οι αναφορές έχουν φορτωθεί από τη βάση.')

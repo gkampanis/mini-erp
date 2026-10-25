@@ -485,7 +485,7 @@ class DesktopRegressions(unittest.TestCase):
         self.assertEqual(titles[titles.index('Έλεγχοι εισαγωγής')+1],'Προμηθευτές')
         self.app.notebook.select(self.app.suppliers_tab);self.root.update()
         tab=self.app.suppliers;tab.tree.selection_set(tab.tree.get_children());original=set(self.app.tree.get_children())
-        win=tab.bulk();win.account_var.set('64.09')
+        win=tab.bulk();win.group_var.set('6 · Έξοδα');win.account_var.set('64.09')
         with patch('app.ui.suppliers.messagebox.askyesno') as confirm:
             self.button(win,'OK').invoke();confirm.assert_not_called()
         self.assertEqual(set(self.app.tree.get_children()),original)
@@ -908,7 +908,7 @@ class DesktopRegressions(unittest.TestCase):
         self.assertEqual(items[0]['status'],'simulated')
         self.assertIsNone(self.app.erp.preparation(self.app.company,ids[1]))
 
-    def test_purchase_context_menu_counts_all_months_applies_and_undoes_without_popups(self):
+    def test_purchase_context_menu_counts_all_months_confirms_transfer_and_undoes(self):
         from types import SimpleNamespace
         from tests.test_supplier_purchases import synthetic_vat
         from app.ui.desktop import STATES
@@ -919,10 +919,10 @@ class DesktopRegressions(unittest.TestCase):
         self.app.state_filter.set(STATES[3]);self.app.refresh();self.root.update()
         item=self.app.tree.get_children()[0];x,y,w,h=self.app.tree.bbox(item,'name')
         event=SimpleNamespace(x=x+5,y=y+h//2,x_root=x+5,y_root=y+h//2)
-        with patch('tkinter.Menu.tk_popup'),patch('app.ui.desktop.messagebox.askyesno') as popup:
+        with patch('tkinter.Menu.tk_popup'),patch('app.ui.desktop.messagebox.askyesno',return_value=True) as popup:
             self.app.purchase_menu(event,self.app.tree)
             self.assertIn('2 εκκρεμή',self.app._purchase_menu.entrycget(0,'label'))
-            self.app._purchase_menu.invoke(0);self.root.update();popup.assert_not_called()
+            self.app._purchase_menu.invoke(0);self.root.update();popup.assert_called_once()
         self.assertFalse(self.app.tree.get_children());self.assertTrue(self.app.purchase_undo_button.winfo_ismapped())
         purchases=self.app.document_views['purchases'];self.assertEqual(len(purchases.rows),1)
         self.app.month_filter.set('Όλοι οι μήνες');self.app.refresh();self.assertEqual(len(purchases.rows),2)
@@ -1641,6 +1641,27 @@ class DesktopRegressions(unittest.TestCase):
         self.assertEqual(report['profile_points']['AFM_CREDITOR'],[10,20]);self.assertFalse(report['save_may_have_been_sent'])
         destination=self.folder/'support.txt';export(app.directory,destination)
         self.assertIn(cause,destination.read_text());self.assertTrue(app.column_filters.cell_filters)
+
+    def test_supplier_creditor_tabs_follow_mapping_and_cancel_purchase_has_no_writes(self):
+        from app.application.supplier_accounts import SupplierAccounts
+        from app.application.supplier_purchases import SupplierPurchases
+        from tests.test_supplier_purchases import synthetic_vat
+        row=list(ROW);row[0]=synthetic_vat();workbook(self.folder/'inputs/groups.xlsx',[HEADERS,row]);self.import_fixture('groups.xlsx')
+        app=self.app;doc=next(iter(app._documents));cp=app._documents[doc]['counterparty_id']
+        SupplierAccounts(app.erp).save(app.company,[cp],'6','64.03',confirmed=True)
+        app.notebook.select(app.creditors_tab);app.refresh();self.root.update()
+        self.assertTrue(app.creditors.tree.exists(str(cp)))
+        app.suppliers.refresh();self.assertFalse(app.suppliers.tree.exists(str(cp)))
+        before=list(app.erp.db.iterdump())
+        with patch('app.ui.desktop.messagebox.askyesno',return_value=False) as confirm:app.set_purchase(row[0],True)
+        self.assertEqual(list(app.erp.db.iterdump()),before);self.assertIn(row[0],confirm.call_args.args[1])
+        with patch('app.ui.desktop.messagebox.askyesno',return_value=True):app.set_purchase(row[0],True)
+        app.suppliers.refresh();app.creditors.refresh()
+        self.assertTrue(app.suppliers.tree.exists(str(cp)));self.assertFalse(app.creditors.tree.exists(str(cp)))
+        self.assertEqual(SupplierPurchases(app.erp).inspect(app.company,row[0])['previous_group'],'6')
+        app.restore_purchase_group(row[0]);app.creditors.refresh();app.suppliers.refresh()
+        self.assertTrue(app.creditors.tree.exists(str(cp)));self.assertFalse(app.suppliers.tree.exists(str(cp)))
+        self.assertEqual(app.erp.preparation(app.company,doc)['account_code'],'64.03')
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
