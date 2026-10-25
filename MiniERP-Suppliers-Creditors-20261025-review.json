@@ -1,0 +1,49 @@
+{
+  "version": "2026.10.25-P3",
+  "source_commit": "65b3ea2cda499ce8e2a310019c234898af8c3bca",
+  "stable_baseline": "stable-2026.10.25-P2",
+  "gate": "PASSED",
+  "sha256": "d2ae8ad2958d29c608852221c74bb8f4cf92e406dafb65bc1917ec3bfe77fe30",
+  "counts": {
+    "source_tests": {
+      "tests": 259,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "source_gui": {
+      "tests": 77,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "package_tests": {
+      "tests": 259,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    },
+    "package_gui": {
+      "tests": 77,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "expected_failures": 0,
+      "unexpected_successes": 0,
+      "successful": true
+    }
+  },
+  "posting_engine_unchanged": true,
+  "windows_desktop": "NOT_RUN",
+  "ebs_live": "NOT_RUN",
+  "aade_live": "NOT_RUN"
+}
