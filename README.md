@@ -1,3 +1,13 @@
+# P9.2.3 — Λογαριασμός → καθαρή αξία EBS
+
+[Λήψη ZIP](MiniERP-P9.2.3-Net-Cell-Focus-20261029.zip) · [Οδηγίες](MiniERP-P9.2.3-Net-Cell-Focus-20261029-guide.md) · [Έλεγχοι](MiniERP-P9.2.3-Net-Cell-Focus-20261029.verification.json) · [SHA-256](MiniERP-P9.2.3-Net-Cell-Focus-20261029.zip.sha256)
+
+Πριν καθαριστεί ή γραφτεί η καθαρή αξία, επαληθεύεται ο πραγματικά εστιασμένος editor στη θέση του mapping. Αν το πρώτο κλικ δεν αλλάξει κελί, η ενεργοποίηση επαναλαμβάνεται. Αποτυχία σταματά τη συμπλήρωση πριν γραφτεί η αξία ή σταλεί Save. Το mapping και η ροή Save → νέο ΤΕΔ διατηρούνται.
+
+Πέρασαν 355 έλεγχοι κώδικα και 115 GUI σε Windows, τόσο στον πηγαίο κώδικα όσο και στο αποσυμπιεσμένο ZIP, μαζί με smoke και CMD launcher checks. Μόνο συνθετικά δεδομένα. Πραγματικό EBS και native πληκτρολόγηση: NOT_RUN. Η λήψη screenshots δεν ήταν διαθέσιμη στο sandbox· τα όρια τεκμηριώνονται στις οδηγίες.
+
+---
+
 # Νεότερη έκδοση — Επαλήθευση εισαγωγής και σωστής περιόδου EBS
 
 [Λήψη ZIP](MiniERP-EBS-Validated-Import-20261023.zip) · [Οδηγίες](MiniERP-EBS-Validated-Import-20261023-guide.md) · [Αναλυτικός έλεγχος](MiniERP-EBS-Validated-Import-20261023-review.md) · [Έλεγχοι πακέτου](MiniERP-EBS-Validated-Import-20261023.verification.json) · [SHA-256](MiniERP-EBS-Validated-Import-20261023.zip.sha256)
