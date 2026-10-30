@@ -1,3 +1,9 @@
+# Σταθερή βάση: P9.2.6
+
+Η P9.2.6 επιβεβαιώθηκε από τον χειριστή στις 30/10/2026 και διατηρείται στο [stable-2026.10.30-P9.2.6](https://github.com/gkampanis/mini-erp/tree/stable-2026.10.30-P9.2.6). [Στοιχεία σταθερής έκδοσης](STABLE.md).
+
+---
+
 # P9.2.6 — Κοινοί λογαριασμοί και αναμονή νέου ΤΕΔ
 
 [Λήψη ZIP](MiniERP-P9.2.6-Account-Consistency-20261029.zip) · [Οδηγίες](MiniERP-P9.2.6-Account-Consistency-20261029-guide.md) · [Αναφορά ελέγχων](MiniERP-P9.2.6-Account-Consistency-20261029.verification.json) · [SHA-256](MiniERP-P9.2.6-Account-Consistency-20261029.zip.sha256)
