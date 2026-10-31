@@ -1,0 +1,109 @@
+{
+  "version": "2026.10.31-P9.4.0",
+  "status": "INDEPENDENT_AUDITS_COMPLETED_WITH_PERIPHERAL_SOURCE_WARNINGS",
+  "tools": {
+    "xml_schema_validator": "lxml 6.1.1",
+    "financial_oracle": "Python Decimal HALF_UP plus integer-cent conservation",
+    "test_inputs": "Synthetic seeded generation and read-only existing local archives"
+  },
+  "official_schema": {
+    "url": "https://www.aade.gr/sites/default/files/2026-09/v2.0.2XSDs_0.zip",
+    "sha256": "feaf90afc57150c841ad7ef73edbe181b3eac22dfb189b3cb5d54d6fdb85154e"
+  },
+  "xsd": {
+    "counts": {
+      "pages_checked": 6,
+      "pages_schema_nonconforming": 2,
+      "unique_invoice_snapshots": 4162,
+      "detail_rows_checked": 15611,
+      "detail_rows_schema_valid": 15611,
+      "outside_invoice_envelope": 1,
+      "pages_schema_valid": 4
+    },
+    "schema_errors": {
+      "page:SCHEMAV_ELEMENT_CONTENT": 4
+    },
+    "schema_source": "https://www.aade.gr/sites/default/files/2026-09/v2.0.2XSDs_0.zip",
+    "scope": "Read-only original XML, no values or identifiers exported; XSD conformance is distinct from accounting correctness"
+  },
+  "source_parser": {
+    "accepted_pages": 6,
+    "records": 4162,
+    "outside_invoice_envelope": 1
+  },
+  "current_extractor": {
+    "counts": {
+      "verified": 4156,
+      "independently_checked_ordinary_lines": 15581,
+      "outside_invoice_envelope": 1,
+      "unsupported": 6
+    },
+    "scope": "Current extractor vs independent Decimal/source-field oracle; aggregate only, read-only archives, unsupported recType not reinterpreted"
+  },
+  "generative": {
+    "seed": 20261031,
+    "valid_scenarios": 1000,
+    "corrupt_mutations_rejected": 3000,
+    "oracle": "Independent Decimal HALF_UP and per-account/category/exemption cent totals; complete source-line coverage after compaction",
+    "status": "PASSED",
+    "scope": "Synthetic deterministic generative audit; not live AADE/EBS"
+  },
+  "ebs_export": {
+    "counts": {
+      "files": 1,
+      "data_rows": 148,
+      "valid_rows": 140,
+      "rows_with_normalization_issues": 8
+    },
+    "mapped_fields": [
+      "date",
+      "gross",
+      "invoice",
+      "net",
+      "tax",
+      "vat"
+    ],
+    "repeated_supplier_reference_date_groups": 0,
+    "maximum_rows_per_identity": 1,
+    "scope": "Read-only existing archived EBS export; no identifiers, amounts or filename exported; not evidence about future two-row postings",
+    "identity_issue_fields": {
+      "invoice": 6,
+      "vat": 3
+    }
+  },
+  "timing": {
+    "reference_verified_git_blob": "2f145453244037adaa08ccf9e8c26c750ea64342",
+    "save_ast_identical_to_working_20261025": true,
+    "current_session_byte_identical_to_P930": true,
+    "save_wait_seconds": 1.3,
+    "new_form_timeout_seconds": 12,
+    "live_timing": "NOT_RUN",
+    "success_prompts_added": false
+  },
+  "invariants": {
+    "session_bytes_unchanged": true,
+    "fill_sequence_ast_unchanged": true,
+    "_advance_saved_ast_unchanged": true
+  },
+  "boundaries": [
+    "No live AADE fetch or production writes",
+    "No EBS input/save acceptance performed",
+    "XSD conformance is not accounting correctness",
+    "Two full envelopes have four peripheral element-content deviations; all15611detail rows conform",
+    "Existing EBS export has8identity-issue rows;6missingreference,3missing/invalidVAT,1overlap; no source values guessed",
+    "Save1.3s wait is unchanged from successful baseline and does not prove database persistence",
+    "Standard-rate VAT observations are diagnostics, not source errors. Source rows preserved when compaction changes VAT; EBS autoVAT configuration and amounts remain unverified, no VAT-field typing added."
+  ],
+  "verification": "Final source+ZIP Windows status and counts are in companion .verification.json",
+  "rounding_diagnostic": {
+    "single_vat_source_line_rounding_differs_from_aggregated_vat": 238,
+    "invoices_with_source_vat_different_from_standard_half_up": 640,
+    "lines_with_source_vat_different_from_standard_half_up": 659
+  },
+  "expense_candidate_rounding_diagnostic": {
+    "counts": {
+      "expense_account_candidate_source_invoices": 26
+    },
+    "scope": "Read-only existing incoming invoices with group6 approval or supplier expense account; not complete RPA/reconciliation eligibility and not actual EBS VAT verification"
+  }
+}
