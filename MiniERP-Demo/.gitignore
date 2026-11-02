@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.local/
+Data/
+.venv/
+venv/
+.env
+.env.*
+*.sqlite
+*.sqlite3
+*.db
+ui-preferences.json

@@ -1,0 +1,2246 @@
+"""Focused desktop regression checks; run explicitly with a graphical display.
+
+DISPLAY=:99 /usr/bin/python3 -m tests.gui_regressions
+Only synthetic fixtures are used. Dialog responses are automated inside tests.
+"""
+from pathlib import Path
+import gc
+import tempfile
+import threading
+import tkinter as tk
+from tkinter import ttk
+import unittest
+from unittest.mock import patch
+
+from app.application.service import ERP
+from app.ui.desktop import Desktop
+from tests.fixtures import demos, workbook, HEADERS, ROW
+from tests.gui_smoke import wait, widgets
+
+
+class DesktopRegressions(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # One Tcl interpreter avoids collecting old Tk interpreters inside later workers.
+        cls.display_root = tk.Tk()
+        cls.display_root.withdraw()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.display_root.destroy()
+        gc.collect()
+
+    def setUp(self):
+        # Test cases intentionally create/destroy desktop forms in one process. Collect
+        # previous UI closure cycles on the Tk owner thread before any new worker runs.
+        gc.collect()
+        self.threads_before = set(threading.enumerate())
+        self.temp = tempfile.TemporaryDirectory()
+        self.folder = Path(self.temp.name)
+        demos(self.folder/'inputs')
+        service = ERP(self.folder/'data')
+        service.company('000000000', 'ΣΥΝΘΕΤΙΚΗ ΕΤΑΙΡΕΙΑ — REGRESSION')
+        service.close()
+        self.root = tk.Toplevel(self.display_root)
+        self.app = Desktop(self.root, self.folder/'data')
+        self.initial_state=self.app.state_filter.get()
+        # Existing scenarios exercise the complete document list. The new
+        # default pending workspace is covered separately below.
+        self.app.state_filter.set('Όλα τα παραστατικά');self.app.refresh()
+        self.errors = []
+        self.releases = []
+        self.display_root.report_callback_exception = lambda *args: self.errors.append(str(args))
+        self.root.update()
+
+    def tearDown(self):
+        for release in self.releases:
+            release.set()
+        try:
+            with patch('app.ui.desktop.messagebox.showerror'):
+                wait(self.root, lambda: not self.app.busy)
+            self.assertEqual(self.errors, [], 'Unexpected Tk callback errors')
+        finally:
+            # A worker can enqueue its result just before its thread returns. Join
+            # workers started by this case before releasing any Tcl-owned objects.
+            for worker in set(threading.enumerate()) - self.threads_before:
+                if worker is not threading.current_thread():
+                    worker.join(timeout=5)
+                    self.assertFalse(worker.is_alive(), 'GUI worker survived test teardown')
+            owners=(self.display_root,self.root,*widgets(self.root)) if self.root.winfo_exists() else (self.display_root,)
+            for timer in self.root.tk.call('after', 'info'):
+                script=self.root.tk.call('after','info',timer)[0]
+                # Native ttk scrolling timers can contain Tcl argument tuples.
+                # Delete Python callbacks through their registering widget only.
+                owner=next((w for w in owners if script in (w._tclCommands or [])),None)
+                if owner is not None:owner.after_cancel(timer)
+                else:self.root.tk.call('after','cancel',timer)
+            self.app.close()
+            self.temp.cleanup()
+            # The interpreter's exception callback and app callbacks otherwise retain
+            # whole cases (StringVars included) until automatic GC in a later worker.
+            self.display_root.report_callback_exception = self.display_root.__class__.report_callback_exception.__get__(self.display_root)
+            self.app = None
+            self.root = None
+            self.releases = []
+            gc.collect()
+
+    def button(self, parent, label):
+        return next(w for w in widgets(parent)
+                    if isinstance(w, ttk.Button) and str(w.cget('text')) == label)
+
+    def table(self, parent, columns):
+        return next(w for w in widgets(parent)
+                    if isinstance(w, ttk.Treeview) and tuple(w['columns']) == columns)
+
+    def count(self, table):
+        return self.app.erp.db.execute('SELECT count(*) FROM '+table).fetchone()[0]
+
+    def open_preview(self, filename='separate.xlsx'):
+        with patch('app.ui.desktop.filedialog.askopenfilename', return_value=str(self.folder/'inputs'/filename)):
+            self.app.choose_excel()
+        wait(self.root, lambda: not self.app.busy)
+        self.assertTrue(self.app._has_preview())
+        return self.app.preview_window
+
+    def commit(self, preview):
+        with patch('app.ui.desktop.messagebox.askyesno', return_value=True):
+            self.button(preview, 'Επιβεβαιώνω εισαγωγή').invoke()
+        wait(self.root, lambda: not self.app.busy)
+
+    def import_fixture(self, filename):
+        self.commit(self.open_preview(filename))
+        from tests.fixtures import reconcile_empty
+        reconcile_empty(self.app.erp,self.app.company)
+        self.close_children()
+
+    def close_children(self):
+        for child in list(self.root.winfo_children()):
+            if isinstance(child, tk.Toplevel):
+                child.destroy()
+        self.root.update()
+
+    def test_cancel_and_single_active_preview_do_not_write(self):
+        preview = self.open_preview()
+        self.assertTrue(self.app.import_button.instate(['disabled']))
+        with patch('app.ui.desktop.filedialog.askopenfilename') as choose:
+            self.app.choose_excel()
+            choose.assert_not_called()
+        self.assertIs(self.app.preview_window, preview)
+        self.assertEqual(sum(isinstance(w, tk.Toplevel) for w in self.root.winfo_children()), 1)
+        self.assertTrue(preview.winfo_exists())
+        self.assertEqual((self.count('documents'), self.count('import_jobs')), (0, 0))
+
+        self.button(preview, 'Ακύρωση').invoke()
+        self.root.update()
+        self.assertFalse(self.app._has_preview())
+        self.assertTrue(self.app.import_button.instate(['!disabled']))
+        self.assertEqual((self.count('documents'), self.count('import_jobs')), (0, 0))
+
+    def test_main_ods_picker_preview_commit_and_original_name_recovery(self):
+        from tests.test_ods import ods
+        from xml.sax.saxutils import escape
+        from app.application.names import NameRecovery
+        path=self.folder/'inputs/synthetic.ods'
+        rows=''.join('<table:table-row>'+''.join('<table:table-cell office:value-type="string"><text:p>'+escape(str(v))+'</text:p></table:table-cell>' for v in row)+'</table:table-row>' for row in (HEADERS,ROW))
+        ods(path,rows)
+        with patch('app.ui.desktop.filedialog.askopenfilename',return_value=str(path)) as choose:
+            self.app.choose_excel()
+        self.assertIn('*.ods',str(choose.call_args.kwargs['filetypes']))
+        wait(self.root,lambda:not self.app.busy)
+        self.commit(self.app.preview_window)
+        self.assertEqual(self.count('documents'),1)
+        self.assertEqual(len(list((self.folder/'data/sources').glob('*.ods'))),1)
+        with self.app.erp.db:self.app.erp.db.execute('UPDATE counterparties SET name=vat')
+        self.assertEqual(NameRecovery(self.app.erp).run(self.app.company)['updated'],1)
+        archived=next((self.folder/'data/sources').glob('*.ods'));archived.rename(archived.with_suffix('.xlsx'))
+        with self.app.erp.db:self.app.erp.db.execute('UPDATE counterparties SET name=vat')
+        self.assertEqual(NameRecovery(self.app.erp).run(self.app.company)['updated'],1)
+
+    def test_changed_mapping_requires_recheck_before_commit(self):
+        preview = self.open_preview()
+        name_column = next(w for w in widgets(preview)
+                           if isinstance(w, ttk.Combobox) and w.get() == '2: Επωνυμία')
+        name_column.set('—')
+        with patch('app.ui.desktop.messagebox.showwarning') as warning, \
+             patch('app.ui.desktop.messagebox.askyesno') as confirm:
+            self.button(preview, 'Επιβεβαιώνω εισαγωγή').invoke()
+            warning.assert_called_once()
+            confirm.assert_not_called()
+        self.assertTrue(preview.winfo_exists())
+        self.assertEqual(self.count('import_jobs'), 0)
+        self.button(preview, 'Επανέλεγχος αντιστοίχισης').invoke()
+        wait(self.root, lambda: not self.app.busy)
+        checked = self.app.preview_window
+        self.assertIs(checked, preview)
+        self.assertTrue(checked.winfo_exists())
+        self.commit(checked)
+        self.assertEqual((self.count('documents'), self.count('import_jobs')), (2, 1))
+        self.assertEqual(self.app.erp.search(self.app.company, '000000001')[0]['name'], 'Χωρίς επωνυμία')
+
+    def test_busy_prevents_discarding_preview_and_keeps_progress(self):
+        preview = self.open_preview()
+        release = threading.Event()
+        self.releases.append(release)
+        self.assertTrue(self.app.run_worker(lambda: release.wait(5), lambda _: None))
+        self.assertFalse(self.app.run_worker(lambda: None, lambda _: None))
+        message = self.app.status.get()
+        self.app.refresh()
+        self.assertEqual(self.app.status.get(), message)
+        with patch('app.ui.desktop.messagebox.askyesno') as confirm:
+            self.button(preview, 'Επιβεβαιώνω εισαγωγή').invoke()
+            self.button(preview, 'Επανέλεγχος αντιστοίχισης').invoke()
+            confirm.assert_not_called()
+        self.assertIs(self.app.preview_window, preview)
+        self.assertTrue(preview.winfo_exists())
+        self.assertEqual(self.count('import_jobs'), 0)
+        self.assertTrue(self.app.import_button.instate(['disabled']))
+        release.set()
+        wait(self.root, lambda: not self.app.busy)
+        self.assertTrue(self.app.import_button.instate(['disabled']))  # preview still owns import
+        self.button(preview, 'Ακύρωση').invoke()
+        self.assertTrue(self.app.import_button.instate(['!disabled']))
+
+    def test_worker_failure_reports_error_and_restores_controls(self):
+        with patch('app.infrastructure.importers.excel.read_workbook', side_effect=ValueError('Συνθετικό σφάλμα ανάγνωσης')), \
+             patch('app.ui.desktop.messagebox.showerror') as error, \
+             patch('app.ui.desktop.filedialog.askopenfilename', return_value=str(self.folder/'inputs/separate.xlsx')):
+            self.app.choose_excel()
+            wait(self.root, lambda: not self.app.busy)
+            error.assert_called_once()
+            self.assertIn('Συνθετικό σφάλμα', error.call_args.args[1])
+        self.assertFalse(self.app._has_preview())
+        self.assertTrue(self.app.import_button.instate(['!disabled']))
+        self.assertEqual((self.count('documents'), self.count('import_jobs')), (0, 0))
+
+    def test_rejections_visible_in_preview_and_persisted_review(self):
+        preview = self.open_preview()
+        rejected = self.table(preview, ('row', 'reason'))
+        children = rejected.get_children()
+        self.assertEqual(len(children), 1)
+        values = rejected.item(children[0], 'values')
+        self.assertEqual(str(values[0]), '4')
+        self.assertIn('ΑΦΜ', values[1])
+        self.commit(preview)
+        self.close_children()
+        self.assertEqual(len(self.app.review_tree.get_children()), 1)
+        job_id = self.app.review_tree.get_children()[0]
+        self.app.review_tree.selection_set(job_id)
+        self.app.open_review()
+        report = next(w for w in self.root.winfo_children() if isinstance(w, tk.Toplevel))
+        issues = self.table(report, ('type', 'row', 'reason'))
+        self.assertEqual(len(issues.get_children()), 1)
+        issue = issues.item(issues.get_children()[0], 'values')
+        self.assertEqual((issue[0], str(issue[1])), ('Εξαίρεση', '4'))
+        self.assertIn('ΑΦΜ', issue[2])
+        self.assertEqual(self.app.erp.import_reviews(self.app.company)[0]['rejected_count'], 1)
+        self.close_children()
+        bad = ['BAD', *ROW[1:]]
+        workbook(self.folder/'inputs/invalid.xlsx', [HEADERS, bad])
+        invalid = self.open_preview('invalid.xlsx')
+        self.assertTrue(self.button(invalid, 'Επιβεβαιώνω εισαγωγή').instate(['disabled']))
+        self.assertEqual(len(self.table(invalid, ('row', 'reason')).get_children()), 1)
+        self.button(invalid, 'Ακύρωση').invoke()
+        self.assertEqual(self.count('import_jobs'), 1)
+
+    def test_sort_filter_detail_and_explicit_group_preparation(self):
+        self.import_fixture('separate.xlsx')
+        self.import_fixture('combined.xlsx')
+        self.app.sort_documents('gross_minor')
+        sorted_ids = [int(i) for i in self.app.tree.get_children()]
+        self.assertEqual([self.app._documents[i]['gross_minor'] for i in sorted_ids], [12, 1240, 12400])
+        self.app.query.set('000000003')
+        self.app.refresh()
+        document_id = int(self.app.tree.get_children()[0])
+        self.app.tree.selection_set(str(document_id))
+        with patch.object(self.app.erp, 'detail', wraps=self.app.erp.detail) as detail:
+            self.app.open_detail()
+            self.assertTrue(detail.call_args_list)
+            self.assertTrue(all(call.args == (self.app.company, document_id) for call in detail.call_args_list))
+        win = self.app._details[document_id]
+        self.assertIn('Γ/3', win.title())
+        self.app.open_detail()
+        self.assertIs(self.app._details[document_id], win)  # no duplicate detail form
+        group = next(w for w in widgets(win) if isinstance(w, ttk.Combobox))
+        entries = [w for w in widgets(win) if isinstance(w, ttk.Entry) and not isinstance(w, ttk.Combobox)]
+        account, note = entries
+        group.set('2 · Αγορές')
+        account.insert(0, '20.00.00')
+        note.insert(0, 'Συνθετικός έλεγχος αγοράς')
+        approve = self.button(win, 'Έγκριση τοπικής προετοιμασίας')
+        with patch('app.ui.desktop.messagebox.showwarning') as warning, \
+             patch('app.ui.desktop.messagebox.askyesno') as confirm:
+            approve.invoke()
+            warning.assert_called_once()
+            confirm.assert_not_called()
+        self.assertIsNone(self.app.erp.preparation(self.app.company, document_id))
+        checkbox = next(w for w in widgets(win) if isinstance(w, ttk.Checkbutton) and str(w.cget('text')).startswith('Έλεγξα'))
+        checkbox.invoke()
+        with patch('app.ui.desktop.messagebox.askyesno', return_value=False):
+            approve.invoke()
+        self.assertIsNone(self.app.erp.preparation(self.app.company, document_id))
+        with patch('app.ui.desktop.messagebox.askyesno', return_value=True):
+            approve.invoke()
+        saved = self.app.erp.preparation(self.app.company, document_id)
+        self.assertEqual((saved['nature_group'], saved['account_code']), ('2', '20.00.00'))
+        self.assertEqual(saved['note'], 'Συνθετικός έλεγχος αγοράς')
+        self.app.query.set('')
+        self.app.state_filter.set('Με τοπική έγκριση')
+        self.app.group_filter.set('Ομάδα 2 · Αγορές')
+        self.app.refresh()
+        self.assertNotIn(str(document_id),self.app.tree.get_children())
+        self.assertIn(document_id,self.app.document_views['purchases'].rows)
+        self.app.open_detail(document_id)
+        win = self.app._details[document_id]
+        group = next(w for w in widgets(win) if isinstance(w, ttk.Combobox))
+        account = next(w for w in widgets(win) if isinstance(w, ttk.Entry) and not isinstance(w, ttk.Combobox))
+        self.assertEqual((group.get(), account.get()), ('2 · Αγορές', '20.00.00'))
+        # Reclassify the same synthetic transaction only through another explicit approval.
+        group.set('6 · Έξοδα')
+        account.delete(0, 'end')
+        account.insert(0, '64.00.00')
+        next(w for w in widgets(win) if isinstance(w, ttk.Checkbutton) and str(w.cget('text')).startswith('Έλεγξα')).invoke()
+        with patch('app.ui.desktop.messagebox.askyesno', return_value=True):
+            self.button(win, 'Έγκριση τοπικής προετοιμασίας').invoke()
+        self.app.group_filter.set('Ομάδα 2 · Αγορές')
+        self.app.refresh()
+        self.assertEqual(self.app.tree.get_children(), ())
+        self.app.group_filter.set('Ομάδα 6 · Έξοδα')
+        self.app.refresh()
+        self.assertEqual(self.app.tree.get_children(), (str(document_id),))
+        self.app.state_filter.set('Χωρίς προετοιμασία')
+        self.app.refresh()
+        self.assertEqual(self.app.tree.get_children(), ())
+        self.app.group_filter.set('Όλες οι ομάδες')
+        self.app.refresh()
+        self.assertEqual(len(self.app.tree.get_children()), 2)
+        _, events = self.app.erp.detail(self.app.company, document_id)
+        self.assertEqual(sum(e['action'] == 'document_prepared' for e in events), 2)
+        self.assertTrue(all(row['status'] == 'needs_review' for row in self.app.erp.search(self.app.company)))
+        self.assertEqual(self.count('documents'), 3)
+
+    def test_closing_with_preview_has_no_callbacks_or_writes(self):
+        self.open_preview()
+        self.assertEqual(self.count('import_jobs'),0)
+        self.app.close()
+        self.display_root.update()
+        self.assertEqual(self.errors,[])
+        check = ERP(self.folder/'data')
+        try:
+            self.assertEqual(check.db.execute('SELECT count(*) FROM import_jobs').fetchone()[0],0)
+        finally:
+            check.close()
+
+    def test_small_window_keeps_primary_actions_visible(self):
+        self.root.geometry('960x650')
+        self.root.update()
+        action = self.button(self.root,'Στοιχεία & προετοιμασία')
+        self.assertGreater(action.winfo_height(),1)
+        self.assertLessEqual(action.winfo_rooty()+action.winfo_height(),self.root.winfo_rooty()+self.root.winfo_height())
+        for key,button in self.app.rpa_panel.buttons.items():
+            if key in ('pause','resume','stop','accounts','simulation'):
+                self.assertFalse(button.winfo_ismapped());continue
+            self.assertTrue(button.winfo_ismapped())
+            self.assertGreaterEqual(button.winfo_width(),button.winfo_reqwidth())
+        preview = self.open_preview()
+        preview.geometry('900x620')
+        self.root.update()
+        confirm = self.button(preview,'Επιβεβαιώνω εισαγωγή')
+        self.assertGreater(confirm.winfo_height(),1)
+        self.assertLessEqual(confirm.winfo_rooty()+confirm.winfo_height(),preview.winfo_rooty()+preview.winfo_height())
+
+    def test_preparation_database_error_keeps_form_and_original_record(self):
+        import sqlite3
+        self.import_fixture('combined.xlsx')
+        document_id = self.app.tree.get_children()[0]
+        self.app.tree.selection_set(document_id)
+        self.app.open_detail()
+        win = self.app._details[int(document_id)]
+        group = next(w for w in widgets(win) if isinstance(w,ttk.Combobox))
+        group.set('6 · Έξοδα')
+        account = next(w for w in widgets(win) if isinstance(w,ttk.Entry) and not isinstance(w,ttk.Combobox))
+        account.insert(0,'64.03')
+        next(w for w in widgets(win) if isinstance(w,ttk.Checkbutton) and str(w.cget('text')).startswith('Έλεγξα')).invoke()
+        with patch('app.application.workspace.Workspace.approve_many',side_effect=sqlite3.OperationalError('database is locked')), \
+             patch('app.ui.desktop.messagebox.askyesno',return_value=True), \
+             patch('app.ui.desktop.messagebox.showerror') as error:
+            self.button(win,'Έγκριση τοπικής προετοιμασίας').invoke()
+            error.assert_called_once()
+        self.assertTrue(win.winfo_exists())
+        self.assertIsNone(self.app.erp.preparation(self.app.company,int(document_id)))
+        self.assertEqual(self.errors,[])
+
+    def test_double_click_details_show_inline_pdf_and_keep_preparation(self):
+        from tests.test_workspace import synthetic_pdf
+        self.import_fixture('combined.xlsx')
+        document=int(self.app.tree.get_children()[0])
+        self.app.erp.attach_pdf(self.app.company,document,'synthetic.pdf',data=synthetic_pdf(),confirmed=True)
+        self.app.tree.selection_set(str(document));self.app.open_detail()
+        win=self.app._details[document];pane=win.pdf_pane
+        wait(self.root,lambda:pane.image is not None and not self.app.busy)
+        self.assertTrue(pane.canvas.find_all())
+        self.assertIn('1 από 1',pane.state.get())
+        self.assertEqual(len(pane.files.get_children()),1)
+        self.assertIsNone(self.app.erp.preparation(self.app.company,document))
+        self.assertTrue(self.button(win,'Έγκριση τοπικής προετοιμασίας').winfo_exists())
+
+    def test_mass_download_links_and_renders_without_individual_controls(self):
+        from tests.test_workspace import synthetic_pdf,MemoryVault
+        self.import_fixture('combined.xlsx')
+        self.app.erp.credential_store=MemoryVault()
+        self.app.erp.save_mydata_credentials(self.app.company,'test','synthetic','synthetic',confirmed=True)
+        document=int(self.app.tree.get_children()[0])
+        self.app.tree.selection_set(str(document));self.app.open_detail()
+        pane=self.app._details[document].pdf_pane
+        def retrieve(sync,company,*args,**kwargs):
+            sync.erp.attach_pdf(company,document,'synthetic.pdf',data=synthetic_pdf(),confirmed=True)
+            return {'import':{'inserted':0,'duplicates':0,'rejected':[]},'pdf':{'saved':1,'pending':0}}
+        win=self.app.open_acquisition()
+        with patch('app.application.sync.Sync.run',retrieve),patch('tkinter.simpledialog.askstring') as manual:
+            win.sync_expenses();wait(self.root,lambda:pane.image is not None and not self.app.busy)
+            manual.assert_not_called()
+        captions=[w.cget('text') for w in widgets(pane.parent) if isinstance(w,ttk.Button)]
+        self.assertIn('Άνοιγμα Παραστατικού',captions)
+        self.assertNotIn('Προσθήκη PDF',captions);self.assertNotIn('ΑΑΔΕ → Λήψη PDF',captions)
+        self.assertFalse(any(isinstance(w,ttk.Combobox) for w in widgets(pane.parent)))
+        self.assertEqual(len(pane.files.get_children()),1);self.assertTrue(pane.canvas.find_all())
+
+    def test_settings_group_components_and_export_private_crashlog(self):
+        from app.infrastructure.crashlog import record
+        try:raise RuntimeError('private supplier api-key=DO-NOT-EXPORT')
+        except RuntimeError as error:record(self.app.directory,error,'worker')
+        win=self.app.open_settings();self.root.update()
+        tabs=win.settings_tabs
+        self.assertEqual([tabs.tab(t,'text') for t in tabs.tabs()],['Συνδέσεις','PDF και λήψεις','Υποστήριξη','Εμφάνιση'])
+        tabs.select(1);self.root.update()
+        self.assertTrue(self.button(win,'Εγκατάσταση Camoufox (προαιρετικό)').winfo_viewable())
+        target=self.folder/'support.txt';tabs.select(2);self.root.update()
+        with patch('app.ui.settings.filedialog.asksaveasfilename',return_value=str(target)),patch('app.ui.settings.messagebox.showinfo'):
+            self.button(win,'Αποθήκευση crashlog για αποστολή').invoke()
+        content=target.read_text();self.assertIn('RuntimeError',content);self.assertNotIn('DO-NOT-EXPORT',content)
+        self.assertEqual(self.app.erp.db.execute('SELECT count(*) FROM documents').fetchone()[0],0)
+
+    def test_camoufox_requires_explicit_selection_before_any_recovery(self):
+        win=self.app.open_aade()
+        with patch('app.ui.aade_dialog.messagebox.showinfo') as info,patch('app.application.camoufox_pdf.run') as recover:
+            win.pdf_recovery_menu.invoke(1)
+            info.assert_called_once();recover.assert_not_called()
+
+    def test_text_fields_support_shortcuts_context_menu_and_greek_layout(self):
+        from types import SimpleNamespace
+        from app.ui.text_editing import shortcut
+        win=tk.Toplevel(self.root)
+        entries=[ttk.Entry(win),tk.Entry(win),ttk.Entry(win,show='●'),tk.Text(win,height=2),ttk.Combobox(win),tk.Spinbox(win),ttk.Spinbox(win)]
+        for field in entries:
+            if not isinstance(field,tk.Text):field.delete(0,'end')
+            field.pack()
+        win.update();sample='Συνθετικό κείμενο'
+        def control(widget,key):
+            # Synthetic keypresses require OS foreground permission on Windows.
+            # Verify registration and exercise the shared handler on real widgets.
+            self.assertIn('shortcut',widget.bind_class(widget.winfo_class(),'<Control-'+key+'>'))
+            self.assertIn('shortcut',widget.bind_class(widget.winfo_class(),'<Control-KeyPress>'))
+            shortcut(SimpleNamespace(widget=widget,keysym=key))
+        for field in entries:
+            field.focus_force();wait(self.root,lambda:field.focus_get()==field)
+            field.clipboard_clear();field.clipboard_append(sample)
+            control(field,'v');self.root.update()
+            self.assertEqual(field.get('1.0','end-1c') if isinstance(field,tk.Text) else field.get(),sample,
+                             (field.winfo_class(),field.clipboard_get()))
+            control(field,'a');control(field,'x');self.root.update()
+            self.assertEqual(field.get('1.0','end-1c') if isinstance(field,tk.Text) else field.get(),'')
+            # Native password fields may copy masking glyphs; paste must accept external text.
+            field.clipboard_clear();field.clipboard_append(sample)
+            shortcut(SimpleNamespace(widget=field,keysym='Greek_omega'));self.root.update()
+            self.assertEqual(field.get('1.0','end-1c') if isinstance(field,tk.Text) else field.get(),sample)
+        field=entries[0];field.delete(0,'end');field.focus_force();self.root.update()
+        # Windows' native popup enters a modal loop waiting for a human click.
+        # Exercise the real binding/menu commands without entering that OS loop.
+        with patch.object(tk.Menu,'tk_popup') as popup:
+            field.event_generate('<Button-3>',x=4,y=4);self.root.update()
+            self.assertEqual(popup.call_count,1)
+        menu=next(w for w in self.display_root.winfo_children() if isinstance(w,tk.Menu))
+        self.assertEqual(menu.entrycget(1,'label'),'Επικόλληση')
+        menu.invoke(1);menu.unpost();self.root.update();self.assertEqual(field.get(),sample)
+        readonly=ttk.Entry(win);readonly.insert(0,'Σταθερό');readonly.configure(state='readonly');readonly.pack()
+        readonly.selection_range(0,'end');shortcut(SimpleNamespace(widget=readonly,keysym='c'))
+        self.assertEqual(readonly.clipboard_get(),'Σταθερό')
+        shortcut(SimpleNamespace(widget=readonly,keysym='v'));self.assertEqual(readonly.get(),'Σταθερό')
+        source=tk.Text(win,height=2);source.insert('1.0','Αμετάβλητη προέλευση');source.configure(state='disabled');source.pack()
+        shortcut(SimpleNamespace(widget=source,keysym='a'));shortcut(SimpleNamespace(widget=source,keysym='c'))
+        self.assertEqual(source.clipboard_get(),'Αμετάβλητη προέλευση')
+        shortcut(SimpleNamespace(widget=source,keysym='v'));self.assertEqual(source.get('1.0','end-1c'),'Αμετάβλητη προέλευση')
+
+    def test_document_and_card_only_offer_automatic_lookup_and_shared_settings(self):
+        self.import_fixture('combined.xlsx')
+        document=int(self.app.tree.get_children()[0]);self.app.tree.selection_set(str(document));self.app.open_detail()
+        detail=self.app._details[document]
+        captions=[w.cget('text') for w in widgets(detail) if isinstance(w,ttk.Button)]
+        self.assertNotIn('Άντληση από σύνδεσμο',captions);self.assertNotIn('ΑΑΔΕ → Λήψη PDF',captions);self.assertIn('Άνοιγμα Παραστατικού',captions)
+        from app.ui.counterparties import open_detail
+        row,_=self.app.erp.detail(self.app.company,document);card=open_detail(self.app,row['counterparty_id'])
+        captions=[w.cget('text') for w in widgets(card) if isinstance(w,ttk.Button)]
+        self.assertNotIn('Κωδικοί Μητρώου',captions);self.assertIn('Άντληση στοιχείων από ΑΦΜ',captions)
+        settings=self.app.open_settings()
+        self.assertTrue(self.button(settings,'Μητρώο ΑΑΔΕ · ειδικοί κωδικοί').winfo_exists())
+
+    def test_month_acquisition_uses_complete_calendar_month_without_date_entries(self):
+        from tests.test_workspace import MemoryVault
+        self.app.erp.credential_store=MemoryVault()
+        self.assertTrue(self.app.acquire_button.winfo_exists())
+        self.app.month_filter.set('Μάιος 2025');self.app.month_changed()
+        win=self.app.open_acquisition();win.year_var.set('2024');win.month_var.set('Φεβρουάριος')
+        self.assertEqual(win.selected_period(),('2024-02-01','2024-02-29'))
+        labels=[w.cget('text') for w in widgets(win) if isinstance(w,ttk.Label)]
+        self.assertNotIn('Από',labels);self.assertNotIn('Έως',labels)
+        result={'import':{'inserted':0,'duplicates':0,'rejected':[]},'pdf':{'saved':0,'pending':0}}
+        with patch('app.application.sync.Sync.run',return_value=result) as sync:
+            win.sync_expenses();wait(self.root,lambda:not self.app.busy)
+        self.assertEqual(sync.call_args.args[2:4],('2024-02-01','2024-02-29'))
+        self.assertEqual(sync.call_args.kwargs['methods'],['RequestDocs','RequestTransmittedDocs'])
+        self.assertEqual(self.app.month_filter.get(),'Φεβρουάριος 2024')
+
+    def test_month_acquisition_opens_on_selected_main_month_with_both_directions_default(self):
+        from tests.test_workspace import MemoryVault
+        self.app.erp.credential_store=MemoryVault()
+        self.app.month_filter.set('Μάιος 2025');self.app.month_changed()
+        win=self.app.open_acquisition()
+        self.assertEqual(win.selected_period(),('2025-05-01','2025-05-31'))
+        self.assertEqual(win.kind_var.get(),'Ληφθέντα και εκδοθέντα')
+        win.destroy();general=self.app.open_aade()
+        self.assertEqual(general.kind_var.get(),'Ληφθέντα και εκδοθέντα')
+
+    def test_supplier_tab_bulk_update_reaches_same_document_ids(self):
+        self.import_fixture('separate.xlsx')
+        titles=[self.app.notebook.tab(t,'text') for t in self.app.notebook.tabs()]
+        self.assertEqual(titles[titles.index('Έλεγχοι εισαγωγής')+1],'Προμηθευτές')
+        self.app.notebook.select(self.app.suppliers_tab);self.root.update()
+        tab=self.app.suppliers;tab.tree.selection_set(tab.tree.get_children());original=set(self.app.tree.get_children())
+        win=tab.bulk();win.group_var.set('6 · Έξοδα');win.account_var.set('64.09')
+        with patch('app.ui.suppliers.messagebox.askyesno') as confirm:
+            self.button(win,'OK').invoke();confirm.assert_not_called()
+        self.assertEqual(set(self.app.tree.get_children()),original)
+        self.assertTrue(all(self.app._documents[int(d)]['account_code']=='64.09' for d in original))
+        self.assertTrue(all(self.app.erp.preparation(self.app.company,int(d)) for d in original))
+
+    def test_pause_cancels_scheduled_item_and_resume_does_not_repeat_simulation(self):
+        self.import_fixture('separate.xlsx');panel=self.app.rpa_panel
+        ids=[int(d) for d in self.app.tree.get_children()]
+        panel.workspace.approve_many(self.app.company,[dict(document=d,group='6',account='64.03') for d in ids],confirmed=True)
+        self.app.tree.selection_set([str(d) for d in ids]);panel.queue_selected()
+        self.assertFalse(panel.buttons['resume'].instate(['disabled']))
+        # Pause immediately after the real inter-item timer is created. Polling
+        # an exact intermediate count can miss it on a slow Windows desktop.
+        after=self.root.after;scheduled=[]
+        def schedule(delay,callback=None,*args):
+            identifier=after(delay,callback,*args)
+            if delay==350 and callback is not None and not scheduled:
+                scheduled.append(identifier);after(0,panel.pause)
+            return identifier
+        with patch.object(self.root,'after',side_effect=schedule):
+            panel.start();wait(self.root,lambda:not self.app.busy and panel.rpa.items(self.app.company,panel.job)[0]['status']=='paused')
+        self.assertEqual(len(scheduled),1)
+        self.assertEqual(panel.rpa.progress(self.app.company,panel.job)['simulated'],1)
+        self.assertTrue(panel.buttons['pause'].instate(['disabled']));self.assertFalse(panel.buttons['resume'].instate(['disabled']))
+        elapsed=[];self.root.after(450,lambda:elapsed.append(True));wait(self.root,lambda:bool(elapsed))
+        self.assertEqual(panel.rpa.progress(self.app.company,panel.job)['simulated'],1)
+        panel.start();wait(self.root,lambda:not self.app.busy and not panel.running)
+        self.assertEqual(panel.rpa.progress(self.app.company,panel.job)['simulated'],2)
+        self.assertTrue(panel.buttons['resume'].instate(['disabled']));self.assertIn('Καμία ενέργεια στο EBS',panel.state.get())
+
+    def test_open_document_uses_verified_source_url_or_archived_pdf(self):
+        from app.application.mydata import MyData
+        from app.infrastructure.aade.client import parsed_page
+        from tests.test_workflow import response
+        from tests.test_workspace import synthetic_pdf
+        self.import_fixture('separate.xlsx');document=self.app.erp.search(self.app.company,'000000001')[0]['id']
+        raw=response();MyData(self.app.erp).persist(self.app.company,'production','2026-10-01','2026-10-31',[(raw,parsed_page(raw))])
+        self.app.tree.selection_set(str(document));self.app.open_detail();pane=self.app._details[document].pdf_pane
+        with patch('webbrowser.open',return_value=True) as browser:
+            pane.open_document();browser.assert_called_once_with('https://example.com/synthetic.pdf')
+        self.app.erp.attach_pdf(self.app.company,document,'synthetic.pdf',data=synthetic_pdf(),confirmed=True)
+        with patch('sys.platform','linux'),patch('webbrowser.open',return_value=True) as browser:
+            pane.open_document();self.assertTrue(browser.call_args.args[0].startswith('file:'))
+
+    def test_history_visual_confirmation_updates_only_operator_verified_counter(self):
+        self.import_fixture('combined.xlsx');panel=self.app.rpa_panel;document=int(self.app.tree.get_children()[0])
+        self.app.erp.prepare_document(self.app.company,document,'6','64.03',confirmed=True)
+        panel.job=panel.rpa.create(self.app.company,[document],mode='fill_only',confirmed=True)
+        item=panel.rpa.items(self.app.company,panel.job)[1][0]
+        with self.app.erp.db:self.app.erp.db.execute("UPDATE rpa_items SET status='save_invoked' WHERE id=?",(item['id'],))
+        win=panel.history();tree=next(w for w in widgets(win) if isinstance(w,ttk.Treeview));tree.selection_set(str(item['id']))
+        with patch('app.ui.rpa_panel.messagebox.askyesno',return_value=True),patch('app.ui.rpa_panel.simpledialog.askstring',return_value='Οπτικός έλεγχος συνθετικής εγγραφής'):
+            self.button(win,'Χειροκίνητος έλεγχος προσπάθειας').invoke()
+        self.assertEqual(panel.rpa.progress(self.app.company,panel.job)['verified_in_ebs'],1)
+        self.assertEqual(panel.rpa.progress(self.app.company,panel.job)['automatically_verified'],0)
+
+    def test_aade_settings_mask_and_secure_save_with_synthetic_vault(self):
+        from tests.test_workspace import MemoryVault
+        self.app.erp.credential_store=MemoryVault()
+        win=self.app.open_aade()
+        entries=[w for w in widgets(win) if isinstance(w,ttk.Entry) and not isinstance(w,ttk.Combobox)]
+        username,key=win.api_username_entry,win.api_key_entry
+        self.assertTrue(key.cget('show'))
+        username.insert(0,'synthetic-ui-user');key.insert(0,'synthetic-ui-key')
+        self.button(win,'Αποθήκευση κωδικών').invoke()
+        self.assertEqual(key.get(),'')
+        self.assertEqual(self.app.erp.mydata_credentials(self.app.company)['key'],'synthetic-ui-key')
+        self.assertNotIn('synthetic-ui-key','\n'.join(self.app.erp.db.iterdump()))
+
+    def test_rpa_tab_queues_selected_approved_document_and_simulates(self):
+        self.import_fixture('combined.xlsx')
+        document=int(self.app.tree.get_children()[0])
+        self.app.erp.prepare_document(self.app.company,document,'6','64.03',confirmed=True)
+        self.app.refresh();self.app.tree.selection_set(str(document))
+        panel=self.app.rpa_panel
+        with patch('app.ui.rpa_panel.messagebox.askyesno',return_value=True):panel.queue_selected()
+        self.assertIsNotNone(panel.job)
+        panel.start()
+        wait(self.root,lambda:not self.app.busy)
+        meta,items=panel.rpa.items(self.app.company,panel.job)
+        self.assertEqual(meta['status'],'completed');self.assertEqual(items[0]['status'],'simulated')
+        self.assertIn('Έλεγχος χωρίς καταχώριση',panel.state.get())
+
+    def test_one_excel_register_card_and_bulk_accounts_share_document_ids(self):
+        self.import_fixture('separate.xlsx')
+        ids=set(self.app.tree.get_children())
+        self.assertEqual(len(ids),2)
+        self.assertNotIn('RPA → EBS',[self.app.notebook.tab(t,'text') for t in self.app.notebook.tabs()])
+        register=self.app.open_counterparties();self.assertEqual(len(register.card_tree.get_children()),2)
+        register.destroy()
+        from app.ui.counterparties import open_detail
+        cp=self.app.erp.search(self.app.company,'000000001')[0]['counterparty_id']
+        card=open_detail(self.app,cp)
+        card.account_fields[0].set('20.01');card.account_fields[1].set('64.03');card.account_fields[2].set('6 · Έξοδα')
+        with patch('app.ui.counterparties.messagebox.askyesno',return_value=True):self.button(card,'Αποθήκευση καρτέλας').invoke()
+        self.app.query.set('000000001');self.app.refresh()
+        document=int(self.app.tree.get_children()[0])
+        self.assertEqual(self.app._documents[document]['account_code'],'64.03')
+        self.assertEqual(self.app._documents[document]['preparation_state'],'Εγκεκριμένο')
+        self.assertEqual(self.app.erp.preparation(self.app.company,document)['account_code'],'64.03')
+        accounts=self.app.rpa_panel.accounts()
+        fields=[w for w in widgets(accounts) if isinstance(w,ttk.Entry) and not isinstance(w,ttk.Combobox)]
+        self.assertIn('64.03',[w.get() for w in fields])
+        with patch('app.ui.rpa_panel.messagebox.askyesno',return_value=True):self.button(accounts,'Έγκριση λογαριασμών').invoke()
+        self.assertEqual(self.app.erp.preparation(self.app.company,document)['account_code'],'64.03')
+        self.assertEqual(self.count('documents'),2)
+        self.app.reset_filters();self.assertEqual(set(self.app.tree.get_children()),ids)
+
+    def test_aade_read_updates_same_excel_row_and_shows_match(self):
+        from tests.test_workspace import MemoryVault
+        from tests.test_workflow import response
+        from app.infrastructure.aade.client import parsed_page
+        self.import_fixture('separate.xlsx');document=self.app.erp.search(self.app.company,'000000001')[0]['id']
+        with self.app.erp.db:self.app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(self.app.company,))
+        self.app.erp.credential_store=MemoryVault()
+        self.app.erp.save_mydata_credentials(self.app.company,'production','synthetic-user','synthetic-key',confirmed=True)
+        win=self.app.open_aade();win.year_var.set('2026');win.month_var.set('Οκτώβριος');win.kind_var.set('Ληφθέντα')
+        raw=response(receiver='000000008')
+        with patch('app.infrastructure.aade.client.Client.fetch',return_value=[(raw,parsed_page(raw))]) as fetch:
+            win.fetch_aade();wait(self.root,lambda:not self.app.busy);fetch.assert_called_once()
+        self.assertEqual(len(win.records_tree.get_children()),1)
+        self.assertIn('Συμφωνεί με εγγραφή',win.records_tree.item(win.records_tree.get_children()[0],'values'))
+        self.assertEqual(self.app._documents[document]['aade_state'],'Συμφωνεί')
+        self.assertEqual(self.count('documents'),2)
+
+    def test_mixed_list_simulation_excludes_purchases_without_second_import(self):
+        self.import_fixture('separate.xlsx')
+        ids=[r['id'] for r in self.app.rpa_panel.workspace.rows(self.app.company)]
+        self.app.rpa_panel.workspace.approve_many(self.app.company,[dict(document=ids[0],group='2',account='20.01'),dict(document=ids[1],group='6',account='64.03')],confirmed=True)
+        self.app.refresh()
+        self.assertNotIn(ids[0],self.app._documents)
+        self.assertIn(ids[0],self.app.document_views['purchases'].rows)
+        with patch('app.ui.rpa_panel.messagebox.askyesno',return_value=True) as confirm:
+            self.app.rpa_panel.simulate()
+            self.assertIn('0 αγορές ομάδας 2 εξαιρέθηκαν',confirm.call_args.args[1])
+        wait(self.root,lambda:not self.app.busy)
+        items=self.app.rpa_panel.rpa.items(self.app.company,self.app.rpa_panel.job)[1]
+        self.assertEqual([i['document_id'] for i in items],[ids[1]])
+        self.assertEqual(self.count('documents'),2)
+        self.assertEqual(self.app.erp.preparation(self.app.company,ids[0])['nature_group'],'2')
+
+    def test_main_month_filter_limits_editing_and_rpa_queue(self):
+        from app.infrastructure.importers.excel import preview
+        rows=[]
+        for index,day in enumerate(('2026-09-30','2026-10-01','2025-09-30')):
+            row=list(ROW);row[3]=str(index+100);row[4]=day;row[8]=str(90000000+index);rows.append(row)
+        workbook(self.folder/'months.xlsx',[HEADERS,*rows])
+        self.app.erp.commit_import(self.app.company,preview(self.folder/'months.xlsx'),confirmed=True)
+        from tests.fixtures import reconcile_empty
+        reconcile_empty(self.app.erp,self.app.company)
+        self.app.refresh();self.assertEqual(self.app.month_filter.get(),'Οκτώβριος 2026')
+        self.app.month_filter.set('Σεπτέμβριος 2026');self.app.refresh()
+        ids=[int(key) for key in self.app.tree.get_children()];self.assertEqual(len(ids),1)
+        self.assertEqual(self.app._documents[ids[0]]['issue_date'],'2026-09-30')
+        accounts=self.app.rpa_panel.accounts()
+        fields=[w for w in widgets(accounts) if isinstance(w,ttk.Entry) and not isinstance(w,ttk.Combobox)]
+        self.assertEqual(len(fields),1);fields[0].insert(0,'64.03')
+        self.assertIs(self.app.rpa_panel.accounts(),accounts)
+        accounts.remember_accounts.set(False)  # Explicit selected/month-only scope.
+        with patch('app.ui.rpa_panel.messagebox.askyesno',return_value=True):self.button(accounts,'Έγκριση λογαριασμών').invoke()
+        self.assertEqual(self.count('document_preparations'),1)
+        self.assertEqual(self.app.rpa_panel.ids(),ids)
+        with patch('app.ui.rpa_panel.messagebox.askyesno',return_value=True):self.app.rpa_panel.simulate()
+        wait(self.root,lambda:not self.app.busy and not self.app.rpa_panel.running)
+        items=self.app.rpa_panel.rpa.items(self.app.company,self.app.rpa_panel.job)[1]
+        self.assertEqual([r['document_id'] for r in items],ids)
+        self.app.reset_filters();self.assertEqual(self.app.month_filter.get(),'Σεπτέμβριος 2026')
+        self.app.month_filter.set('Όλοι οι μήνες');self.app.refresh()
+        self.assertEqual(len(self.app.tree.get_children()),3)
+        self.assertEqual(self.count('documents'),3)
+
+    def test_missing_accounts_lead_to_single_clear_form_without_queue(self):
+        self.import_fixture('separate.xlsx');panel=self.app.rpa_panel
+        with patch('app.ui.rpa_panel.messagebox.showinfo') as info:panel.simulate()
+        self.assertIn('2 παραστατικά',info.call_args.args[1])
+        self.assertEqual(self.count('rpa_jobs'),0)
+        self.assertEqual(len(self.app.tree.selection()),2)
+        win=panel._accounts
+        fields=[w for w in widgets(win) if isinstance(w,ttk.Entry) and not isinstance(w,ttk.Combobox)]
+        self.assertEqual(len(fields),2)
+        self.assertFalse(any(isinstance(w,ttk.Button) and w.cget('text')=='Εφαρμογή σε όλα εδώ' for w in widgets(win)))
+        self.assertEqual(panel.buttons['simulation'].cget('text'),'Έλεγχος χωρίς καταχώριση')
+
+    def test_pdf_cell_opens_archived_file_and_no_visible_sent_status(self):
+        from types import SimpleNamespace
+        from tests.test_workspace import synthetic_pdf
+        self.import_fixture('combined.xlsx');document=int(self.app.tree.get_children()[0])
+        self.app.erp.attach_pdf(self.app.company,document,'synthetic.pdf',data=synthetic_pdf(),confirmed=True)
+        self.app.refresh();self.root.update()
+        self.assertNotIn('ebs_state',self.app.tree['columns'])
+        self.app.tree.xview_moveto(1);self.root.update()
+        box=self.app.tree.bbox(str(document),'pdf_state');self.assertTrue(box)
+        with patch('sys.platform','linux'),patch('webbrowser.open',return_value=True) as browser:
+            self.app.pdf_click(SimpleNamespace(x=box[0]+5,y=box[1]+5))
+            self.assertTrue(browser.call_args.args[0].startswith('file:'))
+        self.assertEqual(self.app._details,{})
+        self.assertEqual(self.count('rpa_jobs'),0)
+        self.app.open_detail();labels=[w.cget('text') for w in widgets(self.app._details[document]) if isinstance(w,ttk.Label)]
+        self.assertNotIn('EBS',labels);self.assertNotIn('Δεν στάλθηκε',labels)
+        self.root.update();wait(self.root,lambda:not self.app.busy)
+
+    def test_inactive_supplier_tab_does_not_reload_on_search_or_sort(self):
+        self.import_fixture('separate.xlsx')
+        with patch.object(self.app.suppliers,'refresh',wraps=self.app.suppliers.refresh) as refresh:
+            self.app.refresh();self.app.sort_documents('name');refresh.assert_not_called()
+            self.app.notebook.select(self.app.suppliers_tab);self.root.update()
+            self.assertGreater(refresh.call_count,0)
+        self.assertEqual(len(self.app.suppliers.tree.get_children()),2)
+
+    def ebs_fixture_dialog(self,*,vat='000000001',source_date='2026-10-21'):
+        from app.application.ebs_reconciliation import EBSReconciliation
+        from tests.test_ods import ods
+        from xml.sax.saxutils import escape
+        headers=['Ημ/νία','Παρ/κό','Εναλ. παρ/κό','Συναλλασσόμενος','Α.Φ.Μ.','Τίτλος','Κατ.','Αξία','ΦΠΑ','Σύνολο']
+        values=[source_date,'ΤΕΔ-00001','ΔΟΚ/1','SYN - ΣΥΝΘΕΤΙΚΟΣ',vat,'Συνθετική εγγραφή','2','0,10','0,02','0,12']
+        rows=''.join('<table:table-row>'+''.join('<table:table-cell office:value-type="string"><text:p>'+escape(v)+'</text:p></table:table-cell>' for v in row)+'</table:table-row>' for row in (headers,values))
+        path=self.folder/'synthetic-ebs.ods';ods(path,rows)
+        book=EBSReconciliation(self.app.erp).layout(path)
+        self.app.notebook.select(self.app.reconciliation_tab);self.root.update()
+        return self.app.reconciliation.import_dialog(book)
+
+    def test_reconciliation_ods_mapping_preview_values_and_real_rpa_selection(self):
+        from app.application.ebs_reconciliation import EBSReconciliation
+        self.import_fixture('separate.xlsx');win=self.ebs_fixture_dialog()
+        win.geometry('920x650');self.root.update()
+        self.assertTrue(win.apply_button.winfo_ismapped())
+        self.assertLessEqual(win.apply_button.winfo_rooty()+win.apply_button.winfo_height(),win.winfo_rooty()+win.winfo_height())
+        self.assertEqual(win.mapping_vars['invoice'].get(),'3: Εναλ. παρ/κό')
+        self.assertEqual({k:v.get() for k,v in win.mapping_vars.items()},{'date':'1: Ημ/νία','invoice':'3: Εναλ. παρ/κό','vat':'5: Α.Φ.Μ.','net':'8: Αξία','tax':'9: ΦΠΑ','gross':'10: Σύνολο'})
+        self.assertNotIn('2: Παρ/κό',win.column_labels);self.assertNotIn('7: Κατ.',win.column_labels)
+        self.assertIn('1: Ημ/νία',win.column_labels);self.assertEqual(len(win.column_labels),6)
+        win.mapping_vars['tax'].set('—')
+        with patch.object(self.app,'run_worker') as worker:win.check();worker.assert_not_called()
+        win.mapping_vars['tax'].set('9: ΦΠΑ')
+        win.company_ok_var.set(True);win.complete_var.set(True);win.check()
+        wait(self.root,lambda:not self.app.busy)
+        self.assertTrue(win.apply_button.instate(['!disabled']))
+        self.assertEqual(win.packet['mapping'],{'date':0,'invoice':2,'vat':4,'net':7,'tax':8,'gross':9})
+        self.assertEqual(win.packet['rows'][0]['raw'][6],'2')
+        self.assertEqual(win.packet['rows'][0]['raw'][0],'2026-10-21')
+        self.assertEqual(win.packet['rows'][0]['normalized']['date'],'2026-10-21')
+        self.assertNotIn('invoice_type',win.packet['rows'][0]['normalized'])
+        self.assertEqual(self.count('rpa_jobs'),0)
+        before_state=self.app.state_filter.get()
+        with patch('app.ui.ebs_reconciliation.messagebox.askyesno') as confirm:
+            win.apply_button.invoke();wait(self.root,lambda:not self.app.busy);confirm.assert_not_called()
+        self.assertEqual(self.app.notebook.select(),str(self.app.documents_tab))
+        from app.ui.desktop import STATES
+        self.assertEqual(self.app.state_filter.get(),before_state)
+        rows=EBSReconciliation(self.app.erp).results(self.app.company)
+        registered=[r['id'] for r in rows.values() if r['status']=='registered'];pending=[r['id'] for r in rows.values() if r['status']=='not_registered']
+        self.assertEqual((len(registered),len(pending)),(1,1))
+        tab=self.app.reconciliation;tab.tree.selection_set(str(registered[0]));comparison=tab.details()
+        labels=[comparison.comparison_tree.item(i,'values')[0] for i in comparison.comparison_tree.get_children()]
+        self.assertTrue({'Καθαρή €','ΦΠΑ €','Σύνολο €'}<=set(labels));self.assertIn('Ημερομηνία',labels);comparison.destroy()
+        tab.pending();self.root.update()
+        self.assertEqual([int(i) for i in self.app.tree.get_children()],pending)
+        self.app.erp.prepare_document(self.app.company,pending[0],'6','64.03',confirmed=True)
+        self.app.refresh()
+        with patch('app.ui.rpa_panel.messagebox.askyesno',return_value=True):self.app.rpa_panel.simulate()
+        wait(self.root,lambda:not self.app.busy and not self.app.rpa_panel.running)
+        items=self.app.rpa_panel.rpa.items(self.app.company,self.app.rpa_panel.job)[1]
+        self.assertEqual([i['document_id'] for i in items],pending)
+        self.assertEqual(items[0]['payload']['account'],'64.03')
+        self.assertEqual(self.count('documents'),2)
+
+    def test_reconciliation_changing_fields_invalidates_inflight_preview(self):
+        from app.application.ebs_reconciliation import EBSReconciliation
+        self.import_fixture('separate.xlsx');win=self.ebs_fixture_dialog()
+        win.company_ok_var.set(True)
+        entered=threading.Event();release=threading.Event();self.releases.append(release)
+        original=EBSReconciliation.preview
+        def delayed(service,*args,**kwargs):
+            entered.set();release.wait(5);return original(service,*args,**kwargs)
+        with patch.object(EBSReconciliation,'preview',delayed):
+            win.check();wait(self.root,entered.is_set)
+            win.mapping_vars['invoice'].set('—');release.set();wait(self.root,lambda:not self.app.busy)
+        self.assertIsNone(win.packet);self.assertTrue(win.apply_button.instate(['disabled']))
+        self.assertEqual(self.count('rpa_jobs'),0)
+
+    def test_reconciliation_invalid_vat_shows_cell_and_values_without_a_generic_popup(self):
+        from app.application.ebs_reconciliation import EBSReconciliation
+        self.import_fixture('separate.xlsx');win=self.ebs_fixture_dialog(vat='123')
+        runs_before=self.count('ebs_reconciliation_runs')
+        win.company_ok_var.set(True);win.complete_var.set(True)
+        with patch('app.ui.desktop.messagebox.showerror') as popup:
+            win.check();wait(self.root,lambda:not self.app.busy);popup.assert_not_called()
+        self.assertTrue(win.packet['can_commit']);self.assertTrue(win.apply_button.instate(['!disabled']))
+        values=win.validation_tree.item(win.validation_tree.get_children()[0],'values')
+        self.assertEqual(values[:7],('2','2026-10-21','ΔΟΚ/1','123','0,10','0,02','0,12'))
+        self.assertIn('E2',values[-1]);self.assertIn('Α.Φ.Μ.',values[-1]);self.assertIn('με ελλείψεις',win.status_var.get())
+        self.assertEqual(len(win.results_tree.get_children()),2)
+        self.assertEqual(self.count('ebs_reconciliation_runs'),runs_before);self.assertEqual(self.count('rpa_jobs'),0)
+        with patch('app.ui.ebs_reconciliation.messagebox.askyesno',return_value=True):win.apply_button.invoke()
+        wait(self.root,lambda:not self.app.busy)
+        service=EBSReconciliation(self.app.erp)
+        states=service.results(self.app.company)
+        self.assertEqual(sum(r['status']=='not_registered' for r in states.values()),1)
+        self.assertEqual(sum(r['status']=='review' for r in states.values()),1)
+        with self.assertRaises(ValueError):service.assert_rpa(self.app.company,list(service.results(self.app.company)),required=True)
+        service.assert_rpa(self.app.company,[d for d,r in states.items() if r['status']=='not_registered'],required=True)
+        self.assertEqual(self.count('documents'),2);self.assertEqual(self.count('rpa_jobs'),0)
+
+    def test_reconciliation_filters_sort_and_open_document_keep_same_identity(self):
+        self.import_fixture('separate.xlsx')
+        tab=self.app.reconciliation;self.app.notebook.select(self.app.reconciliation_tab);self.root.update()
+        self.assertEqual(len(tab.tree.get_children()),2)
+        tab.query.set('000000001');tab.refresh();self.assertEqual(len(tab.tree.get_children()),1)
+        document=int(tab.tree.get_children()[0]);tab.sort_by('net_minor');tab.sort_by('invoice')
+        tab.tree.selection_set(str(document));tab.open();self.assertTrue(self.app._details[document].winfo_exists())
+        self.assertEqual(self.count('documents'),2)
+
+    def test_reconciliation_detects_source_month_and_required_date_mapping(self):
+        self.import_fixture('separate.xlsx');win=self.ebs_fixture_dialog(source_date='2026-09-22')
+        self.assertEqual(tuple(v.get() for v in win.period_vars),('2026','Σεπτέμβριος'))
+        self.assertEqual(set(win.mapping_vars),{'date','invoice','vat','net','tax','gross'})
+        win.company_ok_var.set(True);win.complete_var.set(True);win.check();wait(self.root,lambda:not self.app.busy)
+        self.assertEqual(win.packet['start'],'2026-09-01');self.assertEqual(win.packet['results'],{})
+
+    def test_default_pending_workspace_and_shared_period_remain_visible_on_every_view(self):
+        from app.ui.desktop import STATES
+        self.assertEqual(self.initial_state,STATES[3])
+        self.app.state_filter.set(STATES[3]);self.app.refresh()
+        self.assertIn('Άντληση ΑΑΔΕ',self.app.result_count.get())
+        titles=[self.app.notebook.tab(t,'text') for t in self.app.notebook.tabs()]
+        self.assertEqual(titles[:5],['Μη καταχωρισμένα στο EBS','Έξοδα','Αγορές','Έσοδα','Δελτία Αποστολής'])
+        self.assertEqual(titles[titles.index('Έλεγχοι εισαγωγής')+1],'Προμηθευτές')
+        for tab in self.app.notebook.tabs():
+            self.app.notebook.select(tab);self.root.update()
+            self.assertTrue(self.app.month_box.winfo_ismapped());self.assertTrue(self.app.company_box.winfo_ismapped())
+
+    def test_empty_pdf_has_no_empty_table_or_page_controls_and_saved_pdf_recovers(self):
+        from tests.test_workspace import synthetic_pdf
+        self.import_fixture('combined.xlsx');document=int(self.app.tree.get_children()[0]);self.app.open_detail(document)
+        pane=self.app._details[document].pdf_pane;self.root.update()
+        self.assertFalse(pane.files.winfo_ismapped());self.assertFalse(pane.controls.winfo_ismapped());self.assertFalse(pane.canvas_frame.winfo_ismapped())
+        self.assertIn('ΑΑΔΕ',pane.state.get())
+        self.app.erp.attach_pdf(self.app.company,document,'synthetic.pdf',data=synthetic_pdf(),confirmed=True)
+        pane.refresh_if_changed();wait(self.root,lambda:pane.image is not None and not self.app.busy)
+        self.assertTrue(pane.files.winfo_ismapped());self.assertTrue(pane.canvas_frame.winfo_ismapped())
+        self.assertTrue(pane.previous.instate(['disabled']));self.assertTrue(pane.next.instate(['disabled']))
+
+    def test_views_share_document_identity_and_never_create_a_queue(self):
+        from app.application.mydata import MyData
+        from app.infrastructure.aade.client import parsed_page
+        from tests.test_workflow import response
+        service=MyData(self.app.erp)
+        for mark,code,outgoing in [('80000001','1.1',False),('80000002','10.1',False),('80000003','1.1',True),('80000004','14.1',True)]:
+            raw=response(mark=mark,number=mark,issuer='000000000' if outgoing else '000000001',receiver='000000002' if outgoing else '000000000')
+            raw=raw.replace(b'<invoiceType>1.1</invoiceType>',f'<invoiceType>{code}</invoiceType><isDeliveryNote>true</isDeliveryNote>'.encode())
+            service.persist(self.app.company,'production','2026-10-01','2026-10-31',[(raw,parsed_page(raw))],'RequestTransmittedDocs' if outgoing else 'RequestDocs')
+            service.import_documents(self.app.company,'production','2026-10-01','2026-10-31',confirmed=True,direction='outgoing' if outgoing else 'incoming')
+        self.app.refresh();views=self.app.document_views
+        self.assertEqual(len(views['expenses'].rows),2);self.assertEqual(len(views['income'].rows),1);self.assertEqual(len(views['movement'].rows),4)
+        document=next(iter(views['expenses'].rows));self.assertIn(document,views['movement'].rows)
+        movement=views['movement'];movement.kind.set('Ποσοτικές παραλαβές');movement.refresh()
+        self.assertEqual(len(movement.rows),1);self.assertEqual(next(iter(movement.rows.values()))['invoice_type'],'10.1')
+        income=views['income'];self.app.notebook.select(income.parent);self.root.update();income.query.set('80000003');income.refresh();chosen=next(iter(income.rows))
+        income.tree.selection_set(str(chosen));income.detail();self.assertIn(chosen,self.app._details)
+        self.assertNotIn('account_code',income.tree['columns']);self.assertNotIn('reconciliation',income.tree['columns'])
+        self.assertFalse(any(isinstance(w,ttk.Notebook) for w in widgets(self.app._details[chosen])))
+        self.app.notebook.select(views['expenses'].parent);self.root.update()
+        views['expenses'].tree.selection_set(str(document));views['expenses'].detail()
+        notebooks=[w for w in widgets(self.app._details[document]) if isinstance(w,ttk.Notebook)]
+        self.assertIn('Προετοιμασία EBS',[notebooks[0].tab(t,'text') for t in notebooks[0].tabs()])
+        self_expense=next(r['id'] for r in views['expenses'].rows.values() if r['self_recorded_expense'])
+        self.app.open_detail(self_expense)
+        self.assertTrue(any(isinstance(w,ttk.Notebook) for w in widgets(self.app._details[self_expense])))
+        self.assertEqual(self.count('documents'),4);self.assertEqual(self.count('rpa_jobs'),0)
+
+    def test_default_rpa_scope_honors_selection_for_simulation_and_execution(self):
+        self.import_fixture('separate.xlsx');ids=list(self.app._documents)
+        for document in ids:self.app.erp.prepare_document(self.app.company,document,'6','64.03',confirmed=True)
+        self.app.refresh();panel=self.app.rpa_panel
+        self.app.tree.selection_set(str(ids[0]));self.assertEqual(panel.ids(),[ids[0]])
+        with patch('app.ui.rpa_panel.messagebox.askyesno',return_value=True):panel.simulate()
+        wait(self.root,lambda:not self.app.busy and not panel.running)
+        _,items=panel.rpa.items(self.app.company,panel.job)
+        self.assertEqual([i['document_id'] for i in items],[ids[0]])
+        self.assertEqual(panel.ids(),[ids[0]])
+        self.assertFalse(panel.execution_controls.winfo_ismapped())
+
+    def test_company_switch_is_scoped_and_waits_for_open_document_windows(self):
+        self.import_fixture('combined.xlsx');company=self.app.company
+        other=self.app.erp.company('000000009','ΑΛΛΗ ΣΥΝΘΕΤΙΚΗ');self.app.refresh()
+        label=next(k for k,v in self.app.company_choices.items() if v==other)
+        self.app.open_detail(next(iter(self.app._documents)))
+        self.app.company_filter.set(label);self.app.company_changed();self.assertEqual(self.app.company,company)
+        self.close_children();self.app.company_filter.set(label);self.app.company_changed()
+        self.assertEqual(self.app.company,other);self.assertEqual(self.app._documents,{})
+        self.assertTrue(all(not v.rows for v in self.app.document_views.values()))
+
+    def test_partial_matching_is_saved_excluded_and_confirmed_inline_without_popups(self):
+        from app.application.ebs_reconciliation import EBSReconciliation
+        from app.ui.desktop import STATES
+        self.import_fixture('separate.xlsx');win=self.ebs_fixture_dialog()
+        # Change only the frozen synthetic source, never the customer workbook.
+        from tests.test_ods import ods
+        from xml.sax.saxutils import escape
+        headers=['Ημ/νία','Εναλ. παρ/κό','Α.Φ.Μ.','Αξία','ΦΠΑ','Σύνολο']
+        values=['2026-10-21','ΔΟΚ-0001','000000001','0,10','0,02','0,12']
+        path=self.folder/'partial.ods'
+        ods(path,''.join('<table:table-row>'+''.join('<table:table-cell office:value-type="string"><text:p>'+escape(v)+'</text:p></table:table-cell>' for v in row)+'</table:table-row>' for row in (headers,values)))
+        win.destroy();service=EBSReconciliation(self.app.erp);book=service.layout(path)
+        win=self.app.reconciliation.import_dialog(book);win.company_ok_var.set(True);win.complete_var.set(True)
+        win.check();wait(self.root,lambda:not self.app.busy)
+        with patch('app.ui.ebs_reconciliation.messagebox.askyesno') as popup:
+            win.apply_button.invoke();wait(self.root,lambda:not self.app.busy);popup.assert_not_called()
+        rows=service.results(self.app.company);partial=next(r for r in rows.values() if r['match_kind']=='normalized')
+        # Unique financial/date/reference matches stay in Reconciliation, outside pending.
+        self.assertNotIn(str(partial['id']),self.app.tree.get_children())
+        self.assertEqual(len(self.app.tree.get_children()),1)
+        self.app.column_filters.clear(notify=True);self.app.refresh()
+        self.assertNotIn(str(partial['id']),self.app.tree.get_children())
+        for state in STATES:
+            self.app.state_filter.set(state);self.app.filter_documents()
+            self.assertNotIn(str(partial['id']),self.app.tree.get_children())
+        self.app.state_filter.set('Μη καταχωρισμένα');self.app.filter_documents()
+        with self.assertRaises(ValueError):service.assert_rpa(self.app.company,[partial['id']],required=True)
+        tab=self.app.reconciliation;self.app.notebook.select(self.app.reconciliation_tab);self.root.update()
+        tab.tree.selection_set(str(partial['id']));self.root.update()
+        self.assertEqual(tab.confirm_button.cget('text'),'Επιβεβαίωση αντιστοίχισης')
+        comparison=tab.details();changed=[comparison.comparison_tree.item(i,'values')[0] for i in comparison.comparison_tree.get_children() if 'difference' in comparison.comparison_tree.item(i,'tags')]
+        self.assertEqual(changed,['Παραστατικό'])
+        with patch('app.ui.ebs_reconciliation.messagebox.askyesno') as popup:
+            self.app.busy=True
+            try:self.button(comparison,'Επιβεβαίωση αντιστοίχισης').invoke()
+            finally:self.app.busy=False
+            self.assertEqual(service.results(self.app.company)[partial['id']]['match_kind'],'normalized')
+            self.button(comparison,'Επιβεβαίωση αντιστοίχισης').invoke();self.root.update();popup.assert_not_called()
+        self.assertEqual(service.results(self.app.company)[partial['id']]['match_kind'],'normalized_confirmed')
+        self.assertEqual(self.count('rpa_jobs'),0)
+
+    def test_ready_expenses_continue_when_another_invoice_has_no_account_approval(self):
+        self.import_fixture('separate.xlsx');ids=list(self.app._documents)
+        self.app.erp.prepare_document(self.app.company,ids[0],'6','64.03',confirmed=True)
+        self.app.refresh();panel=self.app.rpa_panel
+        with patch('app.ui.rpa_panel.messagebox.askyesno',return_value=True),patch.object(panel,'accounts') as accounts:
+            panel.simulate();wait(self.root,lambda:not self.app.busy and not panel.running)
+            accounts.assert_not_called()
+        _,items=panel.rpa.items(self.app.company,panel.job)
+        self.assertEqual([i['document_id'] for i in items],[ids[0]])
+        self.assertEqual(items[0]['status'],'simulated')
+        self.assertIsNone(self.app.erp.preparation(self.app.company,ids[1]))
+
+    def test_purchase_context_menu_counts_all_months_confirms_transfer_and_undoes(self):
+        from types import SimpleNamespace
+        from tests.test_supplier_purchases import synthetic_vat
+        from app.ui.desktop import STATES
+        rows=[]
+        for number,day in [('1','2026-09-21'),('2','2026-10-21')]:
+            row=list(ROW);row[0]=synthetic_vat();row[3]=number;row[4]=day;row[8]=str(70000000+int(number));rows.append(row)
+        workbook(self.folder/'inputs/purchases.xlsx',[HEADERS,*rows]);self.import_fixture('purchases.xlsx')
+        self.app.state_filter.set(STATES[3]);self.app.refresh();self.root.update()
+        item=self.app.tree.get_children()[0];x,y,w,h=self.app.tree.bbox(item,'name')
+        event=SimpleNamespace(x=x+5,y=y+h//2,x_root=x+5,y_root=y+h//2)
+        with patch('tkinter.Menu.tk_popup'),patch('app.ui.desktop.messagebox.askyesno',return_value=True) as popup:
+            self.app.purchase_menu(event,self.app.tree)
+            self.assertIn('2 εκκρεμή',self.app._purchase_menu.entrycget(0,'label'))
+            self.app._purchase_menu.invoke(0);self.root.update();popup.assert_called_once()
+        self.assertFalse(self.app.tree.get_children());self.assertTrue(self.app.purchase_undo_button.winfo_ismapped())
+        purchases=self.app.document_views['purchases'];self.assertEqual(len(purchases.rows),1)
+        self.app.month_filter.set('Όλοι οι μήνες');self.app.refresh();self.assertEqual(len(purchases.rows),2)
+        self.assertFalse(self.app.document_views['expenses'].rows)
+        self.app.notebook.select(purchases.parent);self.root.update();purchases.query.set(synthetic_vat());purchases.refresh()
+        document=next(iter(purchases.rows));purchases.tree.selection_set(str(document))
+        with patch.object(self.app,'open_pdf') as pdf:purchases.pdf();pdf.assert_called_once_with(document)
+        self.app.purchase_undo_button.invoke();self.assertFalse(purchases.rows)
+        self.assertEqual(len(self.app.tree.get_children()),2);self.assertEqual(self.count('document_preparations'),0)
+
+    def test_income_pdf_download_occurs_only_on_explicit_individual_open(self):
+        from tests.test_workspace import synthetic_pdf
+        self.import_fixture('separate.xlsx');document=next(iter(self.app._documents))
+        with self.app.erp.db:self.app.erp.db.execute("UPDATE documents SET direction='outgoing' WHERE id=?",(document,))
+        self.app.refresh()
+        def download(service,company,chosen):
+            service.erp.attach_pdf(company,chosen,'synthetic-income.pdf',data=synthetic_pdf(),confirmed=True)
+            return dict(cached=False)
+        with patch('app.application.sync.Sync.document_pdf',autospec=True,side_effect=download) as fetch,patch('webbrowser.open',return_value=True),patch('os.startfile',create=True):
+            self.app.refresh();fetch.assert_not_called()
+            self.app.open_pdf(document);wait(self.root,lambda:not self.app.busy)
+            fetch.assert_called_once()
+            self.assertEqual(len(self.app.erp.attachments(self.app.company,document)),1)
+            self.app.open_pdf(document);fetch.assert_called_once()
+
+    def test_bulk_name_lookup_runs_in_background_can_stop_and_prevents_duplicate_start(self):
+        from app.application.registry import Registry
+        from app.ui.registry import fill_missing
+        from tests.test_supplier_purchases import synthetic_vat
+        from tests.test_workspace import MemoryVault
+        self.app.erp.credential_store=MemoryVault()
+        with self.app.erp.db:
+            self.app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(self.app.company,))
+            for number in (1,2):self.app.erp.db.execute('INSERT INTO counterparties(company_id,vat,name) VALUES (?,?,?)',(self.app.company,synthetic_vat(number),' '))
+        Registry(self.app.erp).save_credentials(self.app.company,'synthetic','synthetic',confirmed=True)
+        entered=threading.Event();release=threading.Event();self.releases.append(release);calls=[]
+        def lookup(user,key,caller,called):
+            calls.append(called);entered.set();release.wait(5);return dict(afm=called,onomasia='ΣΥΝΘΕΤΙΚΗ ΕΠΩΝΥΜΙΑ')
+        # Default transport is bound at definition, so pass the fake through the batch service.
+        original=Registry.fill_missing
+        def batch(service,company,**kwargs):return original(service,company,transport=lookup,**kwargs)
+        with patch.object(Registry,'fill_missing',batch),patch('app.ui.registry.messagebox.askyesno') as popup:
+            win=fill_missing(self.app);wait(self.root,entered.is_set)
+            self.assertIsNone(fill_missing(self.app));self.assertTrue(self.app.busy)
+            win.cancel_event.set();release.set();wait(self.root,lambda:not self.app.busy)
+            popup.assert_not_called()
+        self.assertEqual(len(calls),1);self.assertIn('Συμπληρώθηκαν: 1',win.status_var.get());self.assertIn('Παραλείφθηκαν: 1',win.status_var.get())
+        self.assertEqual(self.count('provider_attempts'),0)
+
+    def test_main_column_sort_and_filters_do_not_reload_data_or_lose_selection(self):
+        self.import_fixture('separate.xlsx');self.app.refresh();tree=self.app.tree
+        selected=tree.get_children()[0];tree.selection_set(selected);tree.focus(selected)
+        tree.column('vat',width=180);self.root.update_idletasks();vat_width=tree.column('vat','width')
+        before={key:self.app._documents[key]['gross_minor'] for key in self.app._documents};calls=[]
+        self.app.erp.db.set_trace_callback(calls.append)
+        try:
+            with patch.object(self.app,'refresh') as reload,patch.object(self.app.rpa_panel,'refresh') as rpa:
+                self.app.sort_documents('gross_minor');self.root.update()
+                self.assertEqual(tree.selection(),(selected,));self.assertEqual(tree.focus(),selected)
+                self.app.column_filters.set('gross_minor','<=0,12')
+                self.assertEqual(len(tree.get_children()),1)
+                self.assertEqual(tree.column('vat','width'),vat_width)
+                self.app.column_filters.set('reference','=does-not-exist')
+                self.assertFalse(tree.get_children());self.assertTrue(self.app.rpa_panel.buttons['post'].instate(['disabled']))
+                self.app.column_filters.clear(notify=True);self.app.reset_filters();self.assertEqual(len(tree.get_children()),2)
+                self.app.query.set('ΔΟΚ/1');self.app.filter_documents();self.assertEqual(len(tree.get_children()),1)
+                reload.assert_not_called();rpa.assert_not_called()
+        finally:self.app.erp.db.set_trace_callback(None)
+        self.assertEqual(calls,[]);self.app.reset_filters()
+        self.assertEqual(before,{key:self.app._documents[key]['gross_minor'] for key in self.app._documents})
+
+    def test_other_views_filter_and_sort_cached_rows_without_database_queries(self):
+        self.import_fixture('separate.xlsx');self.app.refresh()
+        for view,parent in [(self.app.document_views['expenses'],self.app.document_views['expenses'].parent),(self.app.reconciliation,self.app.reconciliation_tab)]:
+            self.app.notebook.select(parent);self.root.update();calls=[];self.app.erp.db.set_trace_callback(calls.append)
+            try:
+                view.sort_by('gross_minor');view.column_filters.set('gross_minor','<=0,12')
+                self.assertEqual(len(view.tree.get_children()),1)
+                view.clear();view.query.set('ΔΟΚ/1')
+                view.refresh(view.rows) if view is self.app.reconciliation else view.refresh()
+                self.assertEqual(len(view.tree.get_children()),1)
+            finally:self.app.erp.db.set_trace_callback(None)
+            self.assertEqual(calls,[])
+
+    def test_heading_double_click_never_opens_a_previously_selected_document(self):
+        from types import SimpleNamespace
+        self.import_fixture('separate.xlsx');self.app.refresh()
+        event=SimpleNamespace(x=10,y=5)
+        with patch.object(self.app,'open_detail') as opened:
+            self.app.document_double_click(event)
+            for name in ('expenses','purchases','income','movement'):
+                view=self.app.document_views[name];self.app.notebook.select(view.parent);self.root.update();view.double_click(event)
+            self.app.notebook.select(self.app.reconciliation_tab);self.root.update();self.app.reconciliation.double_click(event)
+            opened.assert_not_called()
+
+    def test_registry_placeholder_batch_shows_request_progress_before_slow_response(self):
+        from app.application.registry import Registry
+        from app.ui.registry import fill_missing
+        from tests.test_supplier_purchases import synthetic_vat
+        from tests.test_workspace import MemoryVault
+        self.app.erp.credential_store=MemoryVault()
+        with self.app.erp.db:
+            self.app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(self.app.company,))
+            for number,name in [(1,'Χωρίς επωνυμία'),(2,synthetic_vat(2))]:self.app.erp.db.execute('INSERT INTO counterparties(company_id,vat,name) VALUES (?,?,?)',(self.app.company,synthetic_vat(number),name))
+        Registry(self.app.erp).save_credentials(self.app.company,'synthetic','synthetic',confirmed=True)
+        entered=threading.Event();release=threading.Event();self.releases.append(release);calls=[]
+        def lookup(*args):
+            calls.append(args[-1]);entered.set();release.wait(5);return dict(afm=args[-1],onomasia='ΣΥΝΘΕΤΙΚΗ ΕΠΩΝΥΜΙΑ')
+        original=Registry.fill_missing
+        def batch(service,company,**kwargs):return original(service,company,transport=lookup,**kwargs)
+        with patch.object(Registry,'fill_missing',batch):
+            win=fill_missing(self.app);wait(self.root,entered.is_set)
+            wait(self.root,lambda:'Αναζήτηση 1 από 2' in win.status_var.get())
+            self.assertTrue(win.winfo_exists());release.set();wait(self.root,lambda:not self.app.busy)
+        self.assertEqual(len(calls),2);self.assertIn('Συμπληρώθηκαν: 2',win.status_var.get())
+        self.assertEqual(self.count('provider_attempts'),0)
+
+    def test_registry_missing_credentials_finishes_dialog_with_clear_action(self):
+        from app.ui.registry import fill_missing
+        from tests.test_workspace import MemoryVault
+        self.app.erp.credential_store=MemoryVault()
+        with self.app.erp.db:self.app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(self.app.company,))
+        with patch('app.ui.desktop.messagebox.showerror') as popup:
+            win=fill_missing(self.app);wait(self.root,lambda:not self.app.busy);popup.assert_not_called()
+        self.assertIn('Λείπουν ειδικοί κωδικοί Μητρώου',win.status_var.get())
+        self.assertTrue(self.button(win,'Κλείσιμο').instate(['!disabled']))
+
+    def test_right_click_heading_opens_column_filter_alongside_supplier_menu(self):
+        self.import_fixture('separate.xlsx');self.app.refresh();self.root.update()
+        tree=self.app.tree;row=tree.get_children()[0];x,y,width,height=tree.bbox(row,'gross_minor')
+        tree.event_generate('<Button-3>',x=x+5,y=5);self.root.update()
+        win=self.app.column_filters.window;self.assertIsNotNone(win);self.assertTrue(win.winfo_exists())
+        entry=next(w for w in widgets(win) if isinstance(w,ttk.Entry));entry.insert(0,'<=0,12')
+        self.button(win,'Εφαρμογή').invoke();self.root.update()
+        self.assertEqual(len(tree.get_children()),1);self.assertTrue(tree.heading('gross_minor','text').startswith('● '))
+        self.assertEqual(self.count('rpa_jobs'),0)
+
+
+    def test_ebs_screen_mapping_captures_all_fields_without_clicks_and_persists(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from app.infrastructure.ebs_adapter.adapter import FIELDS
+        panel=self.app.rpa_panel;win=panel.settings();self.root.update()
+        self.assertIs(panel.settings(),win)
+        backend=Mock();backend.pg.position.return_value=(-1350,240)
+        callbacks=[]
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=backend),patch('app.ui.rpa_panel.messagebox.showinfo'),patch.object(self.root,'after',side_effect=lambda ms,fn:callbacks.append(fn) or 'capture'):
+            for field in ('ΑΦΜ πιστωτή','Αριθμός παραστατικού','Ημερομηνία · πρώτο ψηφίο','Κελί λογαριασμού εξόδων','Κελί καθαρής αξίας','Save','Νέο ΤΕΔ'):
+                self.button(win,'Καταγραφή '+field).invoke()
+                self.assertEqual(str(self.root.state()),'withdrawn')
+                callbacks.pop()()
+        self.assertEqual(backend.validate_target.call_count,5)
+        backend.validate_target.assert_any_call('INVOICE_DATE',(-1350,240))
+        self.assertEqual(backend.at_ebs.call_count,2)
+        backend.pg.click.assert_not_called();backend.pg.write.assert_not_called()
+        self.assertIsNone(panel.workspace.profile(self.app.company))
+        self.button(win,'Αποθήκευση ρυθμίσεων').invoke();self.root.update()
+        saved=panel.workspace.profile(self.app.company)
+        self.assertEqual(saved['profile']['mapping'],{key:[-1350,240] for key,_ in FIELDS})
+        self.assertEqual(saved['profile']['save'],[-1350,240]);self.assertIsNone(saved['pilot_at'])
+        self.assertEqual(self.count('rpa_jobs'),0)
+
+    def test_ebs_mapping_rejects_wrong_window_and_close_cancels_capture(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        panel=self.app.rpa_panel;win=panel.settings();self.root.update()
+        backend=Mock();backend.pg.position.return_value=(500,300)
+        backend.validate_target.side_effect=RuntimeError('Το σημείο δεν ανήκει στο Entersoft')
+        callbacks=[]
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=backend),patch('app.ui.rpa_panel.messagebox.showinfo'),patch('app.ui.rpa_panel.messagebox.showerror') as error,patch.object(self.root,'after',side_effect=lambda ms,fn:callbacks.append(fn) or 'capture'):
+            self.button(win,'Καταγραφή ΑΦΜ πιστωτή').invoke();callbacks.pop()()
+            error.assert_called_once();self.assertEqual(str(self.root.state()),'normal')
+            with patch.object(self.root,'after_cancel') as cancel:
+                self.button(win,'Καταγραφή ΑΦΜ πιστωτή').invoke()
+                self.root.tk.call(win.protocol('WM_DELETE_WINDOW'))
+                cancel.assert_called_once_with('capture')
+                self.assertEqual(str(self.root.state()),'normal')
+        self.assertIsNone(panel.workspace.profile(self.app.company))
+        backend.pg.click.assert_not_called()
+
+    def test_cell_menu_filters_and_excludes_without_selecting_or_database_refresh(self):
+        self.import_fixture('separate.xlsx');self.app.refresh();self.root.update()
+        tree=self.app.tree;filters=self.app.column_filters
+        rows=list(self.app._documents.values());row=rows[0];other=rows[1]
+        tree.selection_set(str(other['id']))
+        column=list(tree['displaycolumns']).index('name')
+        x,y,w,h=tree.bbox(str(row['id']),'name')
+        with patch('tkinter.Menu.tk_popup'),patch.object(self.app,'refresh',side_effect=AssertionError('SQL reload')):
+            tree.event_generate('<Button-3>',x=x+5,y=y+5);self.root.update()
+            menu=filters.menu
+            labels=[menu.entrycget(i,'label') for i in range(menu.index('end')+1) if menu.type(i)=='command']
+            self.assertIn('Φίλτρο με αυτή την τιμή',labels)
+            index=next(i for i in range(menu.index('end')+1) if menu.type(i)=='command' and menu.entrycget(i,'label')=='Φίλτρο με αυτή την τιμή')
+            menu.invoke(index)
+            self.assertEqual(list(self.app._documents),[row['id']])
+            self.assertEqual(tree.selection(),())  # Hidden selection is never promoted to all visible.
+            filters.clear(notify=True);filters.cell('name',row['name'],True)
+            self.assertEqual(list(self.app._documents),[other['id']])
+            filters.clear(notify=True);self.assertEqual(len(self.app._documents),2)
+        self.assertEqual(self.count('rpa_jobs'),0)
+
+    def test_cell_filters_shared_across_supplier_document_and_review_views(self):
+        self.import_fixture('separate.xlsx');self.app.refresh()
+        views=list(self.app.document_views.values())
+        for view in views:
+            view.refresh()
+            if view.rows:
+                row=next(iter(view.rows.values()));view.column_filters.cell('vat',row['vat'])
+                self.assertTrue(all(r['vat']==row['vat'] for r in view.rows.values()))
+                view.column_filters.clear(notify=True)
+        tab=self.app.suppliers;tab.refresh();row=next(iter(tab.rows.values()))
+        with patch.object(tab.service,'rows',side_effect=AssertionError('Unnecessary reload')):
+            tab.column_filters.cell('vat',row['vat'])
+            self.assertEqual(len(tab.rows),1);tab.column_filters.clear(notify=True)
+        review=self.app.review_filters
+        before=len(self.app.review_tree.get_children());job=next(iter(self.app._review_rows.values()))
+        review.cell('filename',job['filename'],True)
+        self.assertLess(len(self.app.review_tree.get_children()),before)
+        review.clear(notify=True);self.assertEqual(len(self.app.review_tree.get_children()),before)
+
+    def test_posting_actions_use_visible_order_and_never_promote_filter_to_selection(self):
+        from types import SimpleNamespace
+        self.import_fixture('separate.xlsx');self.app.refresh();panel=self.app.rpa_panel
+        visible=[int(k) for k in self.app.tree.get_children()]
+        self.app.tree.move(str(visible[1]),'',0);order=[visible[1],visible[0]]
+        self.app.tree.selection_set(str(visible[0]))
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.ui.rpa_panel.RPA.posting',return_value=dict(job=123,documents=order,skipped=[],pilot=False)) as create,patch.object(panel,'start') as start,patch.object(self.app,'run_worker',side_effect=lambda f,done:done(f())),patch('app.ui.rpa_panel.messagebox.askyesno') as confirm:
+            panel.post();create.assert_called_with(self.app.company,order,limit=40)
+            panel.post_selected();create.assert_called_with(self.app.company,[visible[0]])
+            panel.post_one();create.assert_called_with(self.app.company,[visible[0]])
+            self.assertEqual(start.call_count,3);confirm.assert_not_called()
+            create.reset_mock();self.app.tree.selection_remove(*self.app.tree.selection())
+            panel.post_selected();panel.post_one();create.assert_not_called()
+        panel.job=None
+        self.assertEqual(panel.buttons['post'].cget('text'),'Καταχώριση έως 40')
+        self.assertFalse(panel.buttons['accounts'].winfo_ismapped());self.assertFalse(panel.buttons['simulation'].winfo_ismapped())
+
+    def test_posting_restores_paused_queue_and_shows_processed_progress(self):
+        self.import_fixture('separate.xlsx');panel=self.app.rpa_panel
+        ids=list(self.app._documents)
+        panel.workspace.approve_many(self.app.company,[dict(document=d,group='6',account='64.03') for d in ids],confirmed=True)
+        self.app.tree.selection_set([str(d) for d in ids]);panel.queue_selected();job=panel.job
+        panel.rpa.pause(self.app.company,job);panel.job=None
+        panel.restore_job();panel.refresh();self.root.update()
+        self.assertEqual(panel.job,job);self.assertIn('0/2',panel.state.get())
+        self.assertTrue(panel.buttons['resume'].winfo_ismapped());self.assertFalse(panel.buttons['pause'].winfo_ismapped())
+
+    def test_search_clear_preserves_pending_group_and_cell_exclusions_through_refresh(self):
+        from copy import deepcopy
+        from tests.fixtures import reconcile_empty
+        self.import_fixture('separate.xlsx');app=self.app
+        ids=list(app._documents)
+        app.rpa_panel.workspace.approve_many(app.company,[dict(document=d,group='6',account='64.03') for d in ids],confirmed=True,remember=True)
+        app.state_filter.set('Μη καταχωρισμένα');app.group_filter.set('Ομάδα 6 · Έξοδα');app.refresh();self.root.update()
+        excluded=app._documents[ids[0]]['name'];tree=app.tree
+        x,y,w,h=tree.bbox(str(ids[0]),'name')
+        with patch('tkinter.Menu.tk_popup'):
+            tree.event_generate('<Button-3>',x=x+5,y=y+5);self.root.update()
+            menu=app.column_filters.menu
+            index=next(i for i in range(menu.index('end')+1) if menu.type(i)=='command' and menu.entrycget(i,'label')=='Εξαίρεση αυτής της τιμής')
+            menu.invoke(index)
+        app.column_filters.set('gross_minor','>=0,00')
+        expected=set(app._documents);self.assertEqual(expected,{ids[1]})
+        before_filters=deepcopy((app.column_filters.filters,app.column_filters.cell_filters))
+        app.query.set('unmatched query');app.filter_documents();self.assertFalse(app._documents)
+        before_db=list(app.erp.db.iterdump());before_evidence=deepcopy(app._evidence)
+        self.button(app.documents_tab,'Καθαρισμός').invoke()
+        self.assertEqual(app.query.get(),'');self.assertEqual(app.state_filter.get(),'Μη καταχωρισμένα')
+        self.assertEqual(app.group_filter.get(),'Ομάδα 6 · Έξοδα')
+        self.assertEqual((app.column_filters.filters,app.column_filters.cell_filters),before_filters)
+        self.assertEqual(set(app._documents),expected);self.assertTrue(all(r['name']!=excluded for r in app._documents.values()))
+        self.assertEqual(list(app.erp.db.iterdump()),before_db);self.assertEqual(app._evidence,before_evidence)
+        app.notebook.select(app.reconciliation_tab);self.root.update();app.notebook.select(app.documents_tab);self.root.update()
+        app.refresh();self.assertEqual(set(app._documents),expected)
+        reconcile_empty(app.erp,app.company);app.refresh()
+        self.assertEqual(set(app._documents),expected)
+        self.assertEqual((app.column_filters.filters,app.column_filters.cell_filters),before_filters)
+        app.column_filters.remove('name');self.assertEqual(set(app._documents),set(ids))
+        app.column_filters.clear(notify=True);self.assertFalse(app.column_filters.cell_filters)
+        self.assertEqual(app.state_filter.get(),'Μη καταχωρισμένα')
+
+    def test_other_search_clear_handlers_preserve_kind_status_date_and_amount_exclusions(self):
+        from copy import deepcopy
+        self.import_fixture('separate.xlsx');app=self.app;app.refresh()
+        for view in app.document_views.values():
+            view.kind.set('Δελτία αποστολής' if view.view=='movement' else 'Τιμολόγια')
+            view.column_filters.cell('issue_date','2026-10-21',True)
+            if 'gross_minor' in view.tree['columns']:view.column_filters.cell('gross_minor',12,True)
+            wanted=deepcopy((view.column_filters.filters,view.column_filters.cell_filters));kind=view.kind.get()
+            view.query.set('unmatched query');view.refresh()
+            self.button(view.parent,'Καθαρισμός').invoke()
+            self.assertEqual(view.query.get(),'');self.assertEqual(view.kind.get(),kind)
+            self.assertEqual((view.column_filters.filters,view.column_filters.cell_filters),wanted)
+            self.assertTrue(all(r['issue_date']!='2026-10-21' for r in view.rows.values()))
+            view.column_filters.clear(notify=True);self.assertFalse(view.column_filters.cell_filters)
+        view=app.reconciliation;view.filter.set('Μη καταχωρισμένα')
+        view.column_filters.cell('issue_date','2026-10-21',True);view.column_filters.cell('gross_minor',12,True)
+        wanted=deepcopy((view.column_filters.filters,view.column_filters.cell_filters))
+        view.query.set('unmatched query');view.refresh(view.rows)
+        before=list(app.erp.db.iterdump())
+        self.button(app.reconciliation_tab,'Καθαρισμός').invoke()
+        self.assertEqual(view.query.get(),'');self.assertEqual(view.filter.get(),'Μη καταχωρισμένα')
+        self.assertEqual((view.column_filters.filters,view.column_filters.cell_filters),wanted)
+        self.assertEqual(list(app.erp.db.iterdump()),before)
+        self.assertEqual(len(view.tree.get_children()),1)
+        app.refresh();self.assertEqual((view.column_filters.filters,view.column_filters.cell_filters),wanted)
+        view.column_filters.clear(notify=True);self.assertFalse(view.column_filters.cell_filters)
+
+    def test_clear_search_cannot_reintroduce_delivery_note_into_posting_list(self):
+        from app.application.mydata import MyData
+        from app.infrastructure.aade.client import parsed_page
+        from tests.test_workflow import response
+        from tests.fixtures import reconcile_empty
+        self.import_fixture('separate.xlsx');app=self.app
+        xml=response(mark='88000001',number='DELIVERY').replace(b'<invoiceType>1.1</invoiceType>',b'<invoiceType>9.3</invoiceType>')
+        api=MyData(app.erp);api.persist(app.company,'production','2026-10-01','2026-10-31',[(xml,parsed_page(xml))],'RequestDocs')
+        api.import_documents(app.company,'production','2026-10-01','2026-10-31',confirmed=True)
+        reconcile_empty(app.erp,app.company)
+        app.state_filter.set('Μη καταχωρισμένα');app.refresh()
+        self.assertTrue(any(r['mark']=='88000001' for r in app._month_rows))
+        app.query.set('DELIVERY');app.filter_documents()
+        self.button(app.documents_tab,'Καθαρισμός').invoke();app.refresh()
+        self.assertTrue(app._documents)
+        self.assertTrue(all(r['kind']=='invoice' and (not r['invoice_type'] or r['rpa_allowed']) for r in app._documents.values()))
+        self.assertNotIn('88000001',{r['mark'] for r in app._documents.values()})
+        self.assertEqual(self.count('rpa_jobs'),0)
+
+    def test_real_posting_worker_opens_new_then_fills_and_saves_without_mocking_engine(self):
+        from types import SimpleNamespace
+        from app.infrastructure.ebs_adapter.adapter import FIELDS
+        from tests.test_workflow import FakeEBS
+        # All values remain synthetic; patch only the OS boundary, not posting/advance.
+        app=self.app
+        with app.erp.db:app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(app.company,))
+        row=list(ROW);row[0]='000000004'
+        workbook(self.folder/'inputs/worker-post.xlsx',[HEADERS,row]);self.import_fixture('worker-post.xlsx');app.refresh()
+        ids=list(app._documents);panel=app.rpa_panel
+        panel.workspace.approve_many(app.company,[dict(document=d,group='6',account='64.03') for d in ids],confirmed=True,remember=True)
+        panel.workspace.save_profile(app.company,dict(mapping={f:[10,20] for f,_ in FIELDS},save=[100,200],new=[300,400]))
+        job=panel.rpa.posting(app.company,ids)['job']
+        with app.erp.db:app.erp.db.execute('UPDATE rpa_jobs SET need_new=1 WHERE id=?',(job,))
+        panel.job=job;fake=FakeEBS()
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=fake),patch('ctypes.windll',SimpleNamespace(user32=SimpleNamespace(GetAsyncKeyState=lambda _:0)),create=True):
+            panel.start()
+            self.assertEqual(fake.calls,[])  # EBS is not inspected before Tk hides.
+            wait(self.root,lambda:not app.busy and not panel.running)
+        self.assertEqual([c[0] for c in fake.calls],['new','prepare','fill','save'])
+        self.assertEqual(panel.rpa.items(app.company,job)[0]['status'],'completed')
+        self.assertEqual(panel.rpa.progress(app.company,job)['save_requested'],1)
+        self.assertEqual(panel.rpa.progress(app.company,job)['automatically_verified'],0)
+
+    def test_real_worker_prepare_failure_is_visible_and_resume_does_not_open_another_ted(self):
+        from types import SimpleNamespace
+        from app.infrastructure.ebs_adapter.adapter import FIELDS
+        from tests.test_workflow import FakeEBS
+        app=self.app
+        with app.erp.db:app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(app.company,))
+        row=list(ROW);row[0]='000000004'
+        workbook(self.folder/'inputs/worker-stop.xlsx',[HEADERS,row]);self.import_fixture('worker-stop.xlsx');app.refresh()
+        ids=list(app._documents);panel=app.rpa_panel
+        panel.workspace.approve_many(app.company,[dict(document=d,group='6',account='64.03') for d in ids],confirmed=True)
+        panel.workspace.save_profile(app.company,dict(mapping={f:[10,20] for f,_ in FIELDS},save=[100,200],new=[300,400]))
+        job=panel.rpa.posting(app.company,ids)['job']
+        with app.erp.db:app.erp.db.execute('UPDATE rpa_jobs SET need_new=1 WHERE id=?',(job,))
+        panel.job=job;fake=FakeEBS(fail='prepare')
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=fake),patch('ctypes.windll',SimpleNamespace(user32=SimpleNamespace(GetAsyncKeyState=lambda _:0)),create=True),patch('app.ui.rpa_panel.messagebox.showerror') as error:
+            panel.start();wait(self.root,lambda:not app.busy and not panel.running)
+            error.assert_called_once();self.assertIn('synthetic target mismatch',error.call_args.args[1])
+            fake.fail=None;panel.post();wait(self.root,lambda:not app.busy and not panel.running)
+        self.assertEqual([c[0] for c in fake.calls],['new','prepare','prepare','fill','save'])
+        self.assertEqual(str(self.root.state()),'normal')
+
+    def test_missing_mapping_rejection_remains_visible_after_worker_poll_refresh(self):
+        from types import SimpleNamespace
+        self.import_fixture('separate.xlsx');app=self.app;app.refresh();panel=app.rpa_panel
+        ids=list(app._documents)
+        panel.workspace.approve_many(app.company,[dict(document=d,group='6',account='64.03') for d in ids],confirmed=True)
+        panel.job=panel.rpa.create(app.company,ids,mode='fill_only',confirmed=True)
+        before=panel.job
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('ctypes.windll',SimpleNamespace(user32=SimpleNamespace(GetAsyncKeyState=lambda _:0)),create=True),patch('app.ui.rpa_panel.messagebox.showerror') as error:
+            panel.post();wait(self.root,lambda:not app.busy)
+            self.assertIn('Όρισε πρώτα τις θέσεις',panel.state.get())
+            app._sync_import_button();self.assertIn('Όρισε πρώτα τις θέσεις',panel.state.get())
+            error.assert_not_called()
+            issues=[win for win in self.root.winfo_children() if hasattr(win,'issue_rows')]
+            self.assertEqual(len(issues),1)
+            self.assertTrue(all('Όρισε πρώτα τις θέσεις' in row['reason'] for row in issues[0].issue_rows))
+            self.assertFalse(issues[0].issue_buttons['settings'].instate(['disabled']))
+        self.assertEqual(panel.job,before);self.assertFalse(panel.running)
+        self.assertEqual(self.count('rpa_jobs'),1)
+        self.assertEqual([i['status'] for i in panel.rpa.items(app.company,before)[1]],['queued','queued'])
+
+    def test_empty_grid_right_click_can_remove_active_filters_and_restore_rows(self):
+        self.import_fixture('separate.xlsx');app=self.app;app.refresh();self.root.update()
+        filters=app.column_filters;tree=app.tree
+        names=[r['name'] for r in app._documents.values()]
+        filters.cell('name',names[0],True);filters.cell('name',names[1],True);self.root.update()
+        self.assertFalse(tree.get_children())
+        with patch('tkinter.Menu.tk_popup'):
+            tree.event_generate('<Button-3>',x=15,y=tree.winfo_height()-10);self.root.update()
+        self.assertIsNotNone(filters.menu)
+        menu=filters.menu
+        index=next(i for i in range(menu.index('end')+1) if menu.type(i)=='command' and menu.entrycget(i,'label')=='Καθαρισμός όλων των φίλτρων')
+        menu.invoke(index);self.root.update()
+        self.assertEqual(len(tree.get_children()),2)
+        self.assertFalse(filters.cell_filters)
+
+    def test_empty_grid_reset_is_shared_across_views_and_preserves_search_clear_semantics(self):
+        self.import_fixture('separate.xlsx');app=self.app;app.refresh();app.suppliers.refresh()
+        targets=[(app.document_views['expenses'].column_filters,app.document_views['expenses'].tree),(app.reconciliation.column_filters,app.reconciliation.tree),(app.suppliers.column_filters,app.suppliers.tree),(app.review_filters,app.review_tree)]
+        for filters,tree in targets:
+            filters.clear(notify=True);before=len(tree.get_children());self.assertGreater(before,0)
+            column='name' if 'name' in tree['columns'] else 'filename'
+            filters.cell(column,'__NO_SYNTHETIC_ROW__');self.assertFalse(tree.get_children())
+            self.root.update()
+            # Exercise the same context handler even if the tab is inactive.
+            from types import SimpleNamespace
+            with patch.object(tree,'identify_region',return_value='nothing'),patch('tkinter.Menu.tk_popup'):
+                filters.popup(SimpleNamespace(x=10,y=50,x_root=10,y_root=50))
+            menu=filters.menu
+            index=next(i for i in range(menu.index('end')+1) if menu.type(i)=='command' and menu.entrycget(i,'label')=='Καθαρισμός όλων των φίλτρων')
+            menu.invoke(index)
+            self.assertEqual(len(tree.get_children()),before)
+        app.column_filters.cell('vat','000000001',True)
+        app.query.set('UNMATCHED');app.filter_documents()
+        self.button(app.documents_tab,'Καθαρισμός').invoke()
+        self.assertEqual(app.query.get(),'');self.assertIn('vat',app.column_filters.cell_filters)
+        self.assertEqual(len(app.tree.get_children()),1)
+
+    def test_view_filters_and_reset_never_modify_existing_posting_queue(self):
+        self.import_fixture('separate.xlsx');app=self.app;app.refresh();panel=app.rpa_panel
+        ids=list(app._documents)
+        panel.workspace.approve_many(app.company,[dict(document=d,group='6',account='64.03') for d in ids],confirmed=True,remember=True)
+        panel.job=panel.rpa.create(app.company,ids,mode='fill_only',confirmed=True)
+        app.state_filter.set('Μη καταχωρισμένα');app.group_filter.set('Ομάδα 6 · Έξοδα');app.refresh()
+        before=list(app.erp.db.iterdump());job=panel.rpa.items(app.company,panel.job)
+        app.column_filters.cell('vat','000000001');app.column_filters.set('gross_minor','>9999')
+        self.assertFalse(app.tree.get_children())
+        app.query.set('query');app.reset_filters();app.column_filters.clear(notify=True)
+        self.assertEqual(set(app._documents),set(ids))
+        self.assertEqual(app.state_filter.get(),'Μη καταχωρισμένα');self.assertEqual(app.group_filter.get(),'Ομάδα 6 · Έξοδα')
+        self.assertEqual(list(app.erp.db.iterdump()),before)
+        self.assertEqual(panel.rpa.items(app.company,panel.job),job)
+
+    def test_cell_menu_switches_include_to_exclude_and_back_without_emptying_view(self):
+        self.import_fixture('separate.xlsx');app=self.app;app.refresh();self.root.update()
+        tree=app.tree;first=tree.get_children()[0];second=tree.get_children()[1]
+        def action(item,label):
+            x,y,w,h=tree.bbox(item,'name')
+            with patch('tkinter.Menu.tk_popup'):
+                tree.event_generate('<Button-3>',x=x+5,y=y+5);self.root.update()
+            menu=app.column_filters.menu
+            index=next(i for i in range(menu.index('end')+1) if menu.type(i)=='command' and menu.entrycget(i,'label')==label)
+            menu.invoke(index);self.root.update()
+        action(first,'Φίλτρο με αυτή την τιμή');self.assertEqual(tree.get_children(),(first,))
+        action(first,'Εξαίρεση αυτής της τιμής');self.assertEqual(tree.get_children(),(second,))
+        action(second,'Φίλτρο με αυτή την τιμή');self.assertEqual(tree.get_children(),(second,))
+        app.column_filters.remove('name');self.assertEqual(set(tree.get_children()),{first,second})
+
+    def test_rejected_post_selects_existing_queue_for_resume_without_changing_progress(self):
+        from types import SimpleNamespace
+        self.import_fixture('separate.xlsx');app=self.app;app.refresh();panel=app.rpa_panel
+        ids=list(app._documents)
+        panel.workspace.approve_many(app.company,[dict(document=d,group='6',account='64.03') for d in ids],confirmed=True)
+        job=panel.rpa.create(app.company,ids,mode='fill_only',confirmed=True)
+        panel.rpa.pause(app.company,job);before=panel.rpa.items(app.company,job);panel.job=None
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('ctypes.windll',SimpleNamespace(user32=SimpleNamespace(GetAsyncKeyState=lambda _:0)),create=True),patch('app.ui.rpa_panel.messagebox.showerror'):
+            panel.post();wait(self.root,lambda:not app.busy)
+        self.assertEqual(panel.job,job);self.assertFalse(panel.buttons['resume'].instate(['disabled']))
+        self.assertEqual(panel.rpa.items(app.company,job),before);self.assertEqual(self.count('rpa_jobs'),1)
+
+    def test_filtered_posting_then_clear_runs_only_visible_rows_without_replaying_them(self):
+        from types import SimpleNamespace
+        from app.application.supplier_accounts import SupplierAccounts
+        from app.infrastructure.ebs_adapter.adapter import FIELDS
+        from tests.test_workflow import FakeEBS
+        app=self.app
+        with app.erp.db:app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(app.company,))
+        rows=[]
+        for i,vat in enumerate(('000000004','000000005','000000004')):
+            row=list(ROW);row[0]=vat;row[1]='SYNTHETIC '+vat;row[3]='FILTER'+str(i);row[8]=str(88001000+i);rows.append(row)
+        workbook(self.folder/'inputs/filtered-post.xlsx',[HEADERS,*rows]);self.import_fixture('filtered-post.xlsx');app.refresh()
+        panel=app.rpa_panel;ids=list(app._documents)
+        SupplierAccounts(app.erp).save(app.company,list({r['counterparty_id'] for r in app._documents.values()}),'6','64.03',confirmed=True)
+        panel.workspace.save_profile(app.company,dict(mapping={f:[10,20] for f,_ in FIELDS},save=[100,200],new=[300,400]))
+        with app.erp.db:app.erp.db.execute('UPDATE ebs_profiles SET pilot_at=CURRENT_TIMESTAMP WHERE company_id=?',(app.company,))
+        old=panel.rpa.posting(app.company,ids)['job'];panel.rpa.pause(app.company,old);panel.job=old
+        before=panel.rpa.items(app.company,old)[1];app.refresh()
+        app.column_filters.cell('vat','000000005');visible=list(app._documents);self.assertEqual(visible,[ids[1]])
+        fake=FakeEBS()
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=fake),patch('ctypes.windll',SimpleNamespace(user32=SimpleNamespace(GetAsyncKeyState=lambda _:0)),create=True),patch('app.ui.rpa_panel.messagebox.showerror') as error:
+            panel.post();wait(self.root,lambda:not app.busy and not panel.running)
+            self.assertEqual([r[1] for r in fake.calls if r[0]=='fill'],visible)
+            self.assertEqual(panel.rpa.items(app.company,old)[1],before)
+            self.assertEqual(panel.rpa.items(app.company,old)[0]['status'],'stopped')
+            app.column_filters.clear(notify=True);self.assertEqual(set(app._documents),set(ids)-set(visible))
+            panel.post();wait(self.root,lambda:not app.busy and not panel.running)
+            self.assertEqual([r[1] for r in fake.calls if r[0]=='fill'],[ids[1],ids[0],ids[2]])
+            error.assert_not_called()
+        self.assertEqual(self.count('documents'),3)
+        self.assertEqual(panel.rpa.progress(app.company,panel.job)['automatically_verified'],0)
+
+    def test_visible_filter_reset_restores_screenshot_combination_without_database_changes(self):
+        self.import_fixture('separate.xlsx');app=self.app;app.refresh()
+        first=next(iter(app._documents.values()))
+        app.erp.prepare_document(app.company,first['id'],'6','64.03',confirmed=True)
+        app.state_filter.set('Μη καταχωρισμένα');app.refresh();self.root.update()
+        expected=set(app._documents);before=list(app.erp.db.iterdump())
+        app.column_filters.cell('name',first['name'])
+        app.column_filters.cell('preparation_state','Χρειάζεται λογαριασμό',True)
+        self.root.update()
+        button=self.button(app.documents_tab,'Επαναφορά φίλτρων')
+        self.assertTrue(button.winfo_ismapped());self.assertEqual(len(app.tree.get_children()),1)
+        button.invoke();self.root.update()
+        self.assertEqual(set(app._documents),expected)
+        self.assertEqual(app.state_filter.get(),'Μη καταχωρισμένα')
+        self.assertFalse(app.column_filters.cell_filters);self.assertFalse(button.winfo_ismapped())
+        self.assertEqual(list(app.erp.db.iterdump()),before)
+        for name,view in app.document_views.items():
+            app.notebook.select(view.parent);self.root.update()
+            view.column_filters.cell('vat','__NO_ROW__');self.root.update()
+            self.assertTrue(view.column_filters.reset_button.winfo_ismapped())
+            view.column_filters.reset_button.invoke();self.root.update()
+            self.assertFalse(view.column_filters.cell_filters)
+
+    def test_p1_filtered_mixed_sources_stable_ids_all_three_actions_and_registered_view(self):
+        from types import SimpleNamespace
+        from app.application.mydata import MyData
+        from app.application.ebs_reconciliation import EBSReconciliation
+        from app.infrastructure.aade.client import parsed_page
+        from app.infrastructure.ebs_adapter.adapter import FIELDS
+        from tests.test_workflow import FakeEBS,response
+        from tests.fixtures import reconcile_empty
+        app=self.app
+        with app.erp.db:app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(app.company,))
+        rows=[]
+        for i,(vat,number) in enumerate((('000000004','MANUAL-A'),('000000005','OTHER'),('000000004','MANUAL-B'),('000000004','ALREADY'))):
+            row=list(ROW);row[0]=vat;row[1]='SYNTHETIC '+vat;row[3]=number;row[8]='';rows.append(row)
+        workbook(self.folder/'inputs/mixed-no-mark.xlsx',[HEADERS,*rows]);self.import_fixture('mixed-no-mark.xlsx')
+        api=MyData(app.erp)
+        for code,mark,number in [('1.1','99020001','API-A'),('9.3','99020002','DISPATCH')]:
+            xml=response(mark=mark,number=number,issuer='000000004',receiver='000000008').replace(b'<invoiceType>1.1</invoiceType>',f'<invoiceType>{code}</invoiceType>'.encode())
+            api.persist(app.company,'production','2026-10-01','2026-10-31',[(xml,parsed_page(xml))],'RequestDocs')
+        api.import_documents(app.company,'production','2026-10-01','2026-10-31',confirmed=True)
+        reconcile_empty(app.erp,app.company)
+        data=app.erp.search(app.company);ids={r['number']:r['id'] for r in data}
+        for row in data:
+            if row['kind']=='invoice':app.erp.prepare_document(app.company,row['id'],'6','64.03',confirmed=True)
+        EBSReconciliation(app.erp).confirm_manual(app.company,ids['ALREADY'],'Synthetic confirmed prior entry',confirmed=True)
+        panel=app.rpa_panel
+        panel.workspace.save_profile(app.company,dict(mapping={f:[10,20] for f,_ in FIELDS},save=[100,200],new=[300,400]))
+        with app.erp.db:app.erp.db.execute('UPDATE ebs_profiles SET pilot_at=CURRENT_TIMESTAMP WHERE company_id=?',(app.company,))
+        app.state_filter.set('Μη καταχωρισμένα');app.refresh()
+        app.column_filters.cell('vat','000000004');app.column_filters.cell('name','SYNTHETIC 000000005',True)
+        app.sort_documents('reference');self.root.update()
+        visible=list(app.tree.get_children());self.assertIn(str(ids['MANUAL-A']),visible)
+        self.assertIn(str(ids['API-A']),visible);self.assertNotIn(str(ids['DISPATCH']),visible);self.assertNotIn(str(ids['ALREADY']),visible)
+        self.assertEqual(app.erp.detail(app.company,ids['MANUAL-A'])[0]['mark'],None)
+        fake=FakeEBS()
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=fake),patch('ctypes.windll',SimpleNamespace(user32=SimpleNamespace(GetAsyncKeyState=lambda _:0)),create=True),patch('app.ui.rpa_panel.messagebox.showerror') as error:
+            app.tree.selection_set(str(ids['MANUAL-A']));panel.post_selected();wait(self.root,lambda:not app.busy and not panel.running)
+            self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],[ids['MANUAL-A']])
+            app.tree.selection_set(str(ids['API-A']));panel.post_one();wait(self.root,lambda:not app.busy and not panel.running)
+            panel.post();wait(self.root,lambda:not app.busy and not panel.running)
+            error.assert_not_called()
+        self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],[ids['MANUAL-A'],ids['API-A'],ids['MANUAL-B']])
+        self.assertFalse(app.tree.get_children())
+        tab=app.reconciliation;tab.filter.set('Καταχωρισμένα');tab.refresh(app._evidence)
+        self.assertEqual(set(map(int,tab.tree.get_children())),{ids['MANUAL-A'],ids['MANUAL-B'],ids['API-A'],ids['ALREADY']})
+        self.assertFalse(app.tree.get_children())
+        for document in (ids['MANUAL-A'],ids['API-A'],ids['MANUAL-B']):
+            self.assertTrue(app._evidence[document]['submitted']);self.assertFalse(app._evidence[document]['storage_verified'])
+            self.assertIsNotNone(panel.rpa.create(app.company,[document],mode='fill_only',confirmed=True))
+        self.assertEqual(self.count('documents'),6)
+        labels=[panel.options_menu.entrycget(i,'label') for i in range(panel.options_menu.index('end')+1)]
+        self.assertFalse(any('Ιστορικό' in label or 'Προβολή ουράς' in label for label in labels))
+        tab.tree.selection_set(str(ids['API-A']))
+        with patch('app.ui.rpa_panel.messagebox.askyesno') as confirm,patch('app.ui.rpa_panel.simpledialog.askstring') as note:
+            tab.confirm();confirm.assert_not_called();note.assert_not_called()
+        self.assertTrue(app._evidence[ids['API-A']]['storage_verified'])
+        with self.assertRaises(ValueError):panel.rpa.create(app.company,[ids['API-A']],mode='fill_only',confirmed=True)
+
+    def test_p1_failed_other_supplier_does_not_block_filtered_post_and_no_history_prompt(self):
+        from types import SimpleNamespace
+        from app.infrastructure.ebs_adapter.adapter import FIELDS
+        from tests.test_workflow import FakeEBS
+        app=self.app
+        with app.erp.db:app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(app.company,))
+        rows=[]
+        for i,vat in enumerate(('000000004','000000005')):
+            row=list(ROW);row[0]=vat;row[1]='SYNTHETIC '+vat;row[3]='BANK'+str(i);row[8]='';rows.append(row)
+        workbook(self.folder/'inputs/isolated-failure.xlsx',[HEADERS,*rows]);self.import_fixture('isolated-failure.xlsx');app.refresh()
+        panel=app.rpa_panel;ids=list(app._documents)
+        panel.workspace.approve_many(app.company,[dict(document=d,group='6',account='64.03') for d in ids],confirmed=True)
+        panel.workspace.save_profile(app.company,dict(mapping={f:[10,20] for f,_ in FIELDS},save=[100,200],new=[300,400]))
+        with app.erp.db:app.erp.db.execute('UPDATE ebs_profiles SET pilot_at=CURRENT_TIMESTAMP WHERE company_id=?',(app.company,))
+        failed=panel.rpa.posting(app.company,ids[:1])['job']
+        result=panel.rpa.advance(app.company,failed,live_confirmed=True,adapter=FakeEBS(fail='save'))
+        self.assertEqual(result['item_status'],'uncertain')
+        app.state_filter.set('Μη καταχωρισμένα');app.refresh();app.column_filters.cell('vat','000000005')
+        self.assertEqual(list(app._documents),ids[1:]);fake=FakeEBS()
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=fake),patch('ctypes.windll',SimpleNamespace(user32=SimpleNamespace(GetAsyncKeyState=lambda _:0)),create=True),patch('app.ui.rpa_panel.messagebox.showerror') as error,patch('app.ui.rpa_panel.simpledialog.askstring') as note,patch('app.ui.rpa_panel.messagebox.askyesno') as confirm:
+            panel.post();wait(self.root,lambda:not app.busy and not panel.running)
+            self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],ids[1:])
+            self.assertEqual(fake.calls[0][0],'new')
+            self.assertEqual(panel.rpa.items(app.company,failed)[1][0]['status'],'uncertain')
+            app.column_filters.clear(notify=True);app.state_filter.set('Χρειάζεται έλεγχος στο EBS');app.filter_documents();self.root.update()
+            x,y,w,h=app.tree.bbox(str(ids[0]),'name')
+            with patch('tkinter.Menu.tk_popup'):
+                app.tree.event_generate('<Button-3>',x=x+5,y=y+5);self.root.update()
+            menu=app.column_filters.menu
+            index=next(i for i in range(menu.index('end')+1) if menu.type(i)=='command' and menu.entrycget(i,'label')=='Δεν καταχωρίστηκε · επαναφορά στα εκκρεμή')
+            menu.invoke(index);self.root.update()
+            self.assertEqual(panel.rpa.items(app.company,failed)[1][0]['status'],'not_saved_confirmed')
+            app.state_filter.set('Μη καταχωρισμένα');app.filter_documents();self.assertEqual(list(app._documents),ids[:1])
+            app.tree.selection_set(str(ids[0]));panel.post_one();wait(self.root,lambda:not app.busy and not panel.running)
+            self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],[ids[1],ids[0]])
+            note.assert_not_called();confirm.assert_not_called();error.assert_not_called()
+
+    def test_p1_first_success_can_be_confirmed_without_history_window_or_notes(self):
+        from types import SimpleNamespace
+        from app.infrastructure.ebs_adapter.adapter import FIELDS
+        from tests.test_workflow import FakeEBS
+        app=self.app
+        with app.erp.db:app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(app.company,))
+        row=list(ROW);row[0]='000000004';row[8]=''
+        workbook(self.folder/'inputs/first-no-history.xlsx',[HEADERS,row]);self.import_fixture('first-no-history.xlsx');app.refresh()
+        doc=next(iter(app._documents));panel=app.rpa_panel
+        panel.workspace.approve_many(app.company,[dict(document=doc,group='6',account='64.03')],confirmed=True)
+        panel.workspace.save_profile(app.company,dict(mapping={f:[10,20] for f,_ in FIELDS},save=[100,200],new=[300,400]))
+        app.state_filter.set('Μη καταχωρισμένα');app.refresh();fake=FakeEBS()
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=fake),patch('ctypes.windll',SimpleNamespace(user32=SimpleNamespace(GetAsyncKeyState=lambda _:0)),create=True):
+            panel.post();wait(self.root,lambda:not app.busy and not panel.running)
+        self.assertFalse(app.tree.get_children());self.assertIsNone(panel.workspace.profile(app.company)['pilot_at'])
+        tab=app.reconciliation;tab.filter.set('Καταχωρισμένα');tab.refresh(app._evidence);tab.tree.selection_set(str(doc))
+        with patch('app.ui.rpa_panel.messagebox.askyesno') as confirm,patch('app.ui.rpa_panel.simpledialog.askstring') as note:
+            tab.confirm();self.root.update();confirm.assert_not_called();note.assert_not_called()
+        self.assertTrue(panel.workspace.profile(app.company)['pilot_at'])
+        self.assertTrue(app._evidence[doc]['storage_verified'])
+        self.assertEqual([c[0] for c in fake.calls],['prepare','fill','save'])
+        from app import __version__
+        self.assertIn(__version__,self.root.title())
+
+
+    def test_context_filters_have_top_reset_and_restore_base_view_through_real_commands(self):
+        from copy import deepcopy
+        self.import_fixture('separate.xlsx');app=self.app;app.refresh()
+        app.state_filter.set('Μη καταχωρισμένα');app.group_filter.set('Όλες οι ομάδες');app.refresh();self.root.update()
+        tree=app.tree;expected=tree.get_children();before=list(app.erp.db.iterdump())
+        item=expected[0];x,y,w,h=tree.bbox(item,'name')
+        with patch('tkinter.Menu.tk_popup'):
+            tree.event_generate('<Button-3>',x=x+4,y=y+4);self.root.update()
+        menu=app.column_filters.menu
+        choose=next(i for i in range(menu.index('end')+1) if menu.type(i)=='command' and menu.entrycget(i,'label')=='Φίλτρο με αυτή την τιμή')
+        menu.invoke(choose);self.root.update()
+        app.column_filters.cell('gross_minor',app._documents[int(item)]['gross_minor'])
+        active=deepcopy(app.column_filters.cell_filters)
+        app.query.set('NO-SUCH-DOCUMENT');app.filter_documents();self.assertFalse(tree.get_children())
+        clear=self.button(app.documents_tab,'Καθαρισμός');clear.invoke();self.root.update()
+        self.assertEqual(app.column_filters.cell_filters,active)
+        reset=self.button(app.documents_tab,'Επαναφορά φίλτρων')
+        self.assertEqual(reset.master,clear.master)
+        self.assertTrue(reset.winfo_ismapped())
+        reset.invoke();self.root.update()
+        self.assertEqual(tree.get_children(),expected)
+        self.assertEqual(app.state_filter.get(),'Μη καταχωρισμένα');self.assertEqual(app.group_filter.get(),'Όλες οι ομάδες')
+        self.assertEqual(list(app.erp.db.iterdump()),before)
+        # Reapply then remove through the actual popup command, not clear().
+        app.column_filters.cell('name',app._documents[int(item)]['name'])
+        x,y,w,h=tree.bbox(item,'name')
+        with patch('tkinter.Menu.tk_popup'):
+            tree.event_generate('<Button-3>',x=x+4,y=y+4);self.root.update()
+        menu=app.column_filters.menu
+        self.assertEqual(menu.entrycget(0,'label'),'Καθαρισμός όλων των φίλτρων')
+        menu.invoke(0);self.root.update()
+        self.assertEqual(tree.get_children(),expected)
+        app.notebook.select(app.document_views['expenses'].parent);self.root.update()
+        app.notebook.select(app.documents_tab);app.refresh();self.root.update()
+        self.assertEqual(tree.get_children(),expected)
+
+    def test_long_filter_summary_cannot_hide_existing_reset_in_narrow_view(self):
+        from app.ui.column_filters import ColumnFilters
+        window=tk.Toplevel(self.root);window.geometry('700x400')
+        frame=ttk.Frame(window);frame.pack(fill='both',expand=True)
+        tree=ttk.Treeview(frame,columns=('name',),show='headings')
+        tree.grid(row=0,column=0,sticky='nsew');frame.columnconfigure(0,weight=1);frame.rowconfigure(0,weight=1)
+        tree.heading('name',text='Συναλλασσόμενος')
+        changes=[];filters=ColumnFilters(tree,lambda:changes.append(True),show_summary=True)
+        filters.cell('name','ΣΥΝΘΕΤΙΚΗ ΕΠΩΝΥΜΙΑ ΜΕ ΜΑΚΡΥ ΚΕΙΜΕΝΟ '*5)
+        filters.apply([{'name':'OTHER'}]);self.root.update()
+        button=filters.reset_button
+        self.assertTrue(button.winfo_ismapped())
+        self.assertGreaterEqual(button.winfo_width(),button.winfo_reqwidth())
+        self.assertLessEqual(button.winfo_x()+button.winfo_width(),button.master.winfo_width())
+        button.invoke();self.root.update()
+        self.assertFalse(filters.cell_filters);self.assertEqual(changes,[True,True])
+        window.destroy()
+
+    def test_posting_target_failure_displays_report_and_exports_details_without_retry(self):
+        from types import SimpleNamespace
+        import json
+        from app.infrastructure.ebs_adapter.adapter import FIELDS
+        from app.infrastructure.crashlog import export
+        from tests.test_workflow import FakeEBS
+        app=self.app
+        with app.erp.db:app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(app.company,))
+        row=list(ROW);row[0]='000000004';row[8]=''
+        workbook(self.folder/'inputs/report-ui.xlsx',[HEADERS,row]);self.import_fixture('report-ui.xlsx');app.refresh()
+        doc=next(iter(app._documents));panel=app.rpa_panel
+        panel.workspace.approve_many(app.company,[dict(document=doc,group='6',account='64.03')],confirmed=True)
+        panel.workspace.save_profile(app.company,dict(mapping={f:[10,20] for f,_ in FIELDS},save=[100,200],new=[300,400]))
+        app.refresh();app.column_filters.cell('name',app._documents[doc]['name'])
+        fake=FakeEBS();cause='Η θέση του πεδίου AFM_CREDITOR δεν ανήκει στο ενεργό ΤΕΔ της ουράς. Έλεγξε το mapping πριν καταχώριση.'
+        def fail(profile,expected):fake.calls.append(('prepare',expected));raise RuntimeError(cause)
+        fake.prepare=fail
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=fake),patch('ctypes.windll',SimpleNamespace(user32=SimpleNamespace(GetAsyncKeyState=lambda _:0)),create=True),patch('app.ui.rpa_panel.messagebox.showerror') as error:
+            panel.post();wait(self.root,lambda:not app.busy and not panel.running)
+        self.assertTrue(error.called);self.assertIn('ebs-failure-',str(error.call_args))
+        self.assertEqual([c[0] for c in fake.calls],['prepare'])
+        files=list((app.directory/'diagnostics').glob('ebs-failure-*.json'));self.assertEqual(len(files),1)
+        report=json.loads(files[0].read_text());self.assertEqual(report['phase'],'prepare')
+        self.assertEqual(report['profile_points']['AFM_CREDITOR'],[10,20]);self.assertFalse(report['save_may_have_been_sent'])
+        destination=self.folder/'support.txt';export(app.directory,destination)
+        self.assertIn(cause,destination.read_text());self.assertTrue(app.column_filters.cell_filters)
+
+    def test_supplier_creditor_tabs_follow_mapping_and_cancel_purchase_has_no_writes(self):
+        from app.application.supplier_accounts import SupplierAccounts
+        from app.application.supplier_purchases import SupplierPurchases
+        from tests.test_supplier_purchases import synthetic_vat
+        row=list(ROW);row[0]=synthetic_vat();workbook(self.folder/'inputs/groups.xlsx',[HEADERS,row]);self.import_fixture('groups.xlsx')
+        app=self.app;doc=next(iter(app._documents));cp=app._documents[doc]['counterparty_id']
+        SupplierAccounts(app.erp).save(app.company,[cp],'6','64.03',confirmed=True)
+        app.notebook.select(app.creditors_tab);app.refresh();self.root.update()
+        self.assertTrue(app.creditors.tree.exists(str(cp)))
+        app.suppliers.refresh();self.assertFalse(app.suppliers.tree.exists(str(cp)))
+        before=list(app.erp.db.iterdump())
+        with patch('app.ui.desktop.messagebox.askyesno',return_value=False) as confirm:app.set_purchase(row[0],True)
+        self.assertEqual(list(app.erp.db.iterdump()),before);self.assertIn(row[0],confirm.call_args.args[1])
+        with patch('app.ui.desktop.messagebox.askyesno',return_value=True):app.set_purchase(row[0],True)
+        app.suppliers.refresh();app.creditors.refresh()
+        self.assertTrue(app.suppliers.tree.exists(str(cp)));self.assertTrue(app.creditors.tree.exists(str(cp)))
+        self.assertEqual(SupplierPurchases(app.erp).inspect(app.company,row[0])['previous_group'],'6')
+        app.restore_purchase_group(row[0]);app.creditors.refresh();app.suppliers.refresh()
+        self.assertTrue(app.creditors.tree.exists(str(cp)));self.assertFalse(app.suppliers.tree.exists(str(cp)))
+        self.assertEqual(app.erp.preparation(app.company,doc)['account_code'],'64.03')
+
+    def test_current_account_display_updates_registered_pending_and_open_windows_without_rewriting_history(self):
+        from app.application.supplier_accounts import SupplierAccounts
+        from app.application.ebs_reconciliation import EBSReconciliation
+        from app.ui.counterparties import open_detail as card_detail
+        app=self.app
+        rows=[]
+        for number,day in [('1','2026-09-21'),('2','2026-10-21')]:
+            row=list(ROW);row[3]=number;row[4]=day;row[8]='';rows.append(row)
+        workbook(self.folder/'inputs/display-account.xlsx',[HEADERS,*rows]);self.import_fixture('display-account.xlsx')
+        ids=[r['id'] for r in app.erp.search(app.company)];cp=app.erp.search(app.company)[0]['counterparty_id']
+        service=SupplierAccounts(app.erp);service.save(app.company,[cp],'6','64.03',confirmed=True)
+        EBSReconciliation(app.erp).confirm_manual(app.company,ids[0],'Synthetic check',confirmed=True)
+        historic=app.erp.preparation(app.company,ids[0]);evidence=list(app.erp.db.execute('SELECT * FROM ebs_matches'))
+        app.month_filter.set('Όλοι οι μήνες');app.refresh();app.open_detail(ids[0]);detail=app._details[ids[0]];other_card=card_detail(app,cp);card=card_detail(app,cp)
+        app.column_filters.cell('name',app.erp.detail(app.company,ids[0])[0]['name'])
+        original_filters=dict(app.column_filters.cell_filters)
+        card.account_fields[1].set('64.09');self.button(card,'Αποθήκευση καρτέλας').invoke();self.root.update()
+        self.assertEqual(app.erp.preparation(app.company,ids[0]),historic)
+        self.assertEqual(list(app.erp.db.execute('SELECT * FROM ebs_matches')),evidence)
+        self.assertEqual(app.erp.preparation(app.company,ids[1])['account_code'],'64.09')
+        self.assertIn('64.09',detail.current_account_var.get())
+        self.assertTrue(all(other_card.document_tree.set(key,'account')=='64.09' for key in other_card.document_tree.get_children()))
+        self.assertTrue(any(isinstance(w,ttk.Entry) and w.get()=='64.03' for w in widgets(detail)))
+        self.assertEqual(app.column_filters.cell_filters,original_filters)
+        for document in ids:
+            if app.tree.exists(str(document)):self.assertEqual(app.tree.set(str(document),'display_account_code'),'64.09')
+            self.assertEqual(app.document_views['expenses'].tree.set(str(document),'display_account_code'),'64.09')
+        self.assertEqual(app.creditors.tree.set(str(cp),'account'),'64.09')
+        app.column_filters.cell('display_account_code','64.09');app.sort_documents('display_account_code')
+        self.assertEqual(set(map(int,app.tree.get_children())),set(ids)-{ids[0]})
+        self.assertEqual(app.erp.preparation(app.company,ids[0])['account_code'],'64.03')
+        app.column_filters.remove('display_account_code')
+        self.assertEqual(app.column_filters.cell_filters,original_filters)
+        # Even a newly imported unprepared document reads the same VAT mapping.
+        row=list(ROW);row[3]='3';row[8]='';workbook(self.folder/'inputs/display-new.xlsx',[HEADERS,row]);self.import_fixture('display-new.xlsx');app.refresh()
+        self.assertTrue(all(r['display_account_code']=='64.09' for r in app._documents.values()))
+        self.assertEqual(app.erp.preparation(app.company,ids[0]),historic)
+
+    def test_current_account_covers_excel_api_income_and_movement_without_source_changes(self):
+        from app.application.mydata import MyData
+        from app.application.supplier_accounts import SupplierAccounts
+        from app.infrastructure.aade.client import parsed_page
+        from tests.test_workflow import response
+        app=self.app;self.import_fixture('separate.xlsx')
+        doc=next(r for r in app.erp.search(app.company) if r['vat']=='000000001');cp=doc['counterparty_id']
+        with app.erp.db:app.erp.db.execute("UPDATE documents SET direction='outgoing' WHERE id=?",(doc['id'],))
+        api=MyData(app.erp)
+        for code,mark,number in [('1.1','99110001','API-DISPLAY'),('9.3','99110002','MOVEMENT-DISPLAY')]:
+            xml=response(mark=mark,number=number).replace(b'<invoiceType>1.1</invoiceType>',f'<invoiceType>{code}</invoiceType>'.encode())
+            api.persist(app.company,'production','2026-10-01','2026-10-31',[(xml,parsed_page(xml))],'RequestDocs')
+        api.import_documents(app.company,'production','2026-10-01','2026-10-31',confirmed=True)
+        before=[tuple(r) for r in app.erp.db.execute('SELECT * FROM source_records')]
+        SupplierAccounts(app.erp).save(app.company,[cp],'6','64.09',confirmed=True);app.refresh()
+        for view in ('income','expenses','movement'):
+            rows=[r for r in app.document_views[view].rows.values() if r['vat']=='000000001']
+            self.assertTrue(rows,view)
+            self.assertTrue(all(r['display_account_code']=='64.09' for r in rows))
+            for row in rows:self.assertEqual(app.document_views[view].tree.set(str(row['id']),'display_account_code'),'64.09')
+        self.assertEqual([tuple(r) for r in app.erp.db.execute('SELECT * FROM source_records')],before)
+
+    def test_received_financial_scope_survives_filters_and_purchase_undo(self):
+        from app.application.mydata import MyData
+        from app.application.supplier_purchases import SupplierPurchases
+        from app.infrastructure.aade.client import parsed_page
+        from tests.test_workflow import response
+        from tests.test_supplier_purchases import synthetic_vat
+        from tests.fixtures import reconcile_empty
+        from app.ui.desktop import STATES
+        app=self.app;service=MyData(app.erp);supplier=synthetic_vat(1)
+        for i,(code,outgoing) in enumerate([('1.1',False),('5.1',False),('9.3',False),('10.1',False),('1.1',True)]):
+            xml=response(mark=str(99880001+i),number=str(i+1),issuer='000000000' if outgoing else supplier,receiver=synthetic_vat(2) if outgoing else '000000000')
+            xml=xml.replace(b'<invoiceType>1.1</invoiceType>',f'<invoiceType>{code}</invoiceType>'.encode())
+            method='RequestTransmittedDocs' if outgoing else 'RequestDocs'
+            service.persist(app.company,'production','2026-10-01','2026-10-31',[(xml,parsed_page(xml))],method)
+            service.import_documents(app.company,'production','2026-10-01','2026-10-31',confirmed=True,direction='outgoing' if outgoing else 'incoming')
+        reconcile_empty(app.erp,app.company)
+        expected={r['id'] for r in app.erp.search(app.company) if r['kind'] in ('invoice','credit_note') and r['direction']=='incoming'}
+        self.assertEqual(len(expected),2)
+        for state in (STATES[3],STATES[0],STATES[1]):
+            app.state_filter.set(state);app.refresh()
+            self.assertEqual(set(app._documents),expected)
+            app.column_filters.cell('reference','ΔΟΚ/1');app.column_filters.clear(notify=True)
+            app.query.set('does-not-exist');self.button(app.documents_tab,'Καθαρισμός').invoke()
+            self.assertEqual(set(app._documents),expected)
+        before=[tuple(r) for r in app.erp.db.execute('SELECT * FROM documents')]
+        purchases=SupplierPurchases(app.erp);purchases.set(app.company,supplier,True);app.refresh()
+        self.assertEqual(app._documents,{})
+        self.assertEqual(set(app.document_views['purchases'].rows),expected)
+        purchases.set(app.company,supplier,False);app.refresh()
+        self.assertEqual(set(app._documents),expected)
+        self.assertEqual([tuple(r) for r in app.erp.db.execute('SELECT * FROM documents')],before)
+
+    def test_registered_received_value_never_returns_to_pending_after_reset(self):
+        from app.application.ebs_reconciliation import EBSReconciliation
+        self.import_fixture('separate.xlsx');app=self.app
+        ids=set(app._documents);registered=min(ids)
+        EBSReconciliation(app.erp).confirm_manual(app.company,registered,'Synthetic visual check',confirmed=True)
+        for state in ('Μη καταχωρισμένα','Όλα τα παραστατικά','Χωρίς προετοιμασία'):
+            app.state_filter.set(state);app.refresh()
+            app.column_filters.cell('vat','missing');app.column_filters.clear(notify=True)
+            self.assertEqual(set(app._documents),ids-{registered})
+        app.state_filter.set('Καταχωρισμένα');app.refresh()
+        self.assertNotIn(registered,app._documents)
+        self.assertEqual(app.notebook.tab(app.documents_tab,'text'),'Μη καταχωρισμένα στο EBS')
+        app.reconciliation.filter.set('Καταχωρισμένα');app.reconciliation.refresh(app._evidence)
+        self.assertEqual(set(map(int,app.reconciliation.tree.get_children())),{registered})
+
+    def test_test_environment_keeps_account_display_and_simulation_isolated(self):
+        from app.application.mydata import MyData
+        from app.application.supplier_accounts import SupplierAccounts
+        from app.infrastructure.aade.client import parsed_page
+        from tests.test_workflow import response
+        app=self.app;self.import_fixture('separate.xlsx')
+        live=next(r for r in app.erp.search(app.company) if r['vat']=='000000001')
+        SupplierAccounts(app.erp).save(app.company,[live['counterparty_id']],'6','64.09',confirmed=True)
+        api=MyData(app.erp);xml=response()
+        api.persist(app.company,'test','2026-10-01','2026-10-31',[(xml,parsed_page(xml))])
+        api.import_documents(app.company,'test','2026-10-01','2026-10-31',confirmed=True)
+        test=app.erp.search(app.company,environment='test')[0]
+        app.erp.prepare_document(app.company,test['id'],'6','64.99',confirmed=True)
+        with app.erp.db:app.erp.db.execute("INSERT INTO aade_settings(company_id,environment) VALUES (?,'test')",(app.company,))
+        app.refresh()
+        self.assertEqual(set(app._documents),{test['id']})
+        self.assertNotIn(live['counterparty_id'],app.suppliers.rows)
+        self.assertNotIn(live['counterparty_id'],app.creditors.rows)
+        self.assertEqual(app.tree.set(str(test['id']),'display_account_code'),'—')
+        app.open_detail(test['id'])
+        self.assertNotIn('64.09',app._details[test['id']].current_account_var.get())
+        with patch('app.ui.rpa_panel.messagebox.askyesno',return_value=True),patch.object(app.rpa_panel,'start'),patch('app.ui.rpa_panel.messagebox.showwarning') as warning:
+            app.rpa_panel.make('simulation')
+        warning.assert_not_called()
+        meta,items=app.rpa_panel.rpa.items(app.company,app.rpa_panel.job)
+        self.assertEqual(meta['mode'],'simulation')
+        self.assertEqual([i['document_id'] for i in items],[test['id']])
+        self.assertEqual(app.rpa_panel.rpa.advance(app.company,app.rpa_panel.job)['status'],'completed')
+
+    def continuous_batch_fixture(self,pilot=False,count=13):
+        from app.application.supplier_accounts import SupplierAccounts
+        from app.infrastructure.ebs_adapter.adapter import FIELDS
+        app=self.app
+        with app.erp.db:app.erp.db.execute("UPDATE companies SET vat='000000008' WHERE id=?",(app.company,))
+        rows=[]
+        for number in range(count):
+            row=list(ROW);row[0]='000000004';row[3]='CONT-'+str(number);row[8]='';rows.append(row)
+        workbook(self.folder/'inputs/continuous.xlsx',[HEADERS,*rows]);self.import_fixture('continuous.xlsx')
+        docs=app.erp.search(app.company);cp=docs[0]['counterparty_id']
+        SupplierAccounts(app.erp).save(app.company,[cp],'6','64.09',confirmed=True,apply_pending=False)
+        panel=app.rpa_panel
+        panel.workspace.approve_many(app.company,[dict(document=docs[0]['id'],group='6',account='64.09')],confirmed=True)
+        panel.workspace.save_profile(app.company,dict(mapping={f:[10,20] for f,_ in FIELDS},save=[100,200],new=[300,400]))
+        with app.erp.db:
+            app.erp.db.execute('UPDATE counterparty_accounts SET preferred_group=NULL WHERE company_id=?',(app.company,))
+            if not pilot:app.erp.db.execute('UPDATE ebs_profiles SET pilot_at=CURRENT_TIMESTAMP WHERE company_id=?',(app.company,))
+        app.state_filter.set('Μη καταχωρισμένα');app.refresh()
+        app.column_filters.cell('display_account_code','64.09');app.sort_documents('reference')
+        ids=list(map(int,app.tree.get_children()));self.assertEqual(len(ids),count)
+        return ids
+
+    def run_continuous_filtered_action(self,selected=False,pilot=False):
+        from types import SimpleNamespace
+        from tests.test_workflow import FakeEBS
+        ids=self.continuous_batch_fixture(pilot);app=self.app;panel=app.rpa_panel;fake=FakeEBS()
+        if selected:app.tree.selection_set([str(d) for d in ids])
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=fake),patch('ctypes.windll',SimpleNamespace(user32=SimpleNamespace(GetAsyncKeyState=lambda _:0)),create=True),patch('app.ui.rpa_panel.messagebox.showerror') as error:
+            import time
+            (panel.post_selected if selected else panel.post)()
+            # 13 records include the real 850ms focus and 350ms scheduling delays.
+            deadline=time.monotonic()+40
+            while app.busy or panel.running:
+                self.root.update();time.sleep(.01)
+                if time.monotonic()>deadline:raise AssertionError('Continuous 13-record GUI timeout')
+            self.root.update()
+            error.assert_not_called()
+        return ids,fake
+
+    def test_batch_thirteen_filtered_current_accounts_continues_after_first_save(self):
+        ids,fake=self.run_continuous_filtered_action()
+        self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],ids)
+        self.assertEqual(sum(c[0]=='save' for c in fake.calls),13)
+        self.assertEqual(sum(c[0]=='new' for c in fake.calls),12)
+        self.assertFalse(self.app.tree.get_children())
+        self.assertIn('13 από 13',self.app.rpa_panel.state.get())
+        tab=self.app.reconciliation;tab.filter.set('Καταχωρισμένα');tab.refresh(self.app._evidence)
+        self.assertEqual(set(map(int,tab.tree.get_children())),set(ids))
+        self.assertFalse(self.app.tree.get_children())
+
+    def test_selected_thirteen_filtered_current_accounts_use_same_continuous_flow(self):
+        ids,fake=self.run_continuous_filtered_action(selected=True)
+        self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],ids)
+        self.assertEqual(sum(c[0]=='save' for c in fake.calls),13)
+        self.assertEqual(sum(c[0]=='new' for c in fake.calls),12)
+
+    def test_first_trial_automatically_continues_all_filtered_records_without_activation(self):
+        ids,fake=self.run_continuous_filtered_action(pilot=True)
+        self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],ids)
+        self.assertEqual(sum(c[0]=='save' for c in fake.calls),13)
+        self.assertEqual(sum(c[0]=='new' for c in fake.calls),12)
+        self.assertIn('13 από 13',self.app.rpa_panel.state.get())
+        self.assertTrue(self.app.rpa_panel.rpa.progress(self.app.company,self.app.rpa_panel.job)['first_record_done'])
+        self.assertIsNone(self.app.rpa_panel.workspace.profile(self.app.company)['pilot_at'])
+        self.assertTrue(all(not e['storage_verified'] for e in self.app._evidence.values()))
+
+    def run_successful_checkpoint_boundary(self,pause=False,busy=False,stop=False):
+        from types import SimpleNamespace
+        from tests.test_workflow import FakeEBS
+        ids=self.continuous_batch_fixture(count=41);app=self.app;panel=app.rpa_panel;fake=FakeEBS()
+        report=panel.rpa.posting(app.company,ids)
+        for _ in range(39):panel.rpa.advance(app.company,report['job'],adapter=fake,live_confirmed=True)
+        original=fake.save
+        def save(point):
+            original(point)
+            if pause:panel.pause_requested=True
+            if stop:panel.stop_requested=True
+        fake.save=save;panel.job=report['job'];panel.running=True
+        if busy:
+            original_next=panel.next_item;injected=[False]
+            def delayed_next(continuing=False):
+                if continuing and not injected[0]:
+                    injected[0]=True;app.busy=True
+                    self.root.after(200,lambda:setattr(app,'busy',False))
+                return original_next(continuing)
+            panel.next_item=delayed_next
+        with patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=fake),patch('ctypes.windll',SimpleNamespace(user32=SimpleNamespace(GetAsyncKeyState=lambda _:0)),create=True),patch('app.ui.rpa_panel.messagebox.showerror') as error:
+            panel.next_item();wait(self.root,lambda:not app.busy and not panel.running);error.assert_not_called()
+        return ids,fake
+
+    def test_successful_fortieth_record_automatically_resumes_the_same_filtered_queue(self):
+        ids,fake=self.run_successful_checkpoint_boundary()
+        self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],ids)
+        self.assertEqual(sum(c[0]=='save' for c in fake.calls),41)
+        self.assertEqual(sum(c[0]=='new' for c in fake.calls),40)
+        self.assertEqual(self.app.rpa_panel.rpa.items(self.app.company,self.app.rpa_panel.job)[0]['status'],'completed')
+
+    def test_user_pause_overrides_automatic_checkpoint_continuation(self):
+        ids,fake=self.run_successful_checkpoint_boundary(pause=True)
+        self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],ids[:40])
+        meta,items=self.app.rpa_panel.rpa.items(self.app.company,self.app.rpa_panel.job)
+        self.assertEqual(meta['status'],'paused');self.assertEqual(sum(i['status']=='queued' for i in items),1)
+
+    def test_filtered_post_queues_up_to_forty_and_honors_pause_after_first(self):
+        from types import SimpleNamespace
+        from tests.test_workflow import FakeEBS
+        ids=self.continuous_batch_fixture(count=41);app=self.app;panel=app.rpa_panel;fake=FakeEBS()
+        original=fake.save
+        def save(point):original(point);panel.pause_requested=True
+        fake.save=save
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=fake),patch('ctypes.windll',SimpleNamespace(user32=SimpleNamespace(GetAsyncKeyState=lambda _:0)),create=True),patch('app.ui.rpa_panel.messagebox.showerror') as error:
+            panel.post();wait(self.root,lambda:not app.busy and not panel.running);error.assert_not_called()
+        meta,items=panel.rpa.items(app.company,panel.job)
+        self.assertEqual([i['document_id'] for i in items],ids[:40])
+        self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],ids[:1])
+        self.assertEqual(meta['status'],'paused')
+
+
+    def test_automatic_checkpoint_keeps_resume_permission_through_busy_worker_retry(self):
+        ids,fake=self.run_successful_checkpoint_boundary(busy=True)
+        self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],ids)
+        self.assertEqual(sum(c[0]=='save' for c in fake.calls),41)
+        self.assertEqual(sum(c[0]=='new' for c in fake.calls),40)
+    def test_user_stop_overrides_automatic_checkpoint_continuation(self):
+        ids,fake=self.run_successful_checkpoint_boundary(stop=True)
+        self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],ids[:40])
+        self.assertEqual(self.app.rpa_panel.rpa.items(self.app.company,self.app.rpa_panel.job)[0]['status'],'stopped')
+
+
+    def run_posting_issue_choice(self,answer,phase='save'):
+        from types import SimpleNamespace
+        from tests.test_workflow import FakeEBS
+        ids=self.continuous_batch_fixture(count=2);app=self.app;panel=app.rpa_panel;fake=FakeEBS()
+        original=getattr(fake,phase);attempts=[]
+        def once(*args):
+            if not attempts:
+                attempts.append(True);fake.calls.append((phase,'synthetic issue'))
+                raise RuntimeError('synthetic issue')
+            return original(*args)
+        setattr(fake,phase,once)
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession',return_value=fake),patch('ctypes.windll',SimpleNamespace(user32=SimpleNamespace(GetAsyncKeyState=lambda _:0)),create=True),patch('app.ui.rpa_panel.messagebox.showerror') as error,patch('app.ui.rpa_panel.messagebox.askyesno',return_value=answer) as question:
+            panel.post();wait(self.root,lambda:not app.busy and not panel.running)
+            self.assertEqual(question.call_count,1)
+            self.assertIn('μη καταχωρημένα',question.call_args.args[1])
+            if phase in ('save','new','open_new'):self.assertIn('Save',question.call_args.args[1])
+            error.assert_not_called()
+        return ids,fake
+
+    def test_posting_issue_yes_continues_next_and_retains_failed_document_pending(self):
+        ids,fake=self.run_posting_issue_choice(True)
+        self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],ids)
+        self.assertEqual(list(self.app._documents),ids[:1])
+        items=self.app.rpa_panel.rpa.items(self.app.company,self.app.rpa_panel.job)[1]
+        self.assertEqual([i['status'] for i in items],['uncertain','save_invoked'])
+
+    def test_posting_issue_no_stops_without_locking_resume(self):
+        ids,fake=self.run_posting_issue_choice(False)
+        self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],ids[:1])
+        self.assertEqual(list(self.app._documents),ids)
+        self.assertTrue(self.app.rpa_panel.buttons['resume'].instate(['!disabled']))
+
+    def test_preflight_issue_yes_skips_only_current_document(self):
+        ids,fake=self.run_posting_issue_choice(True,'prepare')
+        self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],ids[1:])
+        self.assertEqual(list(self.app._documents),ids[:1])
+
+    def test_failed_new_question_discloses_save_and_continues_remaining(self):
+        ids,fake=self.run_posting_issue_choice(True,'open_new')
+        self.assertEqual([c[1] for c in fake.calls if c[0]=='fill'],ids)
+        self.assertEqual(list(self.app._documents),ids[:1])
+
+
+    def test_changed_profile_issue_keeps_all_documents_queued(self):
+        from types import SimpleNamespace
+        ids=self.continuous_batch_fixture(count=2);app=self.app;panel=app.rpa_panel
+        job=panel.rpa.posting(app.company,ids)['job'];panel.job=job
+        profile=panel.workspace.profile(app.company)['profile'];profile['save']=[101,200]
+        panel.workspace.save_profile(app.company,profile)
+        with patch('app.ui.rpa_panel.sys',SimpleNamespace(platform='win32')),patch('app.infrastructure.ebs_adapter.session.WindowsSession') as native,patch('ctypes.windll',SimpleNamespace(user32=SimpleNamespace(GetAsyncKeyState=lambda _:0)),create=True),patch('app.ui.rpa_panel.messagebox.showerror') as error,patch('app.ui.rpa_panel.messagebox.askyesno') as question:
+            panel.start();wait(self.root,lambda:not app.busy and not panel.running)
+            native.assert_not_called();question.assert_not_called();error.assert_called_once()
+        self.assertEqual([i['status'] for i in panel.rpa.items(app.company,job)[1]],['queued','queued'])
+        self.assertEqual(list(app._documents),ids)
+
+
+    def test_account_edit_from_selected_updates_same_supplier_pending_and_other_open_card(self):
+        from app.application.supplier_accounts import SupplierAccounts
+        from app.application.rpa import RPA
+        from app.ui.counterparties import open_detail as card_detail
+        app=self.app;rows=[]
+        for number in ('ACCOUNT-1','ACCOUNT-2'):
+            row=list(ROW);row[3]=number;row[8]='';rows.append(row)
+        workbook(self.folder/'inputs/account-sync.xlsx',[HEADERS,*rows]);self.import_fixture('account-sync.xlsx')
+        docs=app.erp.search(app.company);ids=[r['id'] for r in docs];cp=docs[0]['counterparty_id']
+        SupplierAccounts(app.erp).save(app.company,[cp],'6','64.03',confirmed=True)
+        job=RPA(app.erp).create(app.company,ids,mode='fill_only',confirmed=True)
+        with app.erp.db:
+            app.erp.db.execute("UPDATE rpa_items SET status='uncertain' WHERE job_id=? AND document_id=?",(job,ids[0]))
+            app.erp.db.execute("UPDATE rpa_jobs SET status='paused' WHERE id=?",(job,))
+        app.refresh();app.tree.selection_set(str(ids[0]));card=card_detail(app,cp)
+        win=app.rpa_panel.accounts();self.assertTrue(win.remember_accounts.get())
+        next(iter(win.account_forms.values()))[1].set('64.09')
+        with patch('app.ui.rpa_panel.messagebox.showerror') as error:
+            self.button(win,'Έγκριση λογαριασμών').invoke()
+        error.assert_not_called();self.root.update()
+        self.assertEqual(card.account_fields[1].get(),'64.09')
+        for d in ids:
+            self.assertEqual(app.erp.preparation(app.company,d)['account_code'],'64.09')
+            self.assertEqual(app.tree.set(str(d),'display_account_code'),'64.09')
+        app.open_detail(ids[1]);detail=app._details[ids[1]]
+        self.assertEqual(detail.preparation_fields[1].get(),'64.09')
+        self.assertTrue(detail.remember_account.get())
+
+
+    def test_dirty_card_cannot_overwrite_new_account_from_another_screen(self):
+        from app.application.supplier_accounts import SupplierAccounts
+        from app.ui.counterparties import open_detail as card_detail
+        app=self.app;self.import_fixture('separate.xlsx');cp=app.erp.search(app.company)[0]['counterparty_id']
+        service=SupplierAccounts(app.erp);service.save(app.company,[cp],'6','64.03',confirmed=True)
+        app.refresh();card=card_detail(app,cp);card.account_fields[1].set('64.08')
+        service.save(app.company,[cp],'6','64.09',confirmed=True);app.refresh()
+        self.assertEqual(card.account_fields[1].get(),'64.08')
+        with patch('app.ui.counterparties.messagebox.showinfo') as info:
+            self.button(card,'Αποθήκευση καρτέλας').invoke()
+        info.assert_called_once();self.assertEqual(card.account_fields[1].get(),'64.09')
+        self.assertEqual(service.display_accounts(app.company)[app.erp.search(app.company)[0]['vat']],'64.09')
+
+    def test_open_pending_detail_refreshes_account_and_rejects_stale_unsaved_edit(self):
+        from app.application.supplier_accounts import SupplierAccounts
+        app=self.app;self.import_fixture('separate.xlsx');doc=app.erp.search(app.company)[0];cp=doc['counterparty_id']
+        service=SupplierAccounts(app.erp);service.save(app.company,[cp],'6','64.03',confirmed=True)
+        app.refresh();app.open_detail(doc['id']);win=app._details[doc['id']]
+        service.save(app.company,[cp],'6','64.09',confirmed=True);app.refresh()
+        self.assertEqual(win.preparation_fields[1].get(),'64.09')
+        win.preparation_fields[1].set('64.08')
+        service.save(app.company,[cp],'6','64.10',confirmed=True);app.refresh()
+        with patch('app.ui.desktop.messagebox.showinfo') as info:
+            self.button(win,'Έγκριση τοπικής προετοιμασίας').invoke()
+        info.assert_called_once();self.assertEqual(win.preparation_fields[1].get(),'64.10')
+        self.assertEqual(app.erp.preparation(app.company,doc['id'])['account_code'],'64.10')
+        from app.application.counterparties import Counterparties
+        cards=Counterparties(app.erp);card,_=cards.detail(app.company,cp)
+        values=dict(card['accounts']);values['purchases_account']='20.09'
+        cards.save(app.company,cp,card['name'],['supplier'],confirmed=True,accounts=values,apply_pending=True)
+        app.refresh()
+        box=next(w for w in widgets(win) if isinstance(w,ttk.Combobox) and '2 · Αγορές' in w['values'])
+        box.set('2 · Αγορές');box.event_generate('<<ComboboxSelected>>');self.root.update()
+        self.assertEqual(win.preparation_fields[1].get(),'20.09')
+
+    def test_parastio_columns_preserve_manual_width_filters_and_posting_ids(self):
+        from app.ui.preferences import UIPreferences
+        app=self.app;self.import_fixture('separate.xlsx');self.root.update()
+        ui=app.tree.presentation
+        first=next(iter(app._documents));app.tree.selection_set(str(first))
+        ui.schedule_fit()
+        app.tree.column('name',width=270,stretch=False);ui.capture()
+        done=[];self.root.after(350,lambda:done.append(True));wait(self.root,lambda:bool(done))
+        self.assertEqual(app.tree.column('name','width'),270)
+        ui.show_column('pdf_state',False);ui.show_column('description',True)
+        app.column_filters.cell('vat',app._documents[first]['vat'])
+        app.refresh();self.root.update()
+        self.assertEqual(app.tree.column('name','width'),270)
+        self.assertNotIn('pdf_state',app.tree['displaycolumns'])
+        self.assertEqual(app.tree.selection(),(str(first),))
+        self.assertTrue(app.column_filters.cell_filters)
+        layout=UIPreferences(app.directory).layout('documents')
+        self.assertEqual(layout['widths']['name'],270)
+        self.assertNotIn('pdf_state',layout['visible'])
+        self.assertEqual(app.rpa_panel.ids(),[first])
+        ui.reset();self.root.update()
+        self.assertIn('pdf_state',app.tree['displaycolumns'])
+        self.assertTrue(app.column_filters.cell_filters)
+
+    def test_parastio_hidden_pdf_and_supplier_name_do_not_misroute_clicks(self):
+        from types import SimpleNamespace
+        app=self.app;self.import_fixture('separate.xlsx');self.root.update()
+        ui=app.tree.presentation;ui.show_column('pdf_state',False);ui.show_column('name',False)
+        self.root.update();first=app.tree.get_children()[0];app.tree.see(first)
+        x,y,w,h=app.tree.bbox(first,'vat');event=SimpleNamespace(x=x+10,y=y+h//2)
+        with patch.object(app,'open_pdf') as pdf:
+            app.pdf_click(event);pdf.assert_not_called()
+        menu=tk.Menu(app.tree,tearoff=False)
+        app.purchase_menu(event,app.tree,menu);menu.destroy()
+        self.assertIn('vat',app.tree['displaycolumns'])
+
+    def test_parastio_theme_summary_brand_and_reconciliation_actions(self):
+        from app.ui.preferences import UIPreferences,visible_totals
+        app=self.app;self.import_fixture('separate.xlsx');self.root.update()
+        self.assertIn('Σύμβολον ERP',self.root.title())
+        self.assertEqual(app.ui_preferences.theme,'dark')
+        app.change_theme('light');self.root.update()
+        self.assertEqual(UIPreferences(app.directory).theme,'light')
+        self.assertEqual(app.style.lookup('TFrame','background'),'#f4f6f9')
+        first=next(iter(app._documents));app.tree.selection_set(str(first));self.root.update()
+        self.assertIn('Επιλεγμένα: 1',app.tree.presentation.summary.get())
+        app.query.set(app._documents[first]['vat']);app.filter_documents();self.root.update()
+        self.assertIn('Ορατά: 1',app.tree.presentation.summary.get())
+        totals=visible_totals(app._documents.values())
+        self.assertEqual(app.tree.presentation.totals,totals)
+        self.assertFalse(app.reconciliation.confirm_button.winfo_ismapped())
+        labels=[str(w.cget('text')) for w in widgets(app.reconciliation_tab) if isinstance(w,ttk.Button)]
+        self.assertNotIn('Ιστορικό συμφωνιών',labels)
+        app.change_theme('dark')
+
+    def test_parastio_counterparty_search_and_card_refresh_update_visible_summary(self):
+        from app.ui.counterparties import open_register,open_detail
+        from app.ui.preferences import visible_totals
+        app=self.app;self.import_fixture('separate.xlsx')
+        register=open_register(app);self.root.update()
+        self.assertEqual(len(register.card_tree.get_children()),2)
+        query=next(w for w in widgets(register) if isinstance(w,ttk.Entry))
+        query.insert(0,'NO-SUCH-CARD');self.button(register,'Αναζήτηση').invoke();self.root.update()
+        self.assertEqual(register.card_tree.get_children(),())
+        self.assertIn('Ορατά: 0',register.card_tree.presentation.summary.get())
+        query.delete(0,'end');self.button(register,'Αναζήτηση').invoke();self.root.update()
+        self.assertIn('Ορατά: 2',register.card_tree.presentation.summary.get())
+        document=app.erp.search(app.company)[0]
+        card=open_detail(app,document['counterparty_id']);self.root.update()
+        card.document_tree.insert('','end',iid='999999',values=('','','','','',''))
+        card.document_tree.presentation.rows_changed()
+        self.assertIn('Ορατά: 2',card.document_tree.presentation.summary.get())
+        card.refresh_accounts();self.root.update()
+        self.assertIn('Ορατά: 1',card.document_tree.presentation.summary.get())
+        self.assertEqual(card.document_tree.presentation.totals,visible_totals([document]))
+
+    def mixed_vat_fixture(self):
+        import xml.etree.ElementTree as ET
+        from tests.test_mydata_lines import invoice
+        from app.infrastructure.aade.client import parsed_page
+        from app.application.mydata import MyData
+        node=invoice();node.find('{*}invoiceHeader/{*}issueDate').text='2026-10-21'
+        root=ET.Element('RequestedDoc');ET.SubElement(root,'invoicesDoc').append(node);data=ET.tostring(root)
+        api=MyData(self.app.erp);api.persist(self.app.company,'production','2026-10-21','2026-10-21',[(data,parsed_page(data))])
+        api.import_incoming(self.app.company,'production','2026-10-21','2026-10-21',confirmed=True)
+        document=self.app.erp.search(self.app.company)[0]
+        from app.application.supplier_accounts import SupplierAccounts
+        SupplierAccounts(self.app.erp).save(self.app.company,[document['counterparty_id']],'6','64.03.00.0024',confirmed=True)
+        self.app.refresh();self.root.update();return document
+
+    def test_symbolon_vat_dialog_reuses_primary_and_remembers_only_explicit_secondary(self):
+        from app.application.vat_lines import VATLines
+        from app.ui.vat_accounts import open_rules
+        doc=self.mixed_vat_fixture();service=VATLines(self.app.erp);completed=[]
+        win=open_rules(self.app,service.requirements(self.app.company,[doc['id']]),on_saved=lambda:completed.append(True))
+        self.root.update();forms=win.vat_forms
+        primary=forms[(doc['counterparty_id'],1,0)];secondary=forms[(doc['counterparty_id'],7,27)]
+        self.assertTrue(primary['primary'].get());self.assertEqual(primary['account'].get(),'64.03.00.0024');self.assertFalse(secondary['primary'].get())
+        with patch('app.ui.vat_accounts.messagebox.showerror') as error:self.button(win,'Αποθήκευση λογαριασμών και συνέχεια').invoke()
+        error.assert_called_once();self.assertEqual(service.rules(self.app.company,doc['counterparty_id']),[])
+        secondary['account'].set('64.03.00.0000');self.button(win,'Αποθήκευση λογαριασμών και συνέχεια').invoke();self.root.update()
+        self.assertEqual(completed,[True]);self.assertEqual(service.requirements(self.app.company,[doc['id']]),[])
+        card=open_rules(self.app,counterparty=doc['counterparty_id']);self.root.update()
+        self.assertEqual(card.vat_forms[(doc['counterparty_id'],7,27)]['account'].get(),'64.03.00.0000')
+
+    def test_symbolon_posting_requests_unknown_vat_account_before_creating_queue(self):
+        doc=self.mixed_vat_fixture();panel=self.app.rpa_panel;self.app.tree.selection_set(str(doc['id']))
+        from tests.fixtures import reconcile_empty
+        reconcile_empty(self.app.erp,self.app.company)
+        with patch('app.ui.rpa_panel.messagebox.showerror') as error,patch.object(panel,'start') as start:
+            panel.post_one();wait(self.root,lambda:not self.app.busy)
+            windows=[w for w in self.root.winfo_children() if isinstance(w,tk.Toplevel) and hasattr(w,'vat_forms')]
+            self.assertEqual(len(windows),1);self.assertEqual(self.count('rpa_jobs'),0)
+            self.button(windows[0],'Άκυρο').invoke();start.assert_not_called();error.assert_not_called()
+
+    def test_symbolon_additional_row_mapping_can_be_opened_without_changing_old_profile(self):
+        panel=self.app.rpa_panel
+        from app.infrastructure.ebs_adapter.adapter import FIELDS
+        profile=dict(mapping={field:[10+30*i,100] for i,(field,_) in enumerate(FIELDS)},save=[10,20],new=[30,40])
+        panel.workspace.save_profile(self.app.company,profile)
+        win=panel.settings();extra=win.open_extra_rows();self.root.update()
+        self.button(extra,'Καταγραφή Γραμμή 2 · Λογαριασμός');self.button(extra,'Καταγραφή Γραμμή 2 · Καθαρή αξία')
+        self.button(extra,'Έτοιμο').invoke();self.button(win,'Αποθήκευση ρυθμίσεων').invoke();self.root.update()
+        self.assertEqual(panel.workspace.profile(self.app.company)['profile'],profile)
+
+    def test_symbolon_document_list_dominates_normal_desktop_without_hiding_actions(self):
+        self.import_fixture('separate.xlsx');self.root.state('normal')
+        for width,height,ratio in ((1280,900,.57),(960,650,.40)):
+            self.root.geometry(f'{width}x{height}');self.root.update()
+            self.assertGreaterEqual(self.app.tree.winfo_height()/self.root.winfo_height(),ratio,f"List uses {self.app.tree.winfo_height()} of {self.root.winfo_height()} pixels")
+            for label in ('Καταχώριση έως 40','Καταχώριση επιλεγμένων','Μεμονωμένη καταχώριση','Στοιχεία & προετοιμασία'):
+                button=self.button(self.root,label);self.assertTrue(button.winfo_ismapped())
+                self.assertLessEqual(button.winfo_rooty()+button.winfo_height(),self.root.winfo_rooty()+self.root.winfo_height())
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)

@@ -1,0 +1,3 @@
+CREATE TABLE supplier_purchase_rules(company_id INTEGER NOT NULL REFERENCES companies(id),vat TEXT NOT NULL CHECK(length(vat)=9),enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),version INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(company_id,vat));
+CREATE TABLE document_purchase_tags(document_id INTEGER PRIMARY KEY REFERENCES documents(id),company_id INTEGER NOT NULL REFERENCES companies(id),rule_version INTEGER NOT NULL);
+CREATE TRIGGER purchase_tag_company BEFORE INSERT ON document_purchase_tags WHEN NOT EXISTS(SELECT 1 FROM documents WHERE id=NEW.document_id AND company_id=NEW.company_id) BEGIN SELECT RAISE(ABORT,'purchase tag company mismatch'); END;
