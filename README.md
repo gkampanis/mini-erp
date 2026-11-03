@@ -1,3 +1,17 @@
+# Σύμβολον ERP — Πηγαίος κώδικας και εκδόσεις
+
+Ο πηγαίος κώδικας του προγράμματος βρίσκεται πλέον στο [`MiniERP-Demo/`](MiniERP-Demo/): εφαρμογή (`app/`), δοκιμές (`tests/`), migrations και scripts. Στα Windows, η εκκίνηση γίνεται από `MiniERP-Demo\ANOIGMA_MINI_ERP.bat`. Τα έτοιμα ZIP και τα στοιχεία επαλήθευσης παραμένουν στις [εκδόσεις](https://github.com/gkampanis/mini-erp/releases).
+
+## P9.4.7 — Μικρές βελτιώσεις πινάκων
+
+[Λήψη ZIP](SymbolonERP-P9.4.7-UI-Polish-20261102.zip) · [Οδηγίες](SymbolonERP-P9.4.7-UI-Polish-20261102-guide.md) · [Αναφορά Windows](SymbolonERP-P9.4.7-UI-Polish-20261102.verification.json) · [SHA-256](SymbolonERP-P9.4.7-UI-Polish-20261102.zip.sha256)
+
+Οι άδειες λίστες δείχνουν σαφές μήνυμα και υπόδειξη για αλλαγή φίλτρων/αναζήτησης. Το δεξί κλικ σε κελί αγνοεί με ασφάλεια stale ή μη έγκυρα row IDs. Τα σύνολα ορατών εγγραφών δεν μένουν παρωχημένα όταν δεν υπάρχουν αντιστοιχισμένα μοντέλα.
+
+Στοχευμένος έλεγχος Windows και του αποσυμπιεσμένου ZIP: **PASSED** με Python 3.15.0 και Tk 9. Οι δοκιμές `tests.test_cell_filters` και `tests.test_table_presentation`, η εκκίνηση, το GUI smoke test, η συνθετική προετοιμασία/ανάγνωση και ο Windows launcher πέρασαν. `full_regression: NOT_RUN`. Ζωντανή χρήση EBS: **NOT_RUN**.
+
+---
+
 # Σύμβολον ERP P9.4.6 — Άντληση εγγραφών, χωριστά PDF
 
 [Λήψη ZIP](SymbolonERP-P9.4.6-AADE-Links-20261102.zip) · [Οδηγίες](SymbolonERP-P9.4.6-AADE-Links-20261102-guide.md) · [Αναφορά Windows](SymbolonERP-P9.4.6-AADE-Links-20261102.verification.json) · [SHA-256](SymbolonERP-P9.4.6-AADE-Links-20261102.zip.sha256)

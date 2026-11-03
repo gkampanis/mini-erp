@@ -1,0 +1,14 @@
+CREATE TABLE companies(id INTEGER PRIMARY KEY, vat TEXT NOT NULL UNIQUE CHECK(length(vat)=9), name TEXT NOT NULL);
+CREATE TABLE counterparties(id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL REFERENCES companies(id), vat TEXT NOT NULL CHECK(length(vat)=9), name TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'supplier', UNIQUE(company_id,vat));
+CREATE TABLE import_jobs(id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL REFERENCES companies(id), filename TEXT NOT NULL, sha256 TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('completed')), report TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE source_records(id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL REFERENCES import_jobs(id), row_number INTEGER NOT NULL, raw_json TEXT NOT NULL, UNIQUE(job_id,row_number));
+CREATE TABLE documents(id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL REFERENCES companies(id), counterparty_id INTEGER NOT NULL REFERENCES counterparties(id), source_record_id INTEGER NOT NULL REFERENCES source_records(id), direction TEXT NOT NULL CHECK(direction IN ('incoming','outgoing')), kind TEXT NOT NULL, series TEXT NOT NULL, number TEXT NOT NULL, issue_date TEXT NOT NULL, mark TEXT, net_minor INTEGER NOT NULL CHECK(typeof(net_minor)='integer'), tax_minor INTEGER NOT NULL CHECK(typeof(tax_minor)='integer'), gross_minor INTEGER NOT NULL CHECK(typeof(gross_minor)='integer' AND gross_minor=net_minor+tax_minor), currency TEXT NOT NULL CHECK(currency='EUR'), status TEXT NOT NULL DEFAULT 'needs_review', UNIQUE(company_id,counterparty_id,direction,kind,series,number,issue_date));
+CREATE UNIQUE INDEX documents_mark ON documents(company_id,mark) WHERE mark IS NOT NULL;
+CREATE INDEX documents_date ON documents(company_id,issue_date);
+CREATE INDEX documents_counterparty ON documents(company_id,counterparty_id);
+CREATE TABLE audit_events(id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL REFERENCES companies(id), actor TEXT NOT NULL, action TEXT NOT NULL, entity_id INTEGER, payload TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE account_mappings(company_id INTEGER NOT NULL REFERENCES companies(id), counterparty_id INTEGER NOT NULL REFERENCES counterparties(id), account TEXT NOT NULL, approved_by TEXT NOT NULL, PRIMARY KEY(company_id,counterparty_id));
+CREATE TRIGGER source_no_update BEFORE UPDATE ON source_records BEGIN SELECT RAISE(ABORT,'immutable source'); END;
+CREATE TRIGGER source_no_delete BEFORE DELETE ON source_records BEGIN SELECT RAISE(ABORT,'immutable source'); END;
+CREATE TRIGGER audit_no_update BEFORE UPDATE ON audit_events BEGIN SELECT RAISE(ABORT,'append-only audit'); END;
+CREATE TRIGGER audit_no_delete BEFORE DELETE ON audit_events BEGIN SELECT RAISE(ABORT,'append-only audit'); END;

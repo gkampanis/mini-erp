@@ -1,0 +1,2 @@
+CREATE TABLE counterparty_registry(counterparty_id INTEGER PRIMARY KEY REFERENCES counterparties(id),company_id INTEGER NOT NULL REFERENCES companies(id),data_json TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TRIGGER registry_scope BEFORE INSERT ON counterparty_registry WHEN NOT EXISTS(SELECT 1 FROM counterparties WHERE id=NEW.counterparty_id AND company_id=NEW.company_id) BEGIN SELECT RAISE(ABORT,'registry company mismatch'); END;
