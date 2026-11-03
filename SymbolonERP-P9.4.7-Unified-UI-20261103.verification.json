@@ -1,0 +1,184 @@
+{
+  "status": "PASSED",
+  "plan": {
+    "changed": [
+      "NOTICE.md",
+      "README.md",
+      "app/__init__.py",
+      "app/ui/desktop.py",
+      "app/ui/sector_navigation.py",
+      "app/ui/theme.py",
+      "docs/THREE_SECTORS_ROADMAP.md",
+      "docs/UI_P947.md",
+      "docs/branding/navigation/ATTRIBUTION.md",
+      "docs/branding/navigation/expenses-dark.png",
+      "docs/branding/navigation/expenses.png",
+      "docs/branding/navigation/income-dark.png",
+      "docs/branding/navigation/income.png",
+      "docs/branding/navigation/movement-dark.png",
+      "docs/branding/navigation/movement.png",
+      "tests/gui_sector_navigation.py"
+    ],
+    "scopes": [
+      "theme",
+      "views"
+    ],
+    "selectors": [
+      "tests.gui_p9_workspace",
+      "tests.gui_quick_account",
+      "tests.gui_regressions.DesktopRegressions.test_default_pending_workspace_and_shared_period_remain_visible_on_every_view",
+      "tests.gui_sector_navigation",
+      "tests.gui_theme",
+      "tests.test_filter_state_machine",
+      "tests.test_ui_preferences",
+      "tests.test_unified_workspace"
+    ],
+    "unresolved": [],
+    "explicit_coverage": [
+      "app/ui/sector_navigation.py"
+    ],
+    "review_paths": [],
+    "gui": true
+  },
+  "identity": "c8cadb9912916e4d84623bbbb0d2d5e3edc712cd81afb8e3085419d054b52dc3",
+  "calendar": {
+    "local_date": "2026-11-03"
+  },
+  "full_regression": "NOT_RUN",
+  "checks": [
+    {
+      "selector": "tests.gui_p9_workspace",
+      "status": "REUSED_PASSED",
+      "counts": {
+        "tests": 15,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261103T133317Z-214df30b\\00-evidence.json"
+    },
+    {
+      "selector": "tests.gui_quick_account",
+      "status": "REUSED_PASSED",
+      "counts": {
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261103T133317Z-214df30b\\01-evidence.json"
+    },
+    {
+      "selector": "tests.gui_regressions.DesktopRegressions.test_default_pending_workspace_and_shared_period_remain_visible_on_every_view",
+      "status": "REUSED_PASSED",
+      "counts": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261103T133317Z-214df30b\\02-evidence.json"
+    },
+    {
+      "selector": "tests.gui_sector_navigation",
+      "status": "REUSED_PASSED",
+      "counts": {
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261103T133317Z-214df30b\\03-evidence.json"
+    },
+    {
+      "selector": "tests.gui_theme",
+      "status": "REUSED_PASSED",
+      "counts": {
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261103T133317Z-214df30b\\04-evidence.json"
+    },
+    {
+      "selector": "tests.test_filter_state_machine",
+      "status": "REUSED_PASSED",
+      "counts": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261103T133317Z-214df30b\\05-evidence.json"
+    },
+    {
+      "selector": "tests.test_ui_preferences",
+      "status": "REUSED_PASSED",
+      "counts": {
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261103T133317Z-214df30b\\06-evidence.json"
+    },
+    {
+      "selector": "tests.test_unified_workspace",
+      "status": "REUSED_PASSED",
+      "counts": {
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261103T133317Z-214df30b\\07-evidence.json"
+    }
+  ],
+  "ebs_live": "NOT_RUN",
+  "report": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261103T133444Z-aedfb671\\report.json",
+  "package_checks": [
+    {
+      "name": "launcher",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 1.032,
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261103T133444Z-aedfb671\\package\\launcher.log"
+    },
+    {
+      "name": "gui_smoke",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 6.822,
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261103T133444Z-aedfb671\\package\\gui_smoke.log"
+    }
+  ],
+  "artifact": {
+    "path": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\outputs\\SymbolonERP-P9.4.7-Unified-UI-20261103.zip",
+    "sha256": "74270a20f289981204fd72ff5999c0d1409a2d0fdd42fd47371e02f3648dda78"
+  }
+}
