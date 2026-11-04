@@ -1,0 +1,21 @@
+{
+  "status": "PASSED",
+  "artifact": {
+    "name": "SymbolonERP-P9.5.0-Restore-All-20261104.zip",
+    "bytes": 1535555,
+    "sha256": "aa5801f939ad0f0dedaf1b8ba838f4c56f1473342fe87380595dff0de3bd0de6"
+  },
+  "targeted_tests": 7,
+  "application_identical_to_verified_P950": true,
+  "application_verification": "REUSED: exact already-verified Application.zip; no application changes",
+  "all_original_tables_and_data_files_restored": true,
+  "temporary_migration_preserves_all_existing_business_rows": true,
+  "windows_restore_bat_check": "PASSED",
+  "windows_personal_bat_check": "PASSED",
+  "zip_integrity_and_source_match": "PASSED",
+  "full_regression": "NOT_RUN",
+  "live_EBS": "NOT_RUN",
+  "live_AADE": "NOT_RUN",
+  "production_writes": false,
+  "personal_data_published": false
+}
