@@ -1,0 +1,20 @@
+{
+  "status": "PASSED",
+  "synthetic_only": true,
+  "production_writes": false,
+  "all_tables_equal": 37,
+  "schema_equal": true,
+  "source_unchanged": true,
+  "groups": [
+    "2",
+    "6"
+  ],
+  "primary_and_secondary_vat_accounts": true,
+  "ebs_profile_preserved": true,
+  "adjacent_files_equal": [
+    "ui-preferences.json",
+    "mapping-extra.json",
+    "pdf/synthetic.pdf"
+  ],
+  "committed_wal": true
+}

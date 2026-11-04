@@ -1,0 +1,781 @@
+{
+  "status": "PASSED",
+  "plan": {
+    "changed": [
+      "README.md",
+      "START_DEMO.py",
+      "app/__init__.py",
+      "app/__main__.py",
+      "app/application/delivery.py",
+      "app/application/delivery_groups.py",
+      "app/domain/invoice_types.py",
+      "app/infrastructure/aade/client.py",
+      "app/infrastructure/aade/delivery_client.py",
+      "app/infrastructure/aade/delivery_read.py",
+      "app/infrastructure/installation.py",
+      "app/infrastructure/optional_packages.py",
+      "app/ui/aade_dialog.py",
+      "app/ui/branding.py",
+      "app/ui/delivery.py",
+      "app/ui/delivery_groups.py",
+      "app/ui/desktop.py",
+      "app/ui/document_views.py",
+      "app/ui/installation.py",
+      "app/ui/preferences.py",
+      "app/ui/sector_navigation.py",
+      "app/ui/settings.py",
+      "app/ui/theme.py",
+      "docs/INSTALLATION_P948.md",
+      "docs/THREE_SECTORS_P950.md",
+      "docs/aade_delivery/README.md",
+      "docs/aade_delivery/official_xsd/ConfirmDeliveryOutcome-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/ConfirmDeliveryReturn-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/GenerateGroupQRCode-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/GenerateGroupQRCodeResponse -v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/GetDeliveryStatusResponse-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/InvoicesDoc-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/InvoicesDoc-v2.0.2_aade_detailed.xsd",
+      "docs/aade_delivery/official_xsd/RegisterTransfer-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/RejectDeliveryNote-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/RequestE3InfoResponse-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/RequestGroupQRDetailsResponse-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/RequestVatInfoResponse-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/RequestedProviderDoc-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/RequestedStatementDoc-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/SendStatement-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/SimpleTypes-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/TransportTypes-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/expensesClassification-v2.0.2 1.xsd",
+      "docs/aade_delivery/official_xsd/expensesClassification-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/incomeClassification-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/paymentMethods-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/requestedInvoicesDoc-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/response-v2.0.2.xsd",
+      "docs/branding/controls/dark-disabled.png",
+      "docs/branding/controls/dark-navigation.png",
+      "docs/branding/controls/dark-primary-hover.png",
+      "docs/branding/controls/dark-primary.png",
+      "docs/branding/controls/dark-secondary-hover.png",
+      "docs/branding/controls/dark-secondary.png",
+      "docs/branding/controls/light-disabled.png",
+      "docs/branding/controls/light-navigation.png",
+      "docs/branding/controls/light-primary-hover.png",
+      "docs/branding/controls/light-primary.png",
+      "docs/branding/controls/light-secondary-hover.png",
+      "docs/branding/controls/light-secondary.png",
+      "migrations/018_delivery_workspace.sql",
+      "migrations/019_delivery_groups.sql",
+      "requirements-delivery.txt",
+      "scripts/package_demo.py",
+      "scripts/verify_delivery.py",
+      "tests/gui_delivery.py",
+      "tests/gui_regressions.py",
+      "tests/gui_sector_navigation.py",
+      "tests/gui_theme.py",
+      "tests/test_delivery_client.py",
+      "tests/test_delivery_groups.py",
+      "tests/test_delivery_import_updates.py",
+      "tests/test_delivery_read.py",
+      "tests/test_delivery_safety.py",
+      "tests/test_delivery_service.py",
+      "tests/test_delivery_ui_logic.py",
+      "tests/test_installation.py",
+      "tests/test_revenue_sector.py",
+      "tests/test_startup.py",
+      "tests/test_ui_preferences.py"
+    ],
+    "scopes": [
+      "aade",
+      "aade-ui",
+      "delivery",
+      "schema",
+      "theme",
+      "vat",
+      "views"
+    ],
+    "selectors": [
+      "tests.gui_aade_rate_limit",
+      "tests.gui_delivery",
+      "tests.gui_p9_workspace.P9Workspace.test_all_filters_keep_pending_scope_and_nonfinancial_exclusion",
+      "tests.gui_p9_workspace.P9Workspace.test_posting_hotkey_hint_stays_visible_without_covering_actions",
+      "tests.gui_p9_workspace.P9Workspace.test_posting_three_actions_pass_existing_limit_without_simulation",
+      "tests.gui_quick_account",
+      "tests.gui_regressions.DesktopRegressions.test_company_is_installation_bound_with_or_without_open_document_windows",
+      "tests.gui_regressions.DesktopRegressions.test_default_pending_workspace_and_shared_period_remain_visible_on_every_view",
+      "tests.gui_regressions.DesktopRegressions.test_parastio_theme_summary_brand_and_reconciliation_actions",
+      "tests.gui_regressions.DesktopRegressions.test_symbolon_document_list_dominates_normal_desktop_without_hiding_actions",
+      "tests.gui_sector_navigation",
+      "tests.gui_theme",
+      "tests.test_aade_cooldown",
+      "tests.test_aade_import",
+      "tests.test_aade_rate_limit",
+      "tests.test_counterparty_cards",
+      "tests.test_delivery",
+      "tests.test_delivery_client",
+      "tests.test_delivery_groups",
+      "tests.test_delivery_import_updates",
+      "tests.test_delivery_read",
+      "tests.test_delivery_safety",
+      "tests.test_delivery_service",
+      "tests.test_delivery_ui_logic",
+      "tests.test_filter_state_machine",
+      "tests.test_installation",
+      "tests.test_invoice_types",
+      "tests.test_monthly_workflow",
+      "tests.test_multiline_rpa",
+      "tests.test_pdf_cancel",
+      "tests.test_revenue_sector",
+      "tests.test_startup",
+      "tests.test_ui_preferences",
+      "tests.test_unified_workspace",
+      "tests.test_upgrade_safety",
+      "tests.test_vat_line_properties",
+      "tests.test_vat_lines",
+      "tests.test_workspace"
+    ],
+    "unresolved": [],
+    "explicit_coverage": [
+      "app/__main__.py",
+      "app/application/delivery.py",
+      "app/application/delivery_groups.py",
+      "app/infrastructure/installation.py",
+      "app/infrastructure/optional_packages.py",
+      "app/ui/branding.py",
+      "app/ui/delivery.py",
+      "app/ui/delivery_groups.py",
+      "app/ui/document_views.py",
+      "app/ui/installation.py",
+      "app/ui/preferences.py",
+      "app/ui/sector_navigation.py",
+      "app/ui/settings.py",
+      "docs/aade_delivery/official_xsd/ConfirmDeliveryOutcome-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/ConfirmDeliveryReturn-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/GenerateGroupQRCode-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/GenerateGroupQRCodeResponse -v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/GetDeliveryStatusResponse-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/InvoicesDoc-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/InvoicesDoc-v2.0.2_aade_detailed.xsd",
+      "docs/aade_delivery/official_xsd/RegisterTransfer-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/RejectDeliveryNote-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/RequestE3InfoResponse-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/RequestGroupQRDetailsResponse-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/RequestVatInfoResponse-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/RequestedProviderDoc-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/RequestedStatementDoc-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/SendStatement-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/SimpleTypes-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/TransportTypes-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/expensesClassification-v2.0.2 1.xsd",
+      "docs/aade_delivery/official_xsd/expensesClassification-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/incomeClassification-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/paymentMethods-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/requestedInvoicesDoc-v2.0.2.xsd",
+      "docs/aade_delivery/official_xsd/response-v2.0.2.xsd",
+      "requirements-delivery.txt"
+    ],
+    "review_paths": [
+      "migrations/018_delivery_workspace.sql",
+      "migrations/019_delivery_groups.sql"
+    ],
+    "gui": true
+  },
+  "identity": "4f5372ee5d901d2fe270a0579ce0ef89f5453f02d7572b3593bdaffcaf21cfd4",
+  "calendar": {
+    "local_date": "2026-11-04"
+  },
+  "full_regression": "NOT_RUN",
+  "checks": [
+    {
+      "selector": "tests.gui_aade_rate_limit",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\00.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\00-evidence.json"
+    },
+    {
+      "selector": "tests.gui_delivery",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\01.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\01-evidence.json"
+    },
+    {
+      "selector": "tests.gui_p9_workspace.P9Workspace.test_all_filters_keep_pending_scope_and_nonfinancial_exclusion",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\02.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\02-evidence.json"
+    },
+    {
+      "selector": "tests.gui_p9_workspace.P9Workspace.test_posting_hotkey_hint_stays_visible_without_covering_actions",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\03.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\03-evidence.json"
+    },
+    {
+      "selector": "tests.gui_p9_workspace.P9Workspace.test_posting_three_actions_pass_existing_limit_without_simulation",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\04.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\04-evidence.json"
+    },
+    {
+      "selector": "tests.gui_quick_account",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\05.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\05-evidence.json"
+    },
+    {
+      "selector": "tests.gui_regressions.DesktopRegressions.test_company_is_installation_bound_with_or_without_open_document_windows",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\06.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\06-evidence.json"
+    },
+    {
+      "selector": "tests.gui_regressions.DesktopRegressions.test_default_pending_workspace_and_shared_period_remain_visible_on_every_view",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\07.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\07-evidence.json"
+    },
+    {
+      "selector": "tests.gui_regressions.DesktopRegressions.test_parastio_theme_summary_brand_and_reconciliation_actions",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\08.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\08-evidence.json"
+    },
+    {
+      "selector": "tests.gui_regressions.DesktopRegressions.test_symbolon_document_list_dominates_normal_desktop_without_hiding_actions",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\09.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\09-evidence.json"
+    },
+    {
+      "selector": "tests.gui_sector_navigation",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\10.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\10-evidence.json"
+    },
+    {
+      "selector": "tests.gui_theme",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\11.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\11-evidence.json"
+    },
+    {
+      "selector": "tests.test_aade_cooldown",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\12.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\12-evidence.json"
+    },
+    {
+      "selector": "tests.test_aade_import",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\13.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\13-evidence.json"
+    },
+    {
+      "selector": "tests.test_aade_rate_limit",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\14.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\14-evidence.json"
+    },
+    {
+      "selector": "tests.test_counterparty_cards",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\15.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\15-evidence.json"
+    },
+    {
+      "selector": "tests.test_delivery",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\16.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\16-evidence.json"
+    },
+    {
+      "selector": "tests.test_delivery_client",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 16,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\17.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\17-evidence.json"
+    },
+    {
+      "selector": "tests.test_delivery_groups",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\18.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\18-evidence.json"
+    },
+    {
+      "selector": "tests.test_delivery_import_updates",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\19.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\19-evidence.json"
+    },
+    {
+      "selector": "tests.test_delivery_read",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\20.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\20-evidence.json"
+    },
+    {
+      "selector": "tests.test_delivery_safety",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\21.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\21-evidence.json"
+    },
+    {
+      "selector": "tests.test_delivery_service",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 24,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\22.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\22-evidence.json"
+    },
+    {
+      "selector": "tests.test_delivery_ui_logic",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\23.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\23-evidence.json"
+    },
+    {
+      "selector": "tests.test_filter_state_machine",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\24.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\24-evidence.json"
+    },
+    {
+      "selector": "tests.test_installation",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\25.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\25-evidence.json"
+    },
+    {
+      "selector": "tests.test_invoice_types",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\26.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\26-evidence.json"
+    },
+    {
+      "selector": "tests.test_monthly_workflow",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 23,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\27.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\27-evidence.json"
+    },
+    {
+      "selector": "tests.test_multiline_rpa",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\28.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\28-evidence.json"
+    },
+    {
+      "selector": "tests.test_pdf_cancel",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\29.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\29-evidence.json"
+    },
+    {
+      "selector": "tests.test_revenue_sector",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\30.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\30-evidence.json"
+    },
+    {
+      "selector": "tests.test_startup",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\31.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\31-evidence.json"
+    },
+    {
+      "selector": "tests.test_ui_preferences",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\32.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\32-evidence.json"
+    },
+    {
+      "selector": "tests.test_unified_workspace",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\33.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\33-evidence.json"
+    },
+    {
+      "selector": "tests.test_upgrade_safety",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\34.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\34-evidence.json"
+    },
+    {
+      "selector": "tests.test_vat_line_properties",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\35.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\35-evidence.json"
+    },
+    {
+      "selector": "tests.test_vat_lines",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 27,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\36.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\36-evidence.json"
+    },
+    {
+      "selector": "tests.test_workspace",
+      "status": "EXECUTED_PASSED",
+      "counts": {
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      },
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\37.log",
+      "evidence": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\37-evidence.json"
+    }
+  ],
+  "ebs_live": "NOT_RUN",
+  "report": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\report.json",
+  "package_checks": [
+    {
+      "name": "launcher",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 1.393,
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\package\\launcher.log"
+    },
+    {
+      "name": "gui_smoke",
+      "status": "PASSED",
+      "returncode": 0,
+      "seconds": 12.96,
+      "log": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\.local\\development-harness\\991c22efde5a\\runs\\20261104T045112Z-176abfa9\\package\\gui_smoke.log"
+    }
+  ],
+  "artifact": {
+    "path": "C:\\Users\\User\\Documents\\Codex\\2026-10-29\\c-users-user-documents-github-mini\\outputs\\SymbolonERP-P9.5.0-Three-Sectors-20261104.zip",
+    "sha256": "9d79163d5fda695b69cb97e71600585ea4ae0d69a9a296dedcccaa32d0773e24"
+  }
+}
