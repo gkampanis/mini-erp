@@ -1,0 +1,131 @@
+{
+  "artifact": "SymbolonERP-P9.5.1-Default-Acquisition-Fix-20261109.zip",
+  "sha256": "1eb2900a3a5f0f2d006ae3b570dde8fca4dfee0ea5ba70270314ae1d54657e30",
+  "bytes": 36894,
+  "status": "PASSED",
+  "verification_date": "2026-11-09",
+  "targeted_tests": 40,
+  "installed_synthetic_integration_tests": 2,
+  "full_regression": "NOT_RUN",
+  "live_EBS": "NOT_RUN",
+  "live_AADE": "NOT_RUN",
+  "data_included": false,
+  "checks": [
+    {
+      "selector": "tests.gui_default_acquisition",
+      "status": "REUSED_PASSED",
+      "counts": {
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      }
+    },
+    {
+      "selector": "tests.gui_attention",
+      "status": "REUSED_PASSED",
+      "counts": {
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      }
+    },
+    {
+      "selector": "tests.gui_ebs_pending",
+      "status": "REUSED_PASSED",
+      "counts": {
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      }
+    },
+    {
+      "selector": "tests.gui_aade_rate_limit",
+      "status": "REUSED_PASSED",
+      "counts": {
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      }
+    },
+    {
+      "selector": "tests.gui_review_flow",
+      "status": "REUSED_PASSED",
+      "counts": {
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      }
+    },
+    {
+      "selector": "tests.test_aade_import",
+      "status": "REUSED_PASSED",
+      "counts": {
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      }
+    },
+    {
+      "selector": "tests.test_filter_state_machine",
+      "status": "REUSED_PASSED",
+      "counts": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      }
+    },
+    {
+      "selector": "tests.test_unified_workspace",
+      "status": "REUSED_PASSED",
+      "counts": {
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expected_failures": 0,
+        "unexpected_successes": 0,
+        "successful": true
+      }
+    }
+  ],
+  "package_checks": {
+    "actual_windows_updater": true,
+    "all_data_byte_identical": true,
+    "new_october_file_preserved": true,
+    "only_expected_app_files_changed": [
+      "app/ui/desktop.py",
+      "app/ui/aade_dialog.py"
+    ],
+    "idempotent": true,
+    "unknown_version_rejected": true,
+    "updated_application_import_check": true
+  }
+}
